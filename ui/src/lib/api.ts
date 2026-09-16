@@ -75,6 +75,11 @@ export interface NowPlaying {
 	/** YouTube's `musicVideoType` says this is a video upload, not the generated audio track.
 	 *  Gates the player view's music-video mode. */
 	isVideo?: boolean;
+	/** The streaming format's raw mimeType, e.g. `audio/webm; codecs="opus"`. Absent for a local
+	 *  file and for a track restored into the queue but not yet played. */
+	audioCodec?: string | null;
+	/** Bits per second of that format. */
+	audioBitrate?: number | null;
 }
 
 export type RepeatMode = 'off' | 'all' | 'one';
@@ -357,6 +362,98 @@ export const getQueue = () => invoke<QueueState>('get_queue');
  *  Rust; the webview never sees a googlevideo URL. */
 export const videoStream = (videoId: string, maxHeight: number) =>
 	invoke<string | null>('video_stream', { videoId, maxHeight });
+
+// --- offline downloads --------------------------------------------------------------------------
+//
+// A finished download is a file, and Rust hands mpv the path exactly as it does for local music —
+// so a saved track queues, shuffles and gapless-advances like any other, and plays with the network
+// off, which is the whole point.
+
+export interface Downloaded {
+	videoId: string;
+	/** Absolute path to the audio. Rust plays it; the UI never opens it. */
+	path: string;
+	title: string;
+	artists: string;
+	/** Absolute path to the saved cover, if one came down. Needs `convertFileSrc` to render. */
+	thumbnail?: string | null;
+	duration?: string | null;
+	bytes: number;
+	audioCodec?: string | null;
+	audioBitrate?: number | null;
+	addedAt: number;
+}
+
+/** Save these for offline. Returns at once; watch `onDownloadProgress`. */
+export const downloadTracks = (items: SongItem[]) => invoke<void>('download_tracks', { items });
+
+/** Everything saved, newest first. Reads disk and database only — works offline. */
+export const downloads = () => invoke<Downloaded[]>('downloads');
+
+/** Which of these are already saved. One call, because a playlist page asks about every row. */
+export const downloadedIds = (videoIds: string[]) =>
+	invoke<string[]>('downloaded_ids', { videoIds });
+
+/** Stop what is downloading and drop the rest of the queue. */
+export const cancelDownloads = () => invoke<void>('cancel_downloads');
+
+export const removeDownload = (videoId: string) => invoke<void>('remove_download', { videoId });
+
+/** Bytes on disk. */
+export const downloadsSize = () => invoke<number>('downloads_size');
+
+export const onDownloadProgress = (
+	fn: (p: { videoId: string; received: number; total: number; done: boolean }) => void
+) => listen<{ videoId: string; received: number; total: number; done: boolean }>(
+	'download-progress',
+	(e) => fn(e.payload)
+);
+
+/** The queue stopped, either because it finished or because it was cancelled. */
+export const onDownloadsIdle = (fn: () => void) => listen('downloads-idle', () => fn());
+
+export const onDownloadsCancelled = (fn: () => void) => listen('downloads-cancelled', () => fn());
+
+export const onDownloadFailed = (fn: (p: { videoId: string; error: string }) => void) =>
+	listen<{ videoId: string; error: string }>('download-failed', (e) => fn(e.payload));
+
+// --- equalizer ----------------------------------------------------------------------------------
+
+export interface EqualizerState {
+	enabled: boolean;
+	/** Overall trim in dB. Folded into the same `volume` filter as loudness gain. */
+	preamp: number;
+	/** One dB value per band of `equalizerBands()`, in the same order. */
+	gains: number[];
+}
+
+/** The band centre frequencies, from the same constant the filters are built from. */
+export const equalizerBands = () => invoke<number[]>('equalizer_bands');
+
+/** What to draw on open: the stored setting, or a flat, disabled one. */
+export const equalizer = () => invoke<EqualizerState>('equalizer');
+
+/** Apply and persist. `enabled: false` removes the filters rather than flattening them. */
+export const setEqualizer = (enabled: boolean, preampDb: number, gainsDb: number[]) =>
+	invoke<void>('set_equalizer', { enabled, preampDb, gainsDb });
+
+// --- sleep timer --------------------------------------------------------------------------------
+//
+// The deadline lives in Rust (see sleep.rs): the webview is throttled when the window is hidden and
+// destroyed on a reload, and the whole point is that it fires while nobody is looking.
+
+/** Stop the music in `minutes`. Replaces any timer already running. */
+export const setSleepTimer = (minutes: number) => invoke<void>('set_sleep_timer', { minutes });
+
+/** Cancel it. Safe when nothing is running. */
+export const clearSleepTimer = () => invoke<void>('clear_sleep_timer');
+
+/** When the music stops, as unix ms, or null. Count down from this rather than asking repeatedly. */
+export const sleepTimer = () => invoke<number | null>('sleep_timer');
+
+/** Fires whenever the deadline changes — armed, cancelled, or reached. */
+export const onSleepTimer = (fn: (deadline: number | null) => void) =>
+	listen<number | null>('sleep-timer', (e) => fn(e.payload));
 
 /** Drop the backend's memory of this track's video URL, after the element failed to load it. */
 export const forgetVideoStream = (videoId: string) =>

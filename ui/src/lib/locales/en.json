@@ -589,5 +589,56 @@
 		"unsubscribed": "Unsubscribed",
 		"signed_in_as": "Signed in as {name}",
 		"switched_to": "Switched to {name}"
+	},
+	"sleep": {
+		"title": "Sleep timer",
+		"minutes": "{count} minutes",
+		"hours": "{count} hours",
+		"hour": "1 hour",
+		"custom": "Custom length",
+		"custom_placeholder": "Minutes",
+		"set": "Set",
+		"off": "Turn off"
+	},
+	"quality": {
+		"kbps": "kbps",
+		"tooltip": "{codec}, {kbps} kbps"
+	},
+	"eq": {
+		"title": "Equalizer",
+		"desc": "Ten bands, applied to everything you play. Kept across restarts.",
+		"preamp": "Preamp",
+		"reset": "Flatten",
+		"presets": {
+			"flat": "Flat",
+			"bass": "Bass",
+			"treble": "Treble",
+			"vocal": "Vocal",
+			"rock": "Rock",
+			"pop": "Pop",
+			"jazz": "Jazz",
+			"classical": "Classical",
+			"electronic": "Electronic"
+		}
+	},
+	"downloads": {
+		"title": "Downloads",
+		"save": "Download",
+		"save_all": "Download all",
+		"downloading": "Downloading…",
+		"remove": "Remove download",
+		"tab": "Downloaded",
+		"empty": "Nothing downloaded yet. Hit ⋯ on a track and choose Download, and it plays with the network off.",
+		"count": "{count} tracks",
+		"storage": "Downloaded music",
+		"storage_hint": "Tracks saved for offline playback. Not touched by “Clear cache”.",
+		"remove_all": "Remove all downloads",
+		"failed": "Could not download {title}",
+		"queued": "Downloading {count} tracks",
+		"already_all": "Already downloaded",
+		"saved_all": "Downloaded",
+		"save_rest": "Download {count} more",
+		"cancel": "Stop downloading",
+		"saved": "Downloaded"
 	}
 }

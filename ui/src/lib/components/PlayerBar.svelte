@@ -18,7 +18,8 @@
 		MinimizeScreenIcon,
 		MusicNote01Icon,
 		ArrowUp01Icon,
-		ArrowDown01Icon
+		ArrowDown01Icon,
+		DownloadCircle01Icon
 	} from '@hugeicons/core-free-icons';
 	import { fade } from 'svelte/transition';
 	import { goto } from '$app/navigation';
@@ -38,6 +39,8 @@
 	} from '$lib/player.svelte';
 	import { thumb } from '$lib/thumb';
 	import ArtistLine from './ArtistLine.svelte';
+	import QualityChip from './QualityChip.svelte';
+	import { dl, requestSaved } from '$lib/downloads.svelte';
 	import Marquee from './Marquee.svelte';
 	import TrackMenu from './TrackMenu.svelte';
 	import { t } from '$lib/i18n.svelte';
@@ -130,6 +133,15 @@
 		if (pressedControl || isControl(e.target)) return;
 		np.open = !np.open;
 	}
+
+	// Whether the playing track is on disk. Asked through the store's batcher, same as a track row.
+	$effect(() => {
+		const id = playback.now?.videoId;
+		if (id && !api.isLocalId(id)) requestSaved(id);
+	});
+	const nowSaved = $derived(
+		!!playback.now && !api.isLocalId(playback.now.videoId) && dl.saved.has(playback.now.videoId)
+	);
 </script>
 
 <!-- The chevron button below is the keyboard equivalent of clicking the bar, so the bar itself
@@ -193,12 +205,26 @@
 					</span>
 				{/if}
 			</div>
-			<ArtistLine
-				runs={playback.now?.artistRuns}
-				text={playback.now?.artists ?? ''}
-				marquee
-				class="block max-w-full text-xs text-muted-foreground"
-			/>
+			<div class="flex min-w-0 items-center gap-1.5">
+				<ArtistLine
+					runs={playback.now?.artistRuns}
+					text={playback.now?.artists ?? ''}
+					marquee
+					class="block min-w-0 text-xs text-muted-foreground"
+				/>
+				<!-- Compact here: the bar is the tightest row in the app, and "Opus 160" already says
+				     it without the unit. The player view below spells it out. -->
+				<QualityChip codec={playback.now?.audioCodec} bitrate={playback.now?.audioBitrate} compact />
+				<!-- On disk. Same marker as the track rows, so "downloaded" looks like one thing
+				     wherever it appears. Local files are excluded: they were never downloaded. -->
+				{#if nowSaved}
+					<HugeiconsIcon
+						icon={DownloadCircle01Icon}
+						class="h-3.5 w-3.5 shrink-0 text-primary"
+						aria-label={t('downloads.saved')}
+					/>
+				{/if}
+			</div>
 		</div>
 		{#if playback.now}
 			<div class="flex items-center">

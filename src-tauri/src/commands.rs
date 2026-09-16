@@ -235,6 +235,145 @@ pub async fn forget_video_stream(state: St<'_>, video_id: String) -> Result<(), 
     Ok(())
 }
 
+// --- offline downloads --------------------------------------------------------------------------
+
+/// Save these tracks for offline playback. Returns at once; progress arrives as `download-progress`
+/// events and failures as `download-failed`.
+#[tauri::command]
+pub fn download_tracks(state: St<'_>, items: Vec<SongItem>) -> Result<(), String> {
+    crate::downloads::enqueue(state.inner(), items);
+    Ok(())
+}
+
+/// Everything saved, newest first. This is the offline library: it reads from the database and the
+/// disk only, so it works with the network off, which is the entire point.
+#[tauri::command]
+pub fn downloads(state: St<'_>) -> Vec<crate::db::Downloaded> {
+    // Rows whose file has gone (the user cleared the folder by hand) are dropped rather than
+    // listed: a row that cannot play is worse than no row.
+    let all = state.db.downloads();
+    let (alive, dead): (Vec<_>, Vec<_>) =
+        all.into_iter().partition(|d| std::path::Path::new(&d.path).is_file());
+    for d in dead {
+        state.db.delete_download(&d.video_id);
+    }
+    alive
+}
+
+/// Which of these are already saved. One call rather than one per row: a playlist page asks about
+/// every track it shows.
+#[tauri::command]
+pub fn downloaded_ids(state: St<'_>, video_ids: Vec<String>) -> Vec<String> {
+    video_ids.into_iter().filter(|id| crate::downloads::is_downloaded(state.inner(), id)).collect()
+}
+
+/// Stop what is downloading and drop the rest of the queue.
+#[tauri::command]
+pub fn cancel_downloads(state: St<'_>) -> Result<(), String> {
+    crate::downloads::cancel(state.inner());
+    Ok(())
+}
+
+/// Delete a download: the row, the audio and the artwork.
+#[tauri::command]
+pub fn remove_download(state: St<'_>, video_id: String) -> Result<(), String> {
+    crate::downloads::remove(state.inner(), &video_id);
+    Ok(())
+}
+
+/// Bytes on disk, for the storage row in settings.
+#[tauri::command]
+pub fn downloads_size(state: St<'_>) -> i64 {
+    crate::downloads::total_bytes(&state)
+}
+
+// --- equalizer ----------------------------------------------------------------------------------
+
+/// The ten band centre frequencies, so the UI labels its sliders with what they actually do rather
+/// than a copy of the list that can drift from the one the filters are built from.
+#[tauri::command]
+pub fn equalizer_bands() -> Vec<u32> {
+    player::EQ_BANDS.to_vec()
+}
+
+/// Apply the equalizer. `gains` is one dB value per band; an empty vec, or `enabled: false`, turns
+/// it off — which is not the same as all zeros, since zeros would still build the filters.
+///
+/// Persisted here rather than in the UI so it survives a restart and is applied before the first
+/// track starts, the same way audio quality is.
+#[tauri::command]
+pub fn set_equalizer(
+    state: St<'_>,
+    enabled: bool,
+    preamp_db: f64,
+    gains_db: Vec<f64>,
+) -> Result<(), String> {
+    let eq = build_equalizer(enabled, preamp_db, &gains_db);
+    state.player.set_equalizer(eq).map_err(|e| e.to_string())?;
+    // Stored as a compact JSON row next to the other settings, so a corrupt value degrades to
+    // "equalizer off" rather than to a panic on the next launch.
+    let stored = serde_json::json!({ "enabled": enabled, "preamp": preamp_db, "gains": gains_db });
+    state.db.set_setting("equalizer", &stored.to_string());
+    Ok(())
+}
+
+/// What the UI should draw on open: the stored setting, or a flat, disabled one.
+#[tauri::command]
+pub fn equalizer(state: St<'_>) -> serde_json::Value {
+    state
+        .db
+        .get_setting("equalizer")
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .unwrap_or_else(|| {
+            serde_json::json!({
+                "enabled": false,
+                "preamp": 0.0,
+                "gains": vec![0.0; player::EQ_BANDS.len()],
+            })
+        })
+}
+
+/// Shared by the command and the startup restore.
+pub fn build_equalizer(
+    enabled: bool,
+    preamp_db: f64,
+    gains_db: &[f64],
+) -> Option<player::Equalizer> {
+    if !enabled {
+        return None;
+    }
+    let mut gains = [0.0f64; player::EQ_BANDS.len()];
+    for (slot, g) in gains.iter_mut().zip(gains_db) {
+        // Clamped rather than trusted: the UI's sliders stop at ±12, but the setting is a JSON row
+        // on disk and a wild value here is a filter mpv rejects, which drops the whole chain.
+        *slot = g.clamp(-12.0, 12.0);
+    }
+    Some(player::Equalizer { preamp_db: preamp_db.clamp(-12.0, 12.0), gains_db: gains })
+}
+
+// --- sleep timer --------------------------------------------------------------------------------
+
+/// Stop the music in `minutes`. Replaces any timer already running.
+#[tauri::command]
+pub fn set_sleep_timer(state: St<'_>, minutes: u32) -> Result<(), String> {
+    crate::sleep::set(state.inner(), minutes);
+    Ok(())
+}
+
+/// Cancel it. Safe when nothing is running.
+#[tauri::command]
+pub fn clear_sleep_timer(state: St<'_>) -> Result<(), String> {
+    crate::sleep::clear(state.inner());
+    Ok(())
+}
+
+/// When the music stops, as unix milliseconds, or `None`. The UI counts down from this rather than
+/// being ticked, so a window that opened late (the mini player) can ask once and draw the rest.
+#[tauri::command]
+pub fn sleep_timer(state: St<'_>) -> Option<i64> {
+    state.sleep_timer.deadline()
+}
+
 /// Who draws the window frame, as the SPA needs to know it (issue #65). Read-only, derived: the
 /// stored `system_titlebar` preference on Linux/Windows, and always `overlay` on macOS, where the
 /// traffic lights come from `tauri.macos.conf.json`'s `titleBarStyle: Overlay` and there is no

@@ -25,6 +25,7 @@
 	import { copyText } from '$lib/clipboard';
 	import * as api from '$lib/api';
 	import { blocked, prefs, ui, toast, unblockArtist } from '$lib/player.svelte';
+	import { dl, formatBytes, remove as removeDownload } from '$lib/downloads.svelte';
 	import { win } from '$lib/win.svelte';
 	import ColorPicker from '$lib/components/ColorPicker.svelte';
 	import Changelog from '$lib/components/Changelog.svelte';
@@ -756,6 +757,14 @@
 									desc: t('settings.data.clear_cache_hint'),
 									control: clearButton
 								})}
+								<!-- Separate from the cache row above it, and worded to say so: "Clear cache"
+								     wiping music somebody saved for a flight would be the worst kind of
+								     surprise, and the two sitting together invites exactly that assumption. -->
+								{@render row({
+									title: t('downloads.storage'),
+									desc: t('downloads.storage_hint'),
+									control: downloadsButton
+								})}
 							</div>
 						</section>
 					{:else if tab === 'about'}
@@ -1180,6 +1189,24 @@
 		<Input bind:value={proxyInput} placeholder={t('settings.general.proxy_placeholder')} />
 		<Button type="submit" variant="outline">{t('common.save')}</Button>
 	</form>
+{/snippet}
+
+{#snippet downloadsButton()}
+	<div class="flex items-center gap-3">
+		<span class="text-xs tabular-nums text-muted-foreground">{formatBytes(dl.bytes)}</span>
+		<Button
+			variant="destructive"
+			size="sm"
+			disabled={!dl.bytes}
+			onclick={async () => {
+				// One at a time through the same command the row-level delete uses, so there is one
+				// definition of "remove a download" rather than a bulk path that can drift from it.
+				for (const d of await api.downloads()) await removeDownload(d.videoId);
+			}}
+		>
+			{t('downloads.remove_all')}
+		</Button>
+	</div>
 {/snippet}
 
 {#snippet clearButton()}

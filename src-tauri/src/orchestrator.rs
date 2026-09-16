@@ -44,6 +44,12 @@ pub struct PlaybackData {
     /// music-video mode believes this over the queue row's flag, which several rows arrive without
     /// (a card played from a shelf, an album row swapped to its audio id).
     pub is_video: Option<bool>,
+    /// The chosen audio format's own `mimeType` and `bitrate`. The quality badge shows these
+    /// rather than deriving them from the itag: itag 251 is opus, but its bitrate is whatever
+    /// YouTube encoded that track at (measured across a handful of tracks: 106–167 kbps), so a
+    /// nominal number would be wrong most of the time.
+    pub audio_mime: Option<String>,
+    pub audio_bitrate: Option<i64>,
     /// Which client produced the stream (diagnostics). context/06.
     pub stream_client: String,
 }
@@ -424,6 +430,8 @@ impl Orchestrator {
                 headers: std::collections::HashMap::new(),
                 expires_in_seconds: c.expires_in_seconds as i64,
                 loudness_db: c.loudness_db.map(|f| f as f64),
+                audio_mime: Some(c.mime.clone()),
+                audio_bitrate: Some(c.bitrate as i64),
                 playback_ping: None,
                 title: c.title,
                 artists: None,
@@ -544,6 +552,8 @@ impl Orchestrator {
             headers,
             expires_in_seconds: expires,
             loudness_db: format.loudness_db.or(loudness),
+            audio_mime: Some(format.mime_type.clone()),
+            audio_bitrate: Some(format.bitrate),
             playback_ping: ping,
             title: vd.and_then(|v| v.title.clone()),
             artists: vd.and_then(|v| v.author.clone()),

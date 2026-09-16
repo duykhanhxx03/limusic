@@ -52,6 +52,7 @@
 	import { thumb } from '$lib/thumb';
 	import { t } from '$lib/i18n.svelte';
 	import ArtistLine from './ArtistLine.svelte';
+	import QualityChip from './QualityChip.svelte';
 	import LyricsView from './LyricsView.svelte';
 
 	const close = () => (ui.theaterOpen = false);
@@ -444,9 +445,13 @@
 						text={playback.now?.artists ?? ''}
 						class="mt-2 block text-base text-foreground/70"
 					/>
-					{#if album}
-						<p class="mt-0.5 truncate text-[13px] text-muted-foreground">{album}</p>
-					{/if}
+					<div class="mt-1 flex items-center gap-2">
+						{#if album}
+							<p class="truncate text-[13px] text-muted-foreground">{album}</p>
+						{/if}
+						<!-- Room here for the unit, unlike the player bar. -->
+						<QualityChip codec={playback.now?.audioCodec} bitrate={playback.now?.audioBitrate} />
+					</div>
 				</div>
 				<div class="flex shrink-0 items-center gap-1 pt-1.5">
 					<!-- Hidden below lg, where there is no second column for the lyrics to be in. -->

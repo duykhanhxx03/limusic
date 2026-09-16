@@ -16,6 +16,8 @@
         BookmarkAdd02Icon,
         BookmarkCheck02Icon,
     } from "@hugeicons/core-free-icons";
+    import { download } from "$lib/downloads.svelte";
+    import DownloadButton from "$lib/components/DownloadButton.svelte";
     import TrackRow from "$lib/components/TrackRow.svelte";
     import TrackSelectionBar from "$lib/components/TrackSelectionBar.svelte";
     import TrackSelectButton from "$lib/components/TrackSelectButton.svelte";
@@ -201,6 +203,15 @@
         enqueue(album.items, next, album.title, album.continuation);
     }
 
+    function downloadAll() {
+        if (!album?.items.length) return;
+        menuOpen = false;
+        // A continuation means YouTube had more than this page carried. Queueing hands the token
+        // to the backend, which walks it; downloading cannot, so say what was taken.
+        if (album.continuation) toast.error(t("toasts.partial_playlist_added"));
+        download(album.items);
+    }
+
     function saveToPlaylist() {
         if (!album?.items.length) return;
         menuOpen = false;
@@ -375,6 +386,16 @@
                         />
                         {inLibrary ? t("library.in_library") : t("library.save_to_library")}
                     </button>
+                {/if}
+                <!-- Beside Play, not inside the ⋯ menu: whether an album is on your device is
+                     something you want to see, not something you open a menu to find out. -->
+                {#if !isLocal}
+                    <DownloadButton
+                        items={album.items}
+                        ondownload={downloadAll}
+                        disabled={!album.items.length}
+                        class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-foreground/10 text-muted-foreground transition hover:bg-foreground/20 hover:text-foreground disabled:opacity-50"
+                    />
                 {/if}
                 <TrackSelectButton
                     {selection}

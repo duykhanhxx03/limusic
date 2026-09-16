@@ -7,7 +7,9 @@
 		PlayIcon,
 		PlayListAddIcon,
 		ThumbsDownIcon,
-		ThumbsUpIcon
+		ThumbsUpIcon,
+		DownloadCircle01Icon,
+		Download04Icon
 	} from '@hugeicons/core-free-icons';
 	import * as api from '$lib/api';
 	import type { SongItem } from '$lib/api';
@@ -17,6 +19,7 @@
 	import TrackMenu from './TrackMenu.svelte';
 	import ArtistLine from './ArtistLine.svelte';
 	import ExplicitIcon from './ExplicitIcon.svelte';
+	import { dl, isDownloading, requestSaved } from '$lib/downloads.svelte';
 	import { t } from '$lib/i18n.svelte';
 	import type { TrackSelection } from '$lib/selection.svelte';
 	import { Checkbox } from './ui/checkbox';
@@ -99,6 +102,15 @@
 	// colon in it ("Cast of EPIC: The Musical") as a length still holds those strings, and printing
 	// one here squeezes the title and artists down to nothing.
 	const duration = $derived(/^[\d:]+$/.test(song.duration ?? '') ? song.duration : undefined);
+
+	// Saved for offline. Local files are excluded: every row in the Local tab is on disk, so a
+	// marker there would be noise that means nothing.
+	// Every list asks about its own rows; the store batches the questions into one command.
+	$effect(() => {
+		if (!api.isLocalId(song.video_id)) requestSaved(song.video_id);
+	});
+	const saved = $derived(!api.isLocalId(song.video_id) && dl.saved.has(song.video_id));
+	const downloading = $derived(isDownloading(song.video_id));
 
 	const rated = $derived(ratingOf(song));
 	// A local file has no YouTube identity, so there is nothing to rate (the same guard the ⋯ menu
@@ -245,6 +257,26 @@
 				<span class="min-w-0 truncate text-sm font-medium {active ? 'text-primary' : ''}">
 					{song.title}
 				</span>
+				<!-- On disk. After the title, not before it: it is a property of the row, not part of
+				     what the row is called, and a badge in front would push every title across on the
+				     pages where most tracks are saved.
+				     No marker for a local file — the whole Local tab is on disk, so it would mean
+				     nothing there. -->
+				{#if saved}
+					<HugeiconsIcon
+						icon={DownloadCircle01Icon}
+						class="h-3.5 w-3.5 shrink-0 text-primary"
+						aria-label={t('downloads.saved')}
+					/>
+				{:else if downloading}
+					<!-- Pulsing rather than spinning: a spinner on every row of a downloading album is
+					     a lot of motion for a line of text. -->
+					<HugeiconsIcon
+						icon={Download04Icon}
+						class="h-3.5 w-3.5 shrink-0 animate-pulse text-muted-foreground"
+						aria-label={t('downloads.downloading')}
+					/>
+				{/if}
 			</div>
 			<div class="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
 				<ArtistLine runs={song.artist_runs} text={song.artists} />

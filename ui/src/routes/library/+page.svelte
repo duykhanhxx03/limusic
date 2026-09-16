@@ -13,6 +13,7 @@
 		CloudSyncIcon,
 		CloudUploadIcon,
 		DriveIcon,
+		Download04Icon,
 		MusicNote01Icon,
 		MusicNoteSquare02Icon,
 		Playlist02Icon,
@@ -23,6 +24,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Tabs from '$lib/components/ui/tabs';
+	import DownloadedSongs from '$lib/components/DownloadedSongs.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import LibrarySongs from '$lib/components/LibrarySongs.svelte';
 	import LocalMusic from '$lib/components/LocalMusic.svelte';
@@ -250,6 +252,9 @@
 			<Tabs.Trigger value="local">
 				<HugeiconsIcon icon={DriveIcon} class="h-4 w-4" /> {t('library.local_tab')}
 			</Tabs.Trigger>
+			<Tabs.Trigger value="downloaded">
+				<HugeiconsIcon icon={Download04Icon} class="h-4 w-4" /> {t('downloads.tab')}
+			</Tabs.Trigger>
 		</Tabs.List>
 		<!-- Every branch below is gated on `tab`, because bits-ui never unmounts an inactive panel: it
 		     renders every one and hides the inactive ones. Left alone, opening Library builds each card twice
@@ -257,6 +262,11 @@
 		     for a panel you cannot see. -->
 		<!-- Songs, Uploads and Local stand apart: two are track lists rather than card grids, the
 		     third needs neither an account nor a connection, and the states below fit none of them. -->
+		<!-- Beside Local for the same reason it sits there: neither needs an account or a
+		     connection, and both are lists of files on this machine. -->
+		<Tabs.Content value="downloaded">
+			{#if tab === 'downloaded'}<DownloadedSongs />{/if}
+		</Tabs.Content>
 		<Tabs.Content value="songs">
 			{#if tab === 'songs'}
 				{#if signedOut}

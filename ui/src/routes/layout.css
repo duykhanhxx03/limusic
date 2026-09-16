@@ -1,8 +1,7 @@
 @import 'tailwindcss';
 @import "tw-animate-css";
 @import "shadcn-svelte/tailwind.css";
-@import "@fontsource-variable/oxanium";
-@import "@fontsource-variable/ibm-plex-sans";
+@import "@fontsource-variable/plus-jakarta-sans";
 @import "@fontsource-variable/montserrat";
 @import "@fontsource-variable/outfit";
 @import "@fontsource-variable/dm-sans";
@@ -73,8 +72,16 @@
 	--sidebar-accent-foreground: oklch(0.212 0.019 var(--hue));
 	--sidebar-border: oklch(0.922 0.005 var(--hue));
 	--sidebar-ring: oklch(0.6 0.019 var(--hue));
-	--font-sans: 'Oxanium Variable', sans-serif;
-	--font-heading: 'IBM Plex Sans Variable', sans-serif;
+	/* Plus Jakarta Sans for both. Oxanium was the squared-off, techy face the app opened with, and
+	   it is what made the default theme read as a utility rather than a music player; pairing it
+	   with IBM Plex Sans for headings put two unrelated voices on the same screen.
+	   One family for both instead: it is a humanist geometric with softened joins and open
+	   counters, so it stays legible at a track row's 13px and still has some poise at a heading's
+	   24px. It also ships a `vietnamese` subset, which matters here and which several of the
+	   better-looking candidates (Instrument Sans, Urbanist, Figtree) do not have — a title like
+	   "Thương Lấy Chính Mình" falls back to a system face without it. */
+	--font-sans: 'Plus Jakarta Sans Variable', sans-serif;
+	--font-heading: 'Plus Jakarta Sans Variable', sans-serif;
 	--font-serif: ui-serif, Georgia, serif;
 	--font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 	/* Tailwind's stock shadow scale. Restated here because @theme inline maps the shadow

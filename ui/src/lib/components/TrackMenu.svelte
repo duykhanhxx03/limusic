@@ -24,7 +24,10 @@
 		Vynil02Icon,
 		DashboardSquare02Icon,
 		Share08Icon,
-		PreferenceVerticalIcon
+		PreferenceVerticalIcon,
+		SlidersVerticalIcon,
+		Download04Icon,
+		Tick02Icon
 	} from '@hugeicons/core-free-icons';
 	import * as api from '$lib/api';
 	import type { SongItem } from '$lib/api';
@@ -45,6 +48,8 @@
 	} from '$lib/player.svelte';
 	import { t } from '$lib/i18n.svelte';
 	import TempoPitchDialog from './TempoPitchDialog.svelte';
+	import EqualizerDialog from './EqualizerDialog.svelte';
+	import { download, isDownloading, isSaved, remove as removeDownload } from '$lib/downloads.svelte';
 
 	let {
 		song,
@@ -80,6 +85,7 @@
 	let menuOpen = $state(false);
 	// Player-bar only: tempo/pitch belong to playback, not to a row you happen to be pointing at.
 	let advancedOpen = $state(false);
+	let eqOpen = $state(false);
 	let anchor = $state(NO_ANCHOR);
 
 	// Click on the ⋯ opens under the button; right-click on the host row opens at the pointer.
@@ -297,6 +303,34 @@
 			>
 				<HugeiconsIcon icon={PreferenceVerticalIcon} class="h-4 w-4" /> {t('dialogs.tempo_pitch.title')}
 			</button>
+			<!-- Save for offline. Above the sound controls: it is about the track, not about how it
+			     is played. Hidden for a local file, which is already on this machine. -->
+			{#if !api.isLocalId(song.video_id)}
+				<button
+					class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+					onclick={(e) =>
+						run(e, () => (isSaved(song.video_id) ? removeDownload(song.video_id) : download([song])))}
+				>
+					<HugeiconsIcon
+						icon={Download04Icon}
+						altIcon={Tick02Icon}
+						showAlt={isSaved(song.video_id)}
+						class="h-4 w-4"
+					/>
+					{isSaved(song.video_id)
+						? t('downloads.remove')
+						: isDownloading(song.video_id)
+							? t('downloads.downloading')
+							: t('downloads.save')}
+				</button>
+			{/if}
+			<!-- Beside Tempo & Pitch: both are "how this sounds", not "what this is". -->
+			<button
+				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				onclick={(e) => run(e, () => (eqOpen = true))}
+			>
+				<HugeiconsIcon icon={SlidersVerticalIcon} class="h-4 w-4" /> {t('eq.title')}
+			</button>
 		{/if}
 		<!-- Always here, including the player bar at full width where the + button is right there:
 		     people look for this in the menu and miss the icon. -->
@@ -321,4 +355,5 @@
 
 {#if linksOnly}
 	<TempoPitchDialog bind:open={advancedOpen} />
+	<EqualizerDialog bind:open={eqOpen} />
 {/if}

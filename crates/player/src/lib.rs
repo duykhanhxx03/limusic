@@ -69,7 +69,7 @@ pub struct Player {
     /// `(loudness gain dB, pitch semitones)`. mpv's `af` is one global chain, so the two things
     /// that write to it have to be re-applied together: a bare `set_property("af", ...)` from
     /// either one would drop the other's filter.
-    af: std::sync::Mutex<(Option<f64>, i32)>,
+    af: std::sync::Mutex<AfState>,
 }
 
 impl Player {
@@ -113,7 +113,7 @@ impl Player {
             .spawn(move || event_loop(ev, tx))
             .expect("spawn mpv event thread");
 
-        Ok(Player { mpv, events: Some(rx), af: std::sync::Mutex::new((None, 0)) })
+        Ok(Player { mpv, events: Some(rx), af: std::sync::Mutex::new(AfState::default()) })
     }
 
     /// Take the event receiver (once).
@@ -221,8 +221,24 @@ impl Player {
     // round-trip (a few ms) and the filter chain reinits mid-stream. If that ever clicks audibly,
     // keep one labelled filter (`af=@gain:lavfi=[volume=0dB]`) and retune it with `af-command`.
     pub fn set_gain(&self, gain_db: Option<f64>) -> Result<(), Error> {
-        self.af.lock().unwrap().0 = gain_db;
+        self.af.lock().unwrap().gain_db = gain_db;
         self.apply_af()
+    }
+
+    /// The graphic equalizer. `gains` is one value in dB per band of [`EQ_BANDS`], `preamp` is an
+    /// overall trim. `None` turns it off entirely, which is not the same as all-zero gains: zeros
+    /// still build ten biquads that the audio has to pass through for no effect.
+    pub fn set_equalizer(&self, eq: Option<Equalizer>) -> Result<(), Error> {
+        let previous = std::mem::replace(&mut self.af.lock().unwrap().eq, eq);
+        if let Err(e) = self.apply_af() {
+            // Same rollback as `set_pitch`: mpv rejects the whole chain on a bad filter, loudness
+            // gain and pitch included, so put back what was working rather than leave the track
+            // playing dry.
+            self.af.lock().unwrap().eq = previous;
+            let _ = self.apply_af();
+            return Err(e);
+        }
+        Ok(())
     }
 
     /// Tempo, 0.25–2.0. Pitch is unaffected: `audio-pitch-correction` (mpv's default) time-stretches
@@ -240,12 +256,12 @@ impl Player {
     // Windows/macOS build ever turns up without it.
     pub fn set_pitch(&self, semitones: i32) -> Result<(), Error> {
         let wanted = semitones.clamp(-12, 12);
-        let previous = std::mem::replace(&mut self.af.lock().unwrap().1, wanted);
+        let previous = std::mem::replace(&mut self.af.lock().unwrap().semitones, wanted);
         if let Err(e) = self.apply_af() {
             // No librubberband in this build: mpv rejects the *whole* chain, loudness gain
             // included, so put the old value back rather than leave every later set_gain failing.
             // (mpv never applied the bad chain, so this restores what is already playing.)
-            self.af.lock().unwrap().1 = previous;
+            self.af.lock().unwrap().semitones = previous;
             let _ = self.apply_af();
             return Err(if wanted == 0 { e } else { Error::NoPitchFilter });
         }
@@ -253,18 +269,58 @@ impl Player {
     }
 
     fn apply_af(&self) -> Result<(), Error> {
-        let (gain_db, semitones) = *self.af.lock().unwrap();
-        self.mpv.set_property("af", af_chain(gain_db, semitones).as_str())?;
+        let state = self.af.lock().unwrap().clone();
+        self.mpv.set_property("af", af_chain(&state).as_str())?;
         Ok(())
     }
 }
 
 /// The whole `af` chain: loudness gain, then pitch. Empty when neither is in play, so the default
 /// path stays exactly the filterless one it was before pitch existed.
-fn af_chain(gain_db: Option<f64>, semitones: i32) -> String {
+/// The centre frequencies of the ten bands, the ISO octave set every graphic EQ uses. Fixed on
+/// purpose: a slider the user can move sideways as well as up is a parametric EQ, which is a
+/// different tool and a much larger UI.
+pub const EQ_BANDS: [u32; 10] = [31, 62, 125, 250, 500, 1_000, 2_000, 4_000, 8_000, 16_000];
+
+/// Ten band gains in dB, plus an overall trim.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Equalizer {
+    pub preamp_db: f64,
+    pub gains_db: [f64; EQ_BANDS.len()],
+}
+
+#[derive(Debug, Clone, Default)]
+struct AfState {
+    gain_db: Option<f64>,
+    semitones: i32,
+    eq: Option<Equalizer>,
+}
+
+fn af_chain(state: &AfState) -> String {
+    let AfState { gain_db, semitones, eq } = state;
+    let (gain_db, semitones) = (*gain_db, *semitones);
     let mut chain = Vec::new();
-    if let Some(g) = gain_db {
-        chain.push(format!("lavfi=[volume={g}dB]"));
+    // Loudness gain and the EQ preamp are the same operation, so they ride in one `volume` rather
+    // than two: every filter in the chain is another pass over the samples.
+    let preamp = eq.as_ref().map(|e| e.preamp_db).unwrap_or(0.0);
+    let total = gain_db.unwrap_or(0.0) + preamp;
+    if gain_db.is_some() || preamp != 0.0 {
+        chain.push(format!("lavfi=[volume={total}dB]"));
+    }
+    if let Some(e) = eq {
+        for (i, &f) in EQ_BANDS.iter().enumerate() {
+            let g = e.gains_db[i];
+            // A 0 dB band is a biquad that does nothing; skipping it is free and keeps a mostly
+            // flat EQ from costing ten filters.
+            if g == 0.0 {
+                continue;
+            }
+            // `t=q:w=1.0` is a bit over one octave of bandwidth — wide enough that ten bands cover
+            // the spectrum without gaps, narrow enough that neighbours do not fight each other.
+            // One lavfi per band rather than one graph with commas in it: `af` splits on commas
+            // too, and the existing chain already joins that way.
+            chain.push(format!("lavfi=[equalizer=f={f}:t=q:w=1.0:g={g}]"));
+        }
     }
     if semitones != 0 {
         // Semitones → frequency multiplier (equal temperament).
@@ -398,17 +454,59 @@ fn perceptual_to_mpv(percent: i64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{af_chain, perceptual_to_mpv, quoted};
+    use super::{af_chain, perceptual_to_mpv, quoted, AfState, Equalizer, EQ_BANDS};
+
+    fn chain(gain_db: Option<f64>, semitones: i32, eq: Option<Equalizer>) -> String {
+        af_chain(&AfState { gain_db, semitones, eq })
+    }
 
     #[test]
     fn gain_and_pitch_share_one_chain() {
         // The bug this exists for: either setter clobbering the other's filter.
-        assert_eq!(af_chain(None, 0), "");
-        assert_eq!(af_chain(Some(-3.5), 0), "lavfi=[volume=-3.5dB]");
-        assert_eq!(af_chain(None, 12), "rubberband=pitch-scale=2");
-        assert_eq!(af_chain(Some(-6.0), -12), "lavfi=[volume=-6dB],rubberband=pitch-scale=0.5");
+        assert_eq!(chain(None, 0, None), "");
+        assert_eq!(chain(Some(-3.5), 0, None), "lavfi=[volume=-3.5dB]");
+        assert_eq!(chain(None, 12, None), "rubberband=pitch-scale=2");
+        assert_eq!(chain(Some(-6.0), -12, None), "lavfi=[volume=-6dB],rubberband=pitch-scale=0.5");
         // One semitone up is the twelfth root of two.
-        assert!(af_chain(None, 1).ends_with("1.0594630943592953"));
+        assert!(chain(None, 1, None).ends_with("1.0594630943592953"));
+    }
+
+    #[test]
+    fn a_flat_equalizer_adds_no_filters() {
+        // All-zero is not the same as off in the UI, but it must cost the same: ten biquads doing
+        // nothing is ten passes over every sample.
+        let flat = Equalizer::default();
+        assert_eq!(chain(None, 0, Some(flat)), "");
+    }
+
+    #[test]
+    fn only_the_bands_that_were_moved_become_filters() {
+        let mut eq = Equalizer::default();
+        eq.gains_db[0] = 6.0; // 31 Hz
+        eq.gains_db[9] = -3.0; // 16 kHz
+        let c = chain(None, 0, Some(eq));
+        assert_eq!(
+            c,
+            "lavfi=[equalizer=f=31:t=q:w=1.0:g=6],lavfi=[equalizer=f=16000:t=q:w=1.0:g=-3]"
+        );
+    }
+
+    #[test]
+    fn the_preamp_folds_into_the_loudness_volume() {
+        // Two `volume` filters would be two passes for one multiplication.
+        let eq = Equalizer { preamp_db: -2.0, ..Default::default() };
+        assert_eq!(chain(Some(-4.0), 0, Some(eq.clone())), "lavfi=[volume=-6dB]");
+        // And a preamp alone still produces one.
+        assert_eq!(chain(None, 0, Some(eq)), "lavfi=[volume=-2dB]");
+    }
+
+    #[test]
+    fn the_band_list_is_the_iso_octave_set() {
+        // The UI draws a slider per entry and the settings row stores one gain per entry, so the
+        // length is part of the contract.
+        assert_eq!(EQ_BANDS.len(), 10);
+        assert_eq!(EQ_BANDS[0], 31);
+        assert_eq!(EQ_BANDS[9], 16_000);
     }
 
     /// Everything above is string-building; this drives a real libmpv and reads `af` back out of

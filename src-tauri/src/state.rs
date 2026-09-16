@@ -38,6 +38,9 @@ pub struct AppState {
     pub orchestrator: Arc<Orchestrator>,
     /// mpv's on-disk audio cache dir (context/14) — wiped by the settings "Clear caches" action.
     cache_dir: std::path::PathBuf,
+    /// The app data dir. Downloads live under it; the cache dir is deliberately separate, since
+    /// "clear cache" must never take the music somebody saved for a flight.
+    pub data_dir: std::path::PathBuf,
     /// OS media integration (MPRIS/SMTC/NowPlaying). `None` if it failed to init. context/16.
     media: Option<MediaHandle>,
     queue: Mutex<QueueState>,
@@ -63,6 +66,17 @@ pub struct AppState {
     /// Mirror of mpv's pause flag (set in `media_set_playing`). Position ticks must consult this
     /// instead of assuming "playing" — mpv fires `time-pos` on seeks while paused too.
     is_playing: AtomicBool,
+    /// videoId → (codec mime, bitrate) of the audio actually resolved for it, for the quality
+    /// badge. Kept here rather than passed through `emit_now_playing` because that fires from
+    /// three places and only one of them holds a `PlaybackData`: a gapless advance was resolved by
+    /// the lookahead minutes earlier, and a restored queue was never resolved at all.
+    audio_quality: std::sync::Mutex<std::collections::HashMap<String, (String, Option<i64>)>>,
+    /// Bumped by `downloads::cancel`. The worker reads it before each track and between chunks,
+    /// so a cancel stops the queue at the next boundary rather than needing a channel per task.
+    pub download_gen: std::sync::atomic::AtomicU64,
+    /// Sleep timer state. Lives here so the command layer and the firing task share one deadline;
+    /// see sleep.rs for why the clock is not in the webview.
+    pub sleep_timer: crate::sleep::SleepTimer,
     /// Latest mpv position (f64 bits) + wall-clock secs of the last DB write, for throttled
     /// resume-position persistence.
     latest_position: AtomicU64,
@@ -352,6 +366,7 @@ impl AppState {
         app: AppHandle,
         orchestrator: Arc<Orchestrator>,
         cache_dir: std::path::PathBuf,
+        data_dir: std::path::PathBuf,
         media: Option<MediaHandle>,
     ) -> Self {
         AppState {
@@ -362,11 +377,15 @@ impl AppState {
             app,
             orchestrator,
             cache_dir,
+            data_dir,
             media,
             queue: Mutex::new(QueueState::default()),
             auth: tokio::sync::Mutex::default(),
             history_pinged: AtomicBool::new(false),
             is_playing: AtomicBool::new(false),
+            audio_quality: std::sync::Mutex::new(std::collections::HashMap::new()),
+            download_gen: std::sync::atomic::AtomicU64::new(0),
+            sleep_timer: Default::default(),
             generation: AtomicU64::new(0),
             rate_epoch: AtomicU64::new(0),
             pending_seek: std::sync::Mutex::new(None),
@@ -378,6 +397,22 @@ impl AppState {
             last_queue_fingerprint: AtomicU64::new(0),
             last_persisted_fingerprint: AtomicU64::new(0),
         }
+    }
+
+    /// Remember what a track is actually streaming at. Cleared wholesale at its cap for the same
+    /// reason the URL map is: the player looks at one track at a time.
+    fn note_audio_quality(&self, data: &crate::orchestrator::PlaybackData) {
+        let Some(mime) = data.audio_mime.clone() else { return };
+        if let Ok(mut map) = self.audio_quality.lock() {
+            if map.len() >= 64 {
+                map.clear();
+            }
+            map.insert(data.video_id.clone(), (mime, data.audio_bitrate));
+        }
+    }
+
+    fn audio_quality_of(&self, video_id: &str) -> Option<(String, Option<i64>)> {
+        self.audio_quality.lock().ok()?.get(video_id).cloned()
     }
 
     /// Remember where the loopback video proxy should fetch `id` from.
@@ -969,13 +1004,31 @@ impl AppState {
                 ResolveError::LocalMissing(path.to_owned())
             });
         }
+        // A downloaded track is a file too, and for the same reason it comes before everything
+        // network-shaped: the point of saving it was that none of that has to work.
+        if let Some((path, mime, bitrate)) = crate::downloads::playable(self, video_id) {
+            if let Ok(mut data) = crate::local::playback_data(video_id, &path) {
+                // The format the file was saved at, so the quality badge still reads right with no
+                // network — `local::playback_data` leaves these empty, since an ordinary local file
+                // has no YouTube format behind it.
+                data.audio_mime = mime;
+                data.audio_bitrate = bitrate;
+                self.note_audio_quality(&data);
+                return Ok(data);
+            }
+            // The row said yes and the file did not open. Drop the row rather than failing the
+            // track: the stream below is still there, and a download that cannot play is worse
+            // than no download.
+            tracing::warn!(video_id, path, "download unreadable, falling back to the stream");
+            self.db.delete_download(video_id);
+        }
         // Latency cache first (context/11) — honor expiry, never a source of truth.
         // 60s safety margin: a URL that expires mid-load/mid-buffer fails as Raw(-13).
         let now = now_secs();
         if let Some(c) = self.db.get_stream(video_id, now + 60) {
             tracing::debug!(video_id, "stream url cache hit");
             // Cached URL carries no fresh metadata; the UI already has it from the queue item.
-            return Ok(PlaybackData {
+            let hit = PlaybackData {
                 video_id: video_id.to_owned(),
                 stream_url: c.url,
                 itag: c.itag,
@@ -999,13 +1052,20 @@ impl AppState {
                 // the cache window (hours, and every track you just listened to) would fall back
                 // to the queue row's flag, which is exactly the thing that can't be trusted.
                 is_video: c.is_video,
+                // Same reason as `is_video`: a hit skips `/player`, and the badge would otherwise
+                // empty out on exactly the tracks you have just been listening to.
+                audio_mime: c.audio_mime,
+                audio_bitrate: c.audio_bitrate,
                 stream_client: "cache".to_owned(),
-            });
+            };
+            self.note_audio_quality(&hit);
+            return Ok(hit);
         }
         let data = self
             .orchestrator
             .resolve(video_id, is_upload, self.quality(), &self.disabled_clients())
             .await?;
+        self.note_audio_quality(&data);
         // Never cache rustypipe URLs: googlevideo serves them only for bounded-Range requests,
         // which mpv doesn't send → LOADING_FAILED(-13). Caching one poisons the videoId for ~6h.
         //
@@ -1022,11 +1082,25 @@ impl AppState {
                     is_video: data.is_video,
                     ping_url: data.playback_ping.as_ref().map(|p| p.url.clone()),
                     ping_client: data.playback_ping.as_ref().map(|p| p.client.clone()),
+                    audio_mime: data.audio_mime.clone(),
+                    audio_bitrate: data.audio_bitrate,
                 },
                 now,
             );
         }
         Ok(data)
+    }
+
+    /// Resolve a stream for the downloader. Separate from the private `resolve` above only so the
+    /// downloads module does not have to be inside this one — it takes the same path, including
+    /// the quality setting and the client fallback chain, so a saved file is the same bytes the
+    /// stream would have been.
+    pub async fn resolve_for_download(
+        &self,
+        video_id: &str,
+        is_upload: bool,
+    ) -> Result<PlaybackData, ResolveError> {
+        self.resolve(video_id, is_upload).await
     }
 
     /// Start a fresh queue from one track (a search-result click), then hydrate the radio via
@@ -1854,7 +1928,13 @@ impl AppState {
     /// Everything the `now-playing` event carries. Shared with [`Self::playback_snapshot`] so a
     /// window that asks for the current track can't be told a different shape than one that
     /// listened for it.
-    fn now_playing_json(item: &SongItem, stream_client: &str) -> serde_json::Value {
+    fn now_playing_json(&self, item: &SongItem, stream_client: &str) -> serde_json::Value {
+        // Codec and bitrate of what is actually streaming, for the quality badge. `None` for a
+        // local file and for a track restored into the queue but never played.
+        let (codec, bitrate) = match self.audio_quality_of(&item.video_id) {
+            Some((mime, br)) => (Some(mime), br),
+            None => (None, None),
+        };
         serde_json::json!({
             "videoId": item.video_id,
             "title": item.title,
@@ -1869,6 +1949,10 @@ impl AppState {
             // YouTube's own `musicVideoType` says this track is a video upload, not the generated
             // audio track, which is what the player view's music-video mode gates on (plan 031).
             "isVideo": item.is_video,
+            // Raw mimeType ("audio/webm; codecs=\"opus\"") and bits per second. The UI turns them
+            // into a chip; doing it there keeps the wording translatable.
+            "audioCodec": codec,
+            "audioBitrate": bitrate,
         })
     }
 
@@ -1881,7 +1965,7 @@ impl AppState {
             (q.duration, q.items.get(q.current).cloned())
         };
         serde_json::json!({
-            "now": item.as_ref().map(|i| Self::now_playing_json(i, "current")),
+            "now": item.as_ref().map(|i| self.now_playing_json(i, "current")),
             "paused": !self.is_playing.load(Ordering::Relaxed),
             "position": self.current_position(),
             "duration": duration,
@@ -1951,7 +2035,7 @@ impl AppState {
     }
 
     fn emit_now_playing(&self, item: &SongItem, stream_client: &str) {
-        let _ = self.app.emit("now-playing", Self::now_playing_json(item, stream_client));
+        let _ = self.app.emit("now-playing", self.now_playing_json(item, stream_client));
         let _ = self.app.emit("playback-state", "playing");
         // Push the same metadata to the OS media widget (context/16).
         if let Some(m) = &self.media {

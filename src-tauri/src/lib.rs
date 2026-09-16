@@ -7,6 +7,7 @@ mod cipher;
 mod commands;
 mod db;
 mod diagnostics;
+mod downloads;
 mod http;
 mod local;
 mod lyrics;
@@ -15,6 +16,7 @@ mod mini;
 mod orchestrator;
 mod potoken;
 mod session;
+mod sleep;
 mod state;
 #[cfg(target_os = "windows")]
 mod taskbar;
@@ -331,6 +333,26 @@ pub fn run() {
             // Before anything can play: the first track of a restored queue has to come out at the
             // level the user left, not at 100.
             let _ = player.set_volume(state::saved_volume(&db));
+            // Same reason: a restored queue's first track must come out equalized the way the user
+            // left it, not flat for the length of one song. A corrupt or missing row means off.
+            if let Some(raw) = db.get_setting("equalizer") {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                    let gains: Vec<f64> = v["gains"]
+                        .as_array()
+                        .map(|a| a.iter().filter_map(serde_json::Value::as_f64).collect())
+                        .unwrap_or_default();
+                    let eq = commands::build_equalizer(
+                        v["enabled"].as_bool().unwrap_or(false),
+                        v["preamp"].as_f64().unwrap_or(0.0),
+                        &gains,
+                    );
+                    // Failure here is a libmpv without the filter: log it and play flat rather
+                    // than refusing to start.
+                    if let Err(e) = player.set_equalizer(eq) {
+                        tracing::warn!(error = %e, "equalizer: could not restore, playing flat");
+                    }
+                }
+            }
             let events = player.take_events().expect("player events");
 
             // Phase 2 extraction stack: cipher + PoToken hidden webviews behind the orchestrator.
@@ -360,6 +382,7 @@ pub fn run() {
                 handle.clone(),
                 orchestrator,
                 cache_dir.clone(),
+                data_dir.clone(),
                 media,
             ));
             app.manage(app_state.clone());
@@ -372,6 +395,20 @@ pub fn run() {
             // Local music artwork reaches the webview over the asset protocol, whose configured
             // scope is empty — the folders it may read are the ones the user picked (local.rs).
             local::allow_music_paths(&handle, &app_state.db);
+            // Downloaded artwork is a file on disk, so it reaches the webview over the same asset
+            // protocol as local covers — and like them it has to be in scope before the first
+            // paint, or a restored queue whose track is a download asks for its cover and gets a
+            // 403 it never retries.
+            {
+                use tauri::Manager;
+                let dir = downloads::dir(&data_dir);
+                let _ = std::fs::create_dir_all(&dir);
+                let scope = handle.asset_protocol_scope();
+                let _ = scope.allow_directory(&dir, true);
+                if let Ok(real) = dir.canonicalize() {
+                    let _ = scope.allow_directory(real, true);
+                }
+            }
 
             // System tray: playback controls + show/quit while running in the background.
             if let Err(e) = tray::init(&handle) {
@@ -550,6 +587,18 @@ pub fn run() {
             commands::get_queue,
             commands::get_playback,
             commands::video_stream,
+            commands::download_tracks,
+            commands::cancel_downloads,
+            commands::downloads,
+            commands::downloaded_ids,
+            commands::remove_download,
+            commands::downloads_size,
+            commands::equalizer_bands,
+            commands::set_equalizer,
+            commands::equalizer,
+            commands::set_sleep_timer,
+            commands::clear_sleep_timer,
+            commands::sleep_timer,
             commands::forget_video_stream,
             commands::get_settings,
             commands::set_setting,

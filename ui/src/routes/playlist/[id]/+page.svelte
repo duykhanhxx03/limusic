@@ -33,6 +33,8 @@
 	import TrackFilter, { filterTracks } from '$lib/components/TrackFilter.svelte';
 	import TrackRowSkeleton from '$lib/components/TrackRowSkeleton.svelte';
 	import ErrorState from '$lib/components/ErrorState.svelte';
+	import { download } from '$lib/downloads.svelte';
+	import DownloadButton from '$lib/components/DownloadButton.svelte';
 	import * as api from '$lib/api';
 	import { ON_REPEAT_ID } from '$lib/api';
 	import type { BrowseItem, PlaylistPage, SongItem } from '$lib/api';
@@ -682,6 +684,24 @@
 		enqueue(sortedItems, next, pl.title, sorting ? undefined : pl.continuation);
 	}
 
+	async function downloadAll() {
+		if (!pl?.items.length) return;
+		const pid = id;
+		// Every page, not just what is on screen. `loadAll` is the same walk the sort path uses.
+		let whole = true;
+		if (pl.continuation) {
+			preparing = true;
+			try {
+				whole = await loadAll();
+			} finally {
+				preparing = false;
+			}
+		}
+		if (!pl || pid !== id) return;
+		if (!whole) warnPartial('added');
+		download(pl.items);
+	}
+
 	// Untouched by the sort: the backend shuffles the whole playlist (continuation pages included),
 	// so what order it was handed is irrelevant.
 	function shufflePlay() {
@@ -865,6 +885,14 @@
 								<HugeiconsIcon icon={PlayIcon} class="h-4 w-4" />
 								{preparing || resorting ? t('common.sorting') : t('player.play')}
 							</Button>
+							<!-- Beside Play, not inside the ⋯ menu: whether an album is on your device is
+							     something you want to see, not something you open a menu to find out. -->
+							<DownloadButton
+								items={pl.items}
+								ondownload={downloadAll}
+								disabled={!pl.items.length || preparing}
+								class="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-50"
+							/>
 							{#if confirmingDelete}
 								<div class="flex items-center gap-2 rounded-lg border border-destructive/40 px-2 py-1">
 									<span class="text-xs text-muted-foreground">{t('library.delete_playlist_confirm')}</span>

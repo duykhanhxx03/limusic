@@ -66,6 +66,31 @@ pub struct CachedStream {
     /// lookahead caches the next track and a non-gapless advance then re-resolves it. Issue #83.
     pub ping_url: Option<String>,
     pub ping_client: Option<String>,
+    /// The chosen format's own `mimeType` and `bitrate`, so the quality badge states what is
+    /// playing rather than what the itag nominally means. `None` on rows written before the
+    /// columns existed.
+    pub audio_mime: Option<String>,
+    pub audio_bitrate: Option<i64>,
+}
+
+/// A track kept on disk for offline playback.
+///
+/// Carries its own metadata rather than pointing at a queue row: the whole point is that it works
+/// with no network, and the title/artist/artwork have to come from somewhere when nothing can be
+/// fetched. `thumbnail` is a path to a file beside the audio, for the same reason.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Downloaded {
+    pub video_id: String,
+    pub path: String,
+    pub title: String,
+    pub artists: String,
+    pub thumbnail: Option<String>,
+    pub duration: Option<String>,
+    pub bytes: i64,
+    pub audio_mime: Option<String>,
+    pub audio_bitrate: Option<i64>,
+    pub added_at: i64,
 }
 
 impl Db {
@@ -93,7 +118,21 @@ impl Db {
                 loudness_db REAL,
                 is_video    INTEGER,
                 ping_url    TEXT,
-                ping_client TEXT
+                ping_client TEXT,
+                audio_mime  TEXT,
+                audio_bitrate INTEGER
+            );
+            CREATE TABLE IF NOT EXISTS downloads (
+                video_id      TEXT PRIMARY KEY,
+                path          TEXT NOT NULL,
+                title         TEXT NOT NULL,
+                artists       TEXT NOT NULL,
+                thumbnail     TEXT,
+                duration      TEXT,
+                bytes         INTEGER NOT NULL,
+                audio_mime    TEXT,
+                audio_bitrate INTEGER,
+                added_at      INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS lyrics_cache (
                 video_id   TEXT PRIMARY KEY,
@@ -153,6 +192,12 @@ impl Db {
         // The watch-history ping, added for the same reason (issue #83). No wipe: a NULL here just
         // means that one replay goes unregistered, which is exactly what every row did before.
         let _ = conn.execute("ALTER TABLE stream_url_cache ADD COLUMN ping_url TEXT", []);
+        // Codec and bitrate of the audio actually being played, for the quality badge. No wipe
+        // either: a NULL just means the badge falls back to what the itag implies, which is the
+        // codec exactly and the bitrate nominally — worth having, not worth throwing away a warm
+        // cache for.
+        let _ = conn.execute("ALTER TABLE stream_url_cache ADD COLUMN audio_mime TEXT", []);
+        let _ = conn.execute("ALTER TABLE stream_url_cache ADD COLUMN audio_bitrate INTEGER", []);
         let _ = conn.execute("ALTER TABLE stream_url_cache ADD COLUMN ping_client TEXT", []);
         // Local files are no longer recorded as plays (see `AppState::on_position`), but 0.3.1
         // recorded them for a while, so clear out anything already sitting in On Repeat's table.
@@ -515,13 +560,83 @@ impl Db {
         out
     }
 
+    // --- downloads --------------------------------------------------------------------------
+
+    /// One track kept on disk for offline playback. The row is the index; the bytes are the file
+    /// at `path`. Both have to go for a download to be gone, and `AppState::resolve` trusts the
+    /// row, so [`Db::downloaded`] checks the file still exists before handing it back.
+    pub fn put_download(&self, row: &Downloaded) {
+        let conn = self.0.lock().unwrap();
+        let _ = conn.execute(
+            "INSERT INTO downloads(video_id, path, title, artists, thumbnail, duration, bytes, audio_mime, audio_bitrate, added_at)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             ON CONFLICT(video_id) DO UPDATE SET path = excluded.path, title = excluded.title, artists = excluded.artists, thumbnail = excluded.thumbnail, duration = excluded.duration, bytes = excluded.bytes, audio_mime = excluded.audio_mime, audio_bitrate = excluded.audio_bitrate, added_at = excluded.added_at",
+            rusqlite::params![
+                row.video_id,
+                row.path,
+                row.title,
+                row.artists,
+                row.thumbnail,
+                row.duration,
+                row.bytes,
+                row.audio_mime,
+                row.audio_bitrate,
+                row.added_at
+            ],
+        );
+    }
+
+    /// The stored row for a track, or `None`. Does not check the file — callers that are about to
+    /// play it should (see `AppState::resolve`).
+    pub fn download(&self, video_id: &str) -> Option<Downloaded> {
+        let conn = self.0.lock().unwrap();
+        conn.query_row(
+            "SELECT video_id, path, title, artists, thumbnail, duration, bytes, audio_mime, audio_bitrate, added_at FROM downloads WHERE video_id = ?1",
+            [video_id],
+            Self::download_row,
+        )
+        .ok()
+    }
+
+    /// Newest first, which is the order a "Downloaded" list reads in.
+    pub fn downloads(&self) -> Vec<Downloaded> {
+        let conn = self.0.lock().unwrap();
+        let Ok(mut st) = conn.prepare(
+            "SELECT video_id, path, title, artists, thumbnail, duration, bytes, audio_mime, audio_bitrate, added_at FROM downloads ORDER BY added_at DESC",
+        ) else {
+            return Vec::new();
+        };
+        let rows = st.query_map([], Self::download_row);
+        rows.map(|r| r.filter_map(Result::ok).collect()).unwrap_or_default()
+    }
+
+    pub fn delete_download(&self, video_id: &str) {
+        let conn = self.0.lock().unwrap();
+        let _ = conn.execute("DELETE FROM downloads WHERE video_id = ?1", [video_id]);
+    }
+
+    fn download_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Downloaded> {
+        Ok(Downloaded {
+            video_id: r.get(0)?,
+            path: r.get(1)?,
+            title: r.get(2)?,
+            artists: r.get(3)?,
+            thumbnail: r.get(4)?,
+            duration: r.get(5)?,
+            bytes: r.get(6)?,
+            audio_mime: r.get(7)?,
+            audio_bitrate: r.get(8)?,
+            added_at: r.get(9)?,
+        })
+    }
+
     // --- stream url cache -------------------------------------------------------------------
 
     /// Return the cached URL only if still valid (`expires_at` in the future). context/11.
     pub fn get_stream(&self, video_id: &str, now: i64) -> Option<CachedStream> {
         let conn = self.0.lock().unwrap();
         conn.query_row(
-            "SELECT url, itag, expires_at, loudness_db, is_video, ping_url, ping_client FROM stream_url_cache WHERE video_id = ?1 AND expires_at > ?2",
+            "SELECT url, itag, expires_at, loudness_db, is_video, ping_url, ping_client, audio_mime, audio_bitrate FROM stream_url_cache WHERE video_id = ?1 AND expires_at > ?2",
             rusqlite::params![video_id, now],
             |r| {
                 Ok(CachedStream {
@@ -532,6 +647,8 @@ impl Db {
                     is_video: r.get(4)?,
                     ping_url: r.get(5)?,
                     ping_client: r.get(6)?,
+                    audio_mime: r.get(7)?,
+                    audio_bitrate: r.get(8)?,
                 })
             },
         )
@@ -553,8 +670,8 @@ impl Db {
     pub fn put_stream(&self, video_id: &str, row: &CachedStream, now: i64) {
         let conn = self.0.lock().unwrap();
         let _ = conn.execute(
-            "INSERT INTO stream_url_cache(video_id, url, itag, expires_at, loudness_db, is_video, ping_url, ping_client) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-             ON CONFLICT(video_id) DO UPDATE SET url = excluded.url, itag = excluded.itag, expires_at = excluded.expires_at, loudness_db = excluded.loudness_db, is_video = excluded.is_video, ping_url = excluded.ping_url, ping_client = excluded.ping_client",
+            "INSERT INTO stream_url_cache(video_id, url, itag, expires_at, loudness_db, is_video, ping_url, ping_client, audio_mime, audio_bitrate) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             ON CONFLICT(video_id) DO UPDATE SET url = excluded.url, itag = excluded.itag, expires_at = excluded.expires_at, loudness_db = excluded.loudness_db, is_video = excluded.is_video, ping_url = excluded.ping_url, ping_client = excluded.ping_client, audio_mime = excluded.audio_mime, audio_bitrate = excluded.audio_bitrate",
             rusqlite::params![
                 video_id,
                 row.url,
@@ -563,7 +680,9 @@ impl Db {
                 row.loudness_db,
                 row.is_video,
                 row.ping_url,
-                row.ping_client
+                row.ping_client,
+                row.audio_mime,
+                row.audio_bitrate
             ],
         );
         let _ = conn.execute("DELETE FROM stream_url_cache WHERE expires_at <= ?1", [now]);
@@ -989,6 +1108,8 @@ mod tests {
             is_video: None,
             ping_url: None,
             ping_client: None,
+            audio_mime: None,
+            audio_bitrate: None,
         }
     }
 

@@ -604,6 +604,11 @@ pub fn playback_data(video_id: &str, path: &str) -> Result<crate::orchestrator::
         video_id: video_id.to_owned(),
         stream_url: path.to_owned(),
         itag: 0,
+        // A local file's codec and bitrate come from its tags, not from a YouTube format, and the
+        // scan does not read them. Left empty rather than guessed: the badge says nothing for a
+        // local file, which is honest, where "Opus 160" off a stray itag would not be.
+        audio_mime: None,
+        audio_bitrate: None,
         headers: HashMap::new(),
         // Never expires, and never enters the URL cache (see `AppState::resolve`).
         expires_in_seconds: i64::MAX / 2,

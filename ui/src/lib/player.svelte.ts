@@ -3,6 +3,8 @@
 // context/11 UI contract — this module only calls commands / subscribes to events.
 import { browser } from '$app/environment';
 import * as api from './api';
+import { initSleep } from './sleep.svelte';
+import { initDownloads } from './downloads.svelte';
 import type {
 	Account,
 	AccountIdentity,
@@ -1122,6 +1124,11 @@ export function initApp(mini = false): () => void {
 	if (started) return () => {};
 	started = true;
 	const subs = [
+		// The sleep timer follows the deadline Rust holds. Both windows listen: the mini player
+		// draws the countdown too, and it is the visible one while the main window is hidden.
+		initSleep(),
+		// Download progress, so a button anywhere in the app can show it.
+		initDownloads(),
 		api.onNowPlaying((n) => {
 			playback.now = n;
 			playback.rating = n.rating ?? 'indifferent'; // the track's real rating when known

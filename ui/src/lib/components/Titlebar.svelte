@@ -14,6 +14,7 @@
 	import { page } from '$app/state';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
+	import SleepTimer from './SleepTimer.svelte';
 	import {
 		ArrowLeft01Icon,
 		ArrowRight01Icon,
@@ -173,6 +174,10 @@
 		     on <header> only, so these children are ordinary buttons — don't add the attribute here. -->
 		<AccountMenu />
 		<div class="mx-1.5 h-4 w-px bg-foreground/15"></div>
+
+		<!-- Stop the music after a while. Beside the app-level buttons rather than in the player bar:
+		     it is a property of the session, not of the track that happens to be playing. -->
+		<SleepTimer />
 
 		<!-- Paste a YouTube Music link and go to it: the only way into a playlist that is shared by
 		     link and never appears in search or the library (#63). -->
