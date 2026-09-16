@@ -113,7 +113,7 @@
 
 <div class="p-6">
 	{#if loading}
-		<div class="mb-4 h-36 animate-pulse rounded-2xl border bg-card/40"></div>
+		<div class="mb-4 h-36 animate-pulse rounded-2xl bg-card/40"></div>
 		{#each Array(8) as _, i (i)}
 			<TrackRowSkeleton />
 		{/each}
@@ -121,7 +121,7 @@
 		<ErrorState message={error} onRetry={load} />
 	{:else}
 		<!-- The same rounded band the Library ▸ Songs tab wears, tinted by the last thing played. -->
-		<div class="relative mb-6 overflow-hidden rounded-2xl border">
+		<div class="relative mb-6 overflow-hidden rounded-2xl bg-card">
 			{#if covers[0] && !artFailed}
 				<!-- 96px: blur-2xl throws away every detail bigger than a few pixels anyway (HomeHero). -->
 				<img
@@ -144,7 +144,7 @@
 								src={thumb(cover, 400)}
 								alt=""
 								style="z-index:{5 - i}"
-								class="relative -ml-5 h-20 w-20 rounded-xl object-cover shadow-lg ring-2 ring-background first:ml-0"
+								class="relative -ml-5 h-20 w-20 rounded-xl object-cover ring-2 ring-background first:ml-0"
 							/>
 						{/each}
 					</div>
@@ -191,7 +191,7 @@
 						class="sticky top-0 z-10 mb-1 flex items-baseline gap-3 bg-background/85 py-2 backdrop-blur"
 					>
 						<span class="font-heading text-lg font-bold tracking-tight">{group.title}</span>
-						<span class="h-px flex-1 bg-border"></span>
+						<span class="h-px flex-1 bg-foreground/10"></span>
 						<span class="text-xs text-muted-foreground">
 							{t('history.songs_count', { count: group.items.length.toLocaleString() })}
 						</span>

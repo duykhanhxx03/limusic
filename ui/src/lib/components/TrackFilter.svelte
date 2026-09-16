@@ -32,7 +32,7 @@
 </script>
 
 <div
-	class="flex items-center gap-2 rounded-full border bg-background/80 py-1.5 pl-3 pr-2 shadow-sm backdrop-blur focus-within:border-accent"
+	class="flex items-center gap-2 rounded-full glass py-1.5 pl-3 pr-2 focus-within:outline-2 focus-within:outline-ring"
 >
 	<HugeiconsIcon
 		icon={SearchList01Icon}

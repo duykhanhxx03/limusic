@@ -149,7 +149,7 @@
 	     the field behind it is the target. -->
 	{#if !value}
 		<kbd
-			class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rounded border bg-muted px-1.5 py-0.5 font-mono text-[0.625rem] font-medium tracking-wide text-muted-foreground"
+			class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rounded bg-muted px-1.5 py-0.5 font-mono text-[0.625rem] font-medium tracking-wide text-muted-foreground"
 		>
 			{MOD}K
 		</kbd>
@@ -159,7 +159,7 @@
 			id="search-suggest"
 			role="listbox"
 			aria-label={t('a11y.search_preview')}
-			class="absolute top-full z-50 mt-2 overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-xl animate-in fade-in-0 zoom-in-95 duration-150 {panelClass}"
+			class="absolute top-full z-50 mt-2 overflow-hidden rounded-xl glass-strong text-popover-foreground animate-in fade-in-0 zoom-in-[0.97] duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] {panelClass}"
 		>
 			{#if loading && !items.length}
 				{#each Array(4) as _, i (i)}
@@ -187,7 +187,7 @@
 						class="flex w-full cursor-pointer items-center gap-3 px-3 text-left transition-colors {i ===
 						active
 							? 'bg-accent/60'
-							: 'hover:bg-accent/40'} {hero ? 'border-b py-2.5' : 'py-1.5'}"
+							: 'hover:bg-accent/40'} {hero ? 'hairline-b py-2.5' : 'py-1.5'}"
 						onmousedown={(e) => e.preventDefault()}
 						onmouseenter={() => {
 							active = i;
@@ -244,7 +244,7 @@
 			     submit button removed from the DOM before the click completes never submits (#125). -->
 			<button
 				type="button"
-				class="flex w-full cursor-pointer items-center gap-2 border-t bg-muted/30 px-3 py-2 text-left text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+				class="flex w-full cursor-pointer items-center gap-2 hairline-t bg-muted/30 px-3 py-2 text-left text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
 				onmousedown={(e) => e.preventDefault()}
 				onmouseenter={() => (active = -1)}
 				onclick={(e) => {

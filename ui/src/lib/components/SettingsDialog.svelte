@@ -470,7 +470,7 @@
 
 		<div class="flex h-[min(34rem,72vh)]">
 			<!-- Tab rail -->
-			<nav class="flex w-52 shrink-0 flex-col border-r bg-muted/40 p-3">
+			<nav class="flex w-52 shrink-0 flex-col bg-muted/40 p-3">
 				<Dialog.Title class="px-3 pt-1 pb-4 font-heading text-base font-semibold">
 					{t('settings.title')}
 				</Dialog.Title>
@@ -481,7 +481,7 @@
 							aria-current={tab === tb.id}
 							class="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors {tab ===
 							tb.id
-								? 'bg-background text-foreground shadow-sm ring-1 ring-border/70'
+								? 'bg-background text-foreground ring-1 ring-foreground/15'
 								: 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground'}"
 						>
 							<HugeiconsIcon
@@ -503,7 +503,7 @@
 			     (a long font name, a long path) widens the pane and pushes every tab off the modal. -->
 			<div class="flex min-w-0 flex-1 flex-col">
 				<!-- h-14 also keeps the dialog's close button clear of the first row. -->
-				<header class="flex h-14 shrink-0 flex-col justify-center border-b px-6 pr-14">
+				<header class="flex h-14 shrink-0 flex-col justify-center hairline-b px-6 pr-14">
 					<h2 class="text-sm font-semibold">{currentTab.label}</h2>
 					<p class="truncate text-xs text-muted-foreground">{currentTab.hint}</p>
 				</header>
@@ -516,7 +516,7 @@
 						     first: two stacked dialogs would trap focus in the wrong one. -->
 						<button
 							type="button"
-							class="mb-5 inline-flex items-center gap-2 rounded-full border bg-muted/50 px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+							class="mb-5 inline-flex items-center gap-2 rounded-full bg-muted/60 px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 							onclick={() => {
 								ui.settingsOpen = false;
 								ui.shortcutsOpen = true;
@@ -760,7 +760,7 @@
 						</section>
 					{:else if tab === 'about'}
 						<div
-							class="mb-7 rounded-xl border bg-gradient-to-br from-primary/8 to-transparent px-4 py-4"
+							class="mb-7 rounded-xl bg-gradient-to-br from-primary/8 to-transparent px-4 py-4"
 						>
 							<div class="flex items-center gap-2">
 								<span class="font-heading text-lg font-bold">Limusic</span>
@@ -1103,7 +1103,7 @@
 				aria-pressed={quality === q.id}
 				class="cursor-pointer rounded-md px-3.5 py-1.5 text-xs font-medium transition-colors {quality ===
 				q.id
-					? 'bg-background text-foreground shadow-sm'
+					? 'bg-background text-foreground '
 					: 'text-muted-foreground hover:text-foreground'}"
 			>
 				{t(q.key)}

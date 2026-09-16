@@ -105,7 +105,7 @@
      (the compositor can't round an undecorated window for us — same trick as the main window). -->
 <div
 	data-tauri-drag-region="deep"
-	class="group relative flex h-screen w-screen select-none overflow-hidden rounded-2xl border border-border/60 bg-card text-foreground"
+	class="group relative flex h-screen w-screen select-none overflow-hidden rounded-2xl border border-foreground/15 bg-card text-foreground"
 >
 	<!-- Cover art under the left half, masked so it dissolves into the card instead of ending on a
 	     seam. Keyed so a track change cross-fades. -->
@@ -124,7 +124,7 @@
 	     never draws an edge of its own. The art stays plainly visible under it. -->
 	<div
 		class="pointer-events-none absolute inset-y-0 left-0 w-[56%]"
-		style="background:linear-gradient(to right,rgb(0 0 0/0.72) 0%,rgb(0 0 0/0.58) 70%,rgb(0 0 0/0) 100%)"
+		style="background:linear-gradient(to right,rgb(0 0 0/0.72) 0%,rgb(0 0 0/0.65) 70%,rgb(0 0 0/0) 100%)"
 	></div>
 
 	<!-- Back to the app. Hidden until the pointer is over the widget: it is not part of the design,
@@ -206,7 +206,7 @@
 			{/if}
 		</div>
 
-		<div class="min-w-0 [text-shadow:0_1px_4px_rgb(0_0_0/0.7)]">
+		<div class="min-w-0">
 			<Marquee
 				text={now?.title ?? t('player.not_playing')}
 				class="font-heading text-[0.95rem] font-semibold leading-tight text-white"

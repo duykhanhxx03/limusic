@@ -1,8 +1,4 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
-	import { HugeiconsIcon } from '@hugeicons/svelte';
-	import { HistoryIcon, Search01Icon } from '@hugeicons/core-free-icons';
-	import SearchSuggest from '$lib/components/SearchSuggest.svelte';
 	import { auth, playback } from '$lib/player.svelte';
 	import { thumb } from '$lib/thumb';
 	import { t, type TranslationKey } from '$lib/i18n.svelte';
@@ -19,13 +15,6 @@
 					: 'home.good_evening';
 	const daypart = $derived(t(daypartKey));
 
-	let searchQuery = $state('');
-
-	function goSearch() {
-		if (!searchQuery.trim()) return;
-		goto(`/search?${new URLSearchParams({ q: searchQuery }).toString()}`);
-	}
-
 	// Google's CDN doesn't serve every rewritten size, so a 404'd backdrop must degrade to nothing
 	// rendered, never a broken-image glyph. Re-arm whenever the track changes, mirroring MediaCard.
 	let artFailed = $state(false);
@@ -35,9 +24,10 @@
 	});
 </script>
 
-<!-- overflow-hidden lives on the backdrop wrapper, not the hero: the scaled blur has to be clipped,
-     but the search preview below has to hang out past the bottom edge. -->
-<div class="relative border-b">
+<!-- overflow-hidden lives on the backdrop wrapper, not the hero, so the scaled blur is clipped
+     without clipping the hero's own content. (Search and its preview panel used to hang out of the
+     bottom edge here; both live on the titlebar now.) -->
+<div class="relative">
 	<div class="pointer-events-none absolute inset-0 overflow-hidden">
 		{#if playback.now?.thumbnail && !artFailed}
 			<!-- 96px, not display size: blur-2xl is a 40px blur, so every detail above a handful of
@@ -66,47 +56,21 @@
 		></div>
 	</div>
 	<div class="relative p-6 pt-8">
-		<div class="flex items-start justify-between gap-4">
-			<div class="flex min-w-0 items-center gap-3">
-				{#if auth.account?.signedIn && auth.account.thumbnail}
-					<!-- max-width:none defeats Tailwind Preflight's `img{max-width:100%}`, which in a tight box
-					     clamps width to the content-box while height stays fixed → a vertical oval. Inline so
-					     it's immune to Preflight and to stale dev CSS. -->
-					<img
-						src={thumb(auth.account.thumbnail, 128)}
-						alt=""
-						style="width:2.75rem;height:2.75rem;max-width:none"
-						class="shrink-0 rounded-full object-cover ring-2 ring-border"
-					/>
-				{/if}
-				<h1 class="truncate font-heading text-4xl font-bold tracking-tight drop-shadow">
-					{daypart}{auth.account?.name ? `, ${auth.account.name.split(' ')[0]}` : ''}
-				</h1>
-			</div>
-			<div class="flex shrink-0 items-center gap-2">
-				<button
-					onclick={() => goto('/history')}
-					title={t('nav.history')}
-					aria-label={t('nav.history')}
-					class="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-				>
-					<HugeiconsIcon icon={HistoryIcon} class="h-5 w-5" />
-				</button>
-				<form class="relative w-full max-w-xs" onsubmit={(e) => { e.preventDefault(); goSearch(); }}>
-					<HugeiconsIcon
-						icon={Search01Icon}
-						class="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-					/>
-					<!-- The panel is wider than this field and hangs off its right edge: the rows carry
-					     artwork and two lines of text, which 20rem can't hold. -->
-					<SearchSuggest
-						bind:value={searchQuery}
-						placeholder={t('common.search')}
-						inputClass="rounded-full pl-9"
-						panelClass="right-0 w-[26rem]"
-					/>
-				</form>
-			</div>
+		<div class="flex min-w-0 items-center gap-3">
+			{#if auth.account?.signedIn && auth.account.thumbnail}
+				<!-- max-width:none defeats Tailwind Preflight's `img{max-width:100%}`, which in a tight box
+				     clamps width to the content-box while height stays fixed → a vertical oval. Inline so
+				     it's immune to Preflight and to stale dev CSS. -->
+				<img
+					src={thumb(auth.account.thumbnail, 128)}
+					alt=""
+					style="width:2.75rem;height:2.75rem;max-width:none"
+					class="shrink-0 rounded-full object-cover ring-2 ring-foreground/15"
+				/>
+			{/if}
+			<h1 class="truncate font-heading text-4xl font-bold tracking-tight">
+				{daypart}{auth.account?.name ? `, ${auth.account.name.split(' ')[0]}` : ''}
+			</h1>
 		</div>
 	</div>
 </div>

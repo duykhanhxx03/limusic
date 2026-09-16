@@ -103,7 +103,7 @@
 
 <div class="flex flex-col gap-5">
 	<!-- Folders -->
-	<div class="rounded-xl border bg-card/40 p-4">
+	<div class="rounded-xl bg-card/40 p-4">
 		<div class="mb-3 flex items-center justify-between gap-3">
 			<div class="min-w-0">
 				<div class="flex items-center gap-2 font-medium">

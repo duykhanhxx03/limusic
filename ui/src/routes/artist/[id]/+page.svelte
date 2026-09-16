@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { imgReveal } from '$lib/imgreveal';
 	import { goto } from '$app/navigation';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import {
@@ -165,7 +166,7 @@
 </script>
 
 {#if loading}
-	<div class="relative flex min-h-[45vh] flex-col justify-end overflow-hidden border-b">
+	<div class="relative flex min-h-[45vh] flex-col justify-end overflow-hidden">
 		<Skeleton class="absolute inset-0 h-full w-full rounded-none" />
 		<div class="relative space-y-4 p-8">
 			<Skeleton class="h-12 w-1/2 rounded-lg" />
@@ -198,13 +199,20 @@
 	<!-- Hero -->
 	<div class="content-in relative flex min-h-[45vh] flex-col justify-end overflow-hidden">
 		{#if artist.thumbnail}
-			<img src={artist.thumbnail} alt="" class="absolute inset-0 h-full w-full object-cover" />
+			{#key artist.thumbnail}
+				<img
+					src={artist.thumbnail}
+					alt=""
+					class="absolute inset-0 h-full w-full object-cover transition-opacity duration-[var(--duration-fast)] ease-[var(--ease-in-out)]"
+					{@attach imgReveal}
+				/>
+			{/key}
 		{/if}
 		<div
 			class="absolute inset-0 bg-gradient-to-t from-background via-background/60 to-background/10"
 		></div>
 		<div class="relative max-w-3xl p-8">
-			<h1 class="font-heading text-5xl font-bold tracking-tight drop-shadow-lg">{artist.name}</h1>
+			<h1 class="font-heading text-5xl font-bold tracking-tight">{artist.name}</h1>
 			{#if artist.subscribers || artist.monthlyListeners}
 				<p class="mt-2 text-sm text-muted-foreground">
 					{#if artist.subscribers}{artist.subscribers}{/if}
@@ -234,7 +242,7 @@
 				<!-- The deep counterpart to Shuffle above: that one is the finite top-songs playlist,
 				     this one asks YouTube for the artist's own endless mix. -->
 				<button
-					class="flex cursor-pointer items-center gap-2 rounded-full border px-5 py-2.5 text-sm font-semibold transition hover:bg-accent/10"
+					class="flex cursor-pointer items-center gap-2 rounded-full bg-foreground/10 px-5 py-2.5 text-sm font-semibold transition hover:bg-foreground/20"
 					onclick={() => startRadio('artist', id, artist?.name)}
 				>
 					<HugeiconsIcon icon={Radio02Icon} class="h-4 w-4" /> {t('common.radio')}
@@ -243,8 +251,8 @@
 				     the local library instead of offering a button that can only fail. -->
 				{#if auth.account?.signedIn}
 					<button
-						class="flex items-center gap-2 rounded-full border px-5 py-2.5 text-sm font-semibold transition hover:bg-accent/10 disabled:opacity-60 {subscribed
-							? 'border-primary text-primary'
+						class="flex items-center gap-2 rounded-full bg-foreground/10 px-5 py-2.5 text-sm font-semibold transition hover:bg-foreground/20 disabled:opacity-60 {subscribed
+							? 'bg-primary/25 text-primary'
 							: ''}"
 						onclick={toggleSub}
 						disabled={subBusy}
@@ -254,8 +262,8 @@
 					</button>
 				{:else}
 					<button
-						class="flex cursor-pointer items-center gap-2 rounded-full border px-5 py-2.5 text-sm font-semibold transition hover:bg-accent/10 {savedHere
-							? 'border-primary text-primary'
+						class="flex cursor-pointer items-center gap-2 rounded-full bg-foreground/10 px-5 py-2.5 text-sm font-semibold transition hover:bg-foreground/20 {savedHere
+							? 'bg-primary/25 text-primary'
 							: ''}"
 						onclick={() =>
 							toast.success(
@@ -272,7 +280,7 @@
 					</button>
 				{/if}
 				<button
-					class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border text-muted-foreground transition hover:bg-accent/10 hover:text-foreground"
+					class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-foreground/10 text-muted-foreground transition hover:bg-foreground/20 hover:text-foreground"
 					onclick={openMenu}
 					aria-label={t('common.more')}
 				>
@@ -340,7 +348,7 @@
 		aria-label={t('common.close')}
 	></button>
 	<div
-		class="fixed z-50 min-w-52 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95"
+		class="fixed z-50 min-w-52 animate-in rounded-lg glass p-1 text-popover-foreground duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] fade-in-0 zoom-in-[0.97]"
 		style={anchor.style}
 		{@attach fitMenu(anchor)}
 	>

@@ -88,7 +88,7 @@
 	<p class="py-2 text-sm text-muted-foreground">{t('common.loading')}</p>
 {:then releases}
 	{#each releases as r, i (r.version)}
-		<details class="border-b last:border-b-0" open={i === 0}>
+		<details class="hairline-b last:shadow-none" open={i === 0}>
 			<summary class="flex cursor-pointer items-center gap-2 py-2 text-sm marker:text-muted-foreground">
 				<span class="font-medium">{t('changelog.version', { version: r.version })}</span>
 				{#if r.version === current}
@@ -107,7 +107,7 @@
 							src={b.src}
 							alt={b.alt}
 							loading="lazy"
-							class="mt-2 max-w-full rounded-lg border"
+							class="mt-2 max-w-full rounded-lg"
 						/>
 					{:else if b.t === 'pre'}
 						<pre

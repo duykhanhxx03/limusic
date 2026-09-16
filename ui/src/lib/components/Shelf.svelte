@@ -185,7 +185,7 @@
 				{#each columns as col, c (c)}
 					<div
 						class="min-w-0 shrink-0 snap-start {SLOT.song} {c || others.length
-							? 'border-l pl-4'
+							? 'border-l border-foreground/12 pl-4'
 							: ''} pr-4"
 					>
 						{#each col as song, r (song.video_id + ':' + r)}
@@ -239,7 +239,7 @@
 			<button
 				aria-label={t('a11y.scroll_left')}
 				onclick={() => page(-1)}
-				class="absolute left-1 top-1/2 flex h-9 w-9 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border bg-background text-foreground opacity-0 shadow-lg transition hover:scale-105 focus-visible:opacity-100 group-hover/shelf:opacity-100"
+				class="absolute left-1 top-1/2 flex h-9 w-9 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full plate text-foreground opacity-0 transition hover:scale-105 focus-visible:opacity-100 group-hover/shelf:opacity-100"
 			>
 				<HugeiconsIcon icon={ArrowLeft01Icon} class="h-4 w-4" />
 			</button>
@@ -251,7 +251,7 @@
 			<button
 				aria-label={t('a11y.scroll_right')}
 				onclick={() => page(1)}
-				class="absolute right-1 top-1/2 flex h-9 w-9 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border bg-background text-foreground opacity-0 shadow-lg transition hover:scale-105 focus-visible:opacity-100 group-hover/shelf:opacity-100"
+				class="absolute right-1 top-1/2 flex h-9 w-9 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full plate text-foreground opacity-0 transition hover:scale-105 focus-visible:opacity-100 group-hover/shelf:opacity-100"
 			>
 				<HugeiconsIcon icon={ArrowRight01Icon} class="h-4 w-4" />
 			</button>

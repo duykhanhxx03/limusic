@@ -8,6 +8,7 @@
 	// is already a shortcut before it gets here — otherwise this is the same eight items again in a
 	// different shape, which is exactly what it was.
 	import { HugeiconsIcon } from '@hugeicons/svelte';
+	import { imgReveal } from '$lib/imgreveal';
 	import {
 		PlayIcon,
 		MusicNote01Icon,
@@ -81,8 +82,8 @@
 						<img
 							src={thumb(item.thumbnail, 400)}
 							alt=""
-							class="h-full w-full object-cover"
-							loading="lazy"
+							class="h-full w-full object-cover transition-opacity duration-[var(--duration-fast)] ease-[var(--ease-in-out)]"
+							loading="lazy" {@attach imgReveal}
 							draggable="false"
 							onerror={() => (failed = { ...failed, [item.thumbnail!]: true })}
 						/>
@@ -122,7 +123,7 @@
 				/>
 				{#if !round}
 					<button
-						class="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-md transition-opacity hover:brightness-110 focus-visible:opacity-100 group-hover/row:opacity-100"
+						class="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground opacity-0 transition-opacity hover:brightness-110 focus-visible:opacity-100 group-hover/row:opacity-100"
 						class:animate-pulse={busy === item.id}
 						disabled={busy === item.id}
 						aria-label={t('a11y.play_item', { title: item.title })}

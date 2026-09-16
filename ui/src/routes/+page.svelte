@@ -63,14 +63,16 @@
 			.map((r) => freshen(r, library.items))
 	);
 
-	// Outlined at rest, filled with the accent when on. Grey-on-grey pills that go black when
+	// Tonal at rest, filled with the accent when on. Grey-on-grey pills that go black when
 	// selected are YouTube Music's chip row exactly, and they carry no colour of the app at all;
-	// this way the one active filter is the only saturated thing above the feed.
+	// this way the one active filter is the only saturated thing above the feed. The resting chip
+	// is a fill rather than an outline because the outline it used to carry measured 1.26:1
+	// against the page — so the chip was really being drawn by its label either way.
 	const chipClass = (active: boolean) =>
-		`shrink-0 cursor-pointer rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors ${
+		`shrink-0 cursor-pointer rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
 			active
-				? 'border-primary bg-primary text-primary-foreground'
-				: 'border-border text-muted-foreground hover:border-foreground/25 hover:text-foreground'
+				? 'bg-primary text-primary-foreground'
+				: 'bg-foreground/8 text-muted-foreground hover:bg-foreground/15 hover:text-foreground'
 		}`;
 
 	// "Forgotten favourites" is pulled out of the feed and rendered as a list above it (see the
@@ -84,6 +86,13 @@
 	let forgotten = $state<HomeSection | null>(null);
 	let seeking = $state(false); // walking continuations to find it — the slot shows a skeleton
 	const feed = $derived(home?.sections.filter((s) => !isForgotten(s)) ?? []);
+	/**
+	 * Which chip the *rendered* feed belongs to, as opposed to `selected`, which is the chip the
+	 * user last clicked. They differ for the length of one fetch, and during that window the old
+	 * feed is still what is on screen — so the layout must keep describing the old feed, not the
+	 * one still in flight. Updated wherever `home` is, never on the click.
+	 */
+	let rendered = $state<string | null>(null);
 
 	// --- the arrangement the user set in the Edit modal (personal.ts) ---------------------------
 	// The two sections the app builds itself get reserved keys — a YouTube shelf title can't start
@@ -102,7 +111,7 @@
 	 * restart) but rendered under a positional id, because a feed walked far enough does repeat one.
 	 */
 	const blocks = $derived.by(() => {
-		const local: Block[] = selected
+		const local: Block[] = rendered
 			? [] // a mood feed is the chip's: neither of ours belongs in it
 			: [
 					{ id: RECENT, key: RECENT, title: t('home.jump_back_in') },
@@ -202,12 +211,20 @@
 	}
 
 	async function load(params: string | null = selected) {
+		// A different chip is a different page, so it starts at the top. Without this the new feed
+		// renders underneath wherever the reader happened to be, and since each mood has its own
+		// number of shelves the page is a different length every time: the scroll position now
+		// points at unrelated content, or gets clamped and yanks the page. Instant, not smooth —
+		// animating the scroll while the feed swaps is two motions fighting over the same pixels.
+		const switching = params !== selected;
 		selected = params;
+		if (switching) scroller?.scrollTo({ top: 0 });
 		const key = params ? `home:${params}` : 'home';
 		const hit = getCached<HomePage>(key);
 		forgotten = params ? null : getCached<HomeSection>(FORGOTTEN_KEY);
 		if (hit) {
 			home = hit;
+			rendered = params;
 			loading = false;
 			noteForgotten();
 			cater(hit, params);
@@ -219,7 +236,16 @@
 			const fresh = await api.getHome(params ?? undefined);
 			// A stale response from a chip the user already clicked away from must not win.
 			if (selected !== params) return;
-			home = fresh;
+			// Only the *first* view of a feed renders the response. When the cache already answered,
+			// the reader is looking at a finished page, and swapping it for a revalidated one a
+			// second later is the "it loads again" everyone notices: YouTube reorders home between
+			// calls, so the new page is never quite the one they were reading, and if they had
+			// scrolled it also drops back to page one. The response still refreshes the cache, so
+			// the next visit gets it — which is what the cache's five-minute horizon is for.
+			if (!hit) {
+				home = fresh;
+				rendered = params;
+			}
 			putCached(key, fresh);
 			noteForgotten();
 			cater(fresh, params);
@@ -307,7 +333,18 @@
 		// on while the searches ran (a revalidation, or the Forgotten favourites crawl appending pages).
 		const idx = home?.sections.findIndex((s) => /community/i.test(s.title)) ?? -1;
 		if (idx < 0) return;
-		home = { ...home!, sections: home!.sections.map((s, i) => (i === idx ? { ...s, items } : s)) };
+		// Already carrying exactly this set — a revisit reading the same entry out of the cache, say.
+		// Reassigning `home` here would rebuild the feed for no change at all.
+		if (home!.sections[idx].items === items) return;
+		const catered = {
+			...home!,
+			sections: home!.sections.map((s, i) => (i === idx ? { ...s, items } : s))
+		};
+		home = catered;
+		// Cache the *catered* page, not the raw response. Otherwise every return to home replays
+		// this swap: the shelf paints YouTube's items first and is patched a frame later, which
+		// reads as the shelf reloading itself every single visit.
+		putCached('home', catered);
 	}
 
 	// Chips only refresh when a response actually carries them (never blank the row mid-switch).
@@ -333,7 +370,7 @@
 	     Opaque rather than blurred — a backdrop-filter repainting on every scroll frame is the one
 	     thing WebKitGTK reliably chokes on. -->
 	{#if chips.length}
-		<div class="sticky top-0 z-20 border-b bg-background px-6 pt-2.5">
+		<div class="sticky top-0 z-20 bg-background px-6 pt-2.5">
 			<div class="flex gap-2 overflow-x-auto pb-2">
 				<!-- An explicit "All" is the way out of a filter. Clicking the active chip again also
 				     clears it, but nobody discovers that, and nothing else on screen says you're filtered. -->
@@ -351,7 +388,7 @@
 	{:else if loading}
 		<!-- Hold the bar's height on a cold load: chips arrive with the feed, and popping them in
 		     afterwards shoves the whole page down under the cursor. -->
-		<div class="sticky top-0 z-20 border-b bg-background px-6 pt-2.5" aria-hidden="true">
+		<div class="sticky top-0 z-20 bg-background px-6 pt-2.5" aria-hidden="true">
 			<div class="flex gap-2 overflow-hidden pb-2">
 				{#each ['w-10', 'w-16', 'w-20', 'w-14', 'w-24', 'w-16'] as w, i (i)}
 					<Skeleton class="h-8 shrink-0 rounded-full {w}" />
@@ -363,8 +400,8 @@
 		<!-- Zone one: what's yours. The grid you arranged, above the rule that separates it from
 		     everything the app or YouTube chose. It steps aside entirely while a mood filter is
 		     active: none of it is filterable, and neither is the arrangement it edits. -->
-		{#if !selected}
-			<div class="mb-10 border-b pb-8">
+		{#if !rendered}
+			<div class="mb-10 hairline-b pb-8">
 				<Shortcuts onEdit={() => (editing = true)} />
 			</div>
 		{/if}
@@ -384,7 +421,11 @@
 		     instead of above them, and a drag in the Edit modal can put any of them anywhere.
 		     gap-10, not gap-8: with a heading, a row of cards and no rule between them, shelves any
 		     closer than this stop reading as separate sections. -->
-		<div class="content-in flex flex-col gap-10">
+		{#key rendered}
+			<div
+				class="flex flex-col gap-10"
+				in:fade={{ duration: 250 }}
+			>
 			{#each visible as block (block.id)}
 				{#if block.shelf}
 					<Shelf
@@ -452,7 +493,8 @@
 					</div>
 				{/if}
 			{/if}
-		</div>
+			</div>
+		{/key}
 	</div>
 </div>
 
@@ -462,7 +504,7 @@
 		transition:fade={{ duration: 150 }}
 		onclick={() => scroller?.scrollTo({ top: 0, behavior: 'smooth' })}
 		aria-label={t('a11y.back_to_top')}
-		class="fixed right-6 z-10 flex h-11 w-11 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-110 {playback.now
+		class="fixed right-6 z-10 flex h-11 w-11 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform hover:scale-110 {playback.now
 			? 'bottom-24'
 			: 'bottom-6'}"
 	>

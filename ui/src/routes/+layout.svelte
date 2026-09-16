@@ -223,7 +223,7 @@
 	{#if updateState.available}
 		<div
 			transition:fly={{ y: 16, duration: 220, easing: cubicOut }}
-			class="fixed bottom-24 left-1/2 z-[100] flex -translate-x-1/2 items-center gap-3 rounded-lg border bg-card px-4 py-2 text-sm shadow-lg"
+			class="fixed bottom-24 left-1/2 z-[100] flex -translate-x-1/2 items-center gap-3 rounded-lg glass px-4 py-2 text-sm"
 		>
 			<span>{t('settings.about.update_available', { version: updateState.available.version })}</span>
 			{#if updateState.canInstall}
@@ -248,8 +248,9 @@
 	{#if ui.toast}
 		{@const t = ui.toast}
 		<div
-			transition:fly={{ y: 16, duration: 220, easing: cubicOut }}
-			class="fixed bottom-40 left-1/2 z-[100] flex -translate-x-1/2 items-center gap-2 rounded-lg border bg-card px-4 py-2 text-sm shadow-lg"
+			in:fly={{ y: 16, duration: 150, easing: cubicOut }}
+			out:fly={{ y: 16, duration: 350, easing: cubicOut }}
+			class="fixed bottom-40 left-1/2 z-[100] flex -translate-x-1/2 items-center gap-2 rounded-lg glass px-4 py-2 text-sm"
 		>
 			<!-- Three branches instead of a ternary on `icon`: HugeiconsIcon freezes `icon` at mount, so a
 			     new toast replacing a visible one would keep the old glyph. -->

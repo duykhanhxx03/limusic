@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/svelte';
+	import { imgReveal } from '$lib/imgreveal';
 	import {
 		FavouriteIcon,
 		MusicNote01Icon,
@@ -227,7 +228,7 @@
 			{/if}
 			{#if !hideThumb}
 				{#if song.thumbnail}
-					<img src={thumb(song.thumbnail, 96)} alt="" class="h-10 w-10 shrink-0 rounded-md object-cover" loading="lazy" />
+					<img src={thumb(song.thumbnail, 96)} alt="" class="h-10 w-10 shrink-0 rounded-md object-cover transition-opacity duration-[var(--duration-fast)] ease-[var(--ease-in-out)]" loading="lazy" {@attach imgReveal} />
 				{:else}
 					<!-- An untagged file has no artwork of its own. A music note keeps the row aligned
 					     with its neighbours and says so plainly. -->
@@ -275,7 +276,7 @@
 				alt=""
 				title={t('library.added_by', { user: song.added_by ?? '' })}
 				class="h-5 w-5 shrink-0 rounded-full object-cover"
-				loading="lazy"
+				loading="lazy" {@attach imgReveal}
 			/>
 		{/if}
 		<!-- Both marks are always on, unlike the thumbs beside them: they are properties of the song,

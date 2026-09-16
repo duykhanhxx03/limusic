@@ -1,5 +1,6 @@
 <script lang="ts">
     import { page } from "$app/state";
+    import { imgReveal } from "$lib/imgreveal";
     import { goto } from "$app/navigation";
     import { HugeiconsIcon } from "@hugeicons/svelte";
     import {
@@ -242,11 +243,14 @@
         {#if album.thumbnail}
             <!-- Blurred backdrop: blur-2xl destroys any detail a bigger source would carry, so
                  ask for the smallest thing that still reads as the cover's colours. -->
-            <img
-                src={thumb(album.thumbnail, 96)}
-                alt=""
-                class="absolute inset-0 h-full w-full art-wash scale-110 object-cover opacity-50 blur-2xl"
-            />
+            {#key album.thumbnail}
+                <img
+                    src={thumb(album.thumbnail, 96)}
+                    alt=""
+                    class="absolute inset-0 h-full w-full art-wash scale-110 object-cover opacity-50 blur-2xl"
+                    {@attach imgReveal}
+                />
+            {/key}
         {/if}
         <div
             class="absolute inset-0 bg-gradient-to-t from-background via-background/75 to-background/40"
@@ -261,12 +265,15 @@
                 <!-- Inline width/height so the size holds even against a stale dev-server CSS that -->
                 <!-- hasn't regenerated a newly-used spacing utility (would fall back to intrinsic size). -->
                 {#if album.thumbnail}
-                    <img
-                        src={thumb(album.thumbnail, 400)}
-                        alt=""
-                        style="width:7rem;height:7rem"
-                        class="shrink-0 rounded-xl object-cover shadow-2xl"
-                    />
+                    {#key album.thumbnail}
+                        <img
+                            src={thumb(album.thumbnail, 400)}
+                            alt=""
+                            style="width:7rem;height:7rem"
+                            class="shrink-0 rounded-xl bg-muted object-cover transition-opacity duration-[var(--duration-fast)] ease-[var(--ease-in-out)]"
+                            {@attach imgReveal}
+                        />
+                    {/key}
                 {:else}
                     <div
                         style="width:7rem;height:7rem"
@@ -280,7 +287,7 @@
                         {album.subtitle ?? "Album"}
                     </div>
                     <h1
-                        class="mt-1 font-heading text-4xl font-bold tracking-tight drop-shadow"
+                        class="mt-1 font-heading text-4xl font-bold tracking-tight"
                     >
                         {album.title ?? "Album"}
                     </h1>
@@ -343,7 +350,7 @@
                     <HugeiconsIcon icon={PlayIcon} class="h-4 w-4" /> {t("player.play")}
                 </button>
                 <button
-                    class="flex cursor-pointer items-center gap-2 rounded-full border px-5 py-2.5 text-sm font-semibold transition hover:bg-accent/10 disabled:opacity-50"
+                    class="flex cursor-pointer items-center gap-2 rounded-full bg-foreground/10 px-5 py-2.5 text-sm font-semibold transition hover:bg-foreground/20 disabled:opacity-50"
                     onclick={shuffle}
                     disabled={!album.items.length}
                 >
@@ -353,9 +360,9 @@
                      in or not. -->
                 {#if !isLocal}
                     <button
-                        class="flex cursor-pointer items-center gap-2 rounded-full border px-5 py-2.5 text-sm font-semibold transition hover:bg-accent/10 disabled:opacity-50"
-                        class:border-primary={inLibrary}
-                        class:text-primary={inLibrary}
+                        class="flex cursor-pointer items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition disabled:opacity-50 {inLibrary
+                            ? 'bg-primary/25 text-primary'
+                            : 'bg-foreground/10 hover:bg-foreground/20'}"
                         onclick={toggleLibrary}
                         disabled={savingLibrary}
                     >
@@ -371,10 +378,10 @@
                 {/if}
                 <TrackSelectButton
                     {selection}
-                    class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border transition hover:bg-accent/10 hover:text-foreground"
+                    class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-foreground/10 transition hover:bg-foreground/20 hover:text-foreground"
                 />
                 <button
-                    class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border text-muted-foreground transition hover:bg-accent/10 hover:text-foreground"
+                    class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-foreground/10 text-muted-foreground transition hover:bg-foreground/20 hover:text-foreground"
                     onclick={openMenu}
                     aria-label={t("a11y.more_options")}
                 >
@@ -395,7 +402,7 @@
                         {@attach toBody}
                     ></button>
                     <div
-                        class="fixed z-50 min-w-48 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95"
+                        class="fixed z-50 min-w-48 animate-in rounded-lg glass p-1 text-popover-foreground duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] fade-in-0 zoom-in-[0.97]"
                         style={anchor.style}
                         {@attach toBody}
                         {@attach fitMenu(anchor)}
@@ -501,7 +508,7 @@
     <!-- Other versions of this release, and what sits near it. Ruled off from the tracks so the
          page reads as the album first and its surroundings second. -->
     {#if album.sections?.length}
-        <div class="content-in mt-2 flex flex-col gap-8 border-t px-6 pb-8 pt-8">
+        <div class="content-in mt-2 flex flex-col gap-8 hairline-t px-6 pb-8 pt-8">
             {#each album.sections as section, i (i + ":" + section.title)}
                 <Shelf
                     title={section.title}

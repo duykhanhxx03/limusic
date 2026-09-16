@@ -3,6 +3,7 @@
 	// play / add-to-playlist. Wider than a MediaCard, so the shelf stretches these instead of
 	// packing more of them per row (see Shelf's `community` prop).
 	import { goto } from '$app/navigation';
+	import { imgReveal } from '$lib/imgreveal';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import { PlayIcon, PlayListAddIcon, MusicNote01Icon } from '@hugeicons/core-free-icons';
 	import { Skeleton } from '$lib/components/ui/skeleton';
@@ -87,11 +88,11 @@
 <div
 	bind:this={root}
 	data-ctx
-	class="group relative flex h-full min-w-0 flex-col gap-2 rounded-2xl border bg-card/40 p-2.5 transition-colors hover:border-foreground/20 hover:bg-card"
+	class="group relative flex h-full min-w-0 flex-col gap-2 rounded-2xl bg-card/40 p-2.5 transition-colors hover:bg-card"
 >
 	<ItemMenu
 		{item}
-		triggerClass="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-background/90 text-foreground opacity-0 shadow-md transition hover:bg-background focus-visible:opacity-100 group-hover:opacity-100 cursor-pointer"
+		triggerClass="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-background/90 text-foreground opacity-0 transition hover:bg-background focus-visible:opacity-100 group-hover:opacity-100 cursor-pointer"
 	/>
 	<!-- A div, not a button: `ctxHost` treats a nested <button> as its own thing and would leave the
 	     card's whole cover-and-title block without a right-click menu. -->
@@ -118,15 +119,15 @@
 			{#if mosaic.length === 4}
 				<div class="grid h-full w-full grid-cols-2 grid-rows-2">
 					{#each mosaic as m (m)}
-						<img src={thumb(m, 200)} alt="" class="h-full w-full object-cover" loading="lazy" />
+						<img src={thumb(m, 200)} alt="" class="h-full w-full object-cover transition-opacity duration-[var(--duration-fast)] ease-[var(--ease-in-out)]" loading="lazy" {@attach imgReveal} />
 					{/each}
 				</div>
 			{:else if cover}
 				<img
 					src={thumb(cover, 400)}
 					alt=""
-					class="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-105"
-					loading="lazy"
+					class="h-full w-full object-cover transition-[transform,opacity] duration-[var(--duration-fast)] ease-[var(--ease-smooth-out)] group-hover:scale-105"
+					loading="lazy" {@attach imgReveal}
 				/>
 			{:else}
 				<div class="flex h-full w-full items-center justify-center text-muted-foreground/50">
@@ -156,7 +157,7 @@
 							src={thumb(t.thumbnail, 100)}
 							alt=""
 							class="h-8 w-8 shrink-0 rounded-md bg-muted object-cover"
-							loading="lazy"
+							loading="lazy" {@attach imgReveal}
 						/>
 					{:else}
 						<div class="h-8 w-8 shrink-0 rounded-md bg-muted"></div>
@@ -195,7 +196,7 @@
 			aria-label={t('a11y.play')}
 			disabled={busy}
 			class:animate-pulse={busy}
-			class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md transition hover:brightness-110"
+			class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground transition hover:brightness-110"
 			onclick={() => act((p) => playFrom(item, p.items, null, item.id, undefined, p.continuation))}
 		>
 			<HugeiconsIcon icon={PlayIcon} class="h-3.5 w-3.5" />
@@ -203,7 +204,7 @@
 		<button
 			aria-label={t('player.add_to_playlist')}
 			disabled={busy}
-			class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border text-foreground transition-colors hover:bg-accent/10"
+			class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-foreground/10 text-foreground transition-colors hover:bg-foreground/20"
 			onclick={() => act((p) => openAddManyToPlaylist(p.items))}
 		>
 			<HugeiconsIcon icon={PlayListAddIcon} class="h-3.5 w-3.5" />

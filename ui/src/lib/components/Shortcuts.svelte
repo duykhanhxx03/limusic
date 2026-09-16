@@ -110,7 +110,7 @@
 				<button
 					onclick={onEdit}
 					title={t('home.edit_home')}
-					class="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1 text-sm font-medium text-muted-foreground transition-colors hover:border-foreground/20 hover:bg-muted hover:text-foreground"
+					class="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-muted/60 px-2.5 py-1 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 				>
 					<HugeiconsIcon icon={Edit01Icon} class="h-4 w-4" />
 					{t('home.edit_home')}
@@ -151,13 +151,13 @@
 			     space by being a single line and an obvious place to drop something. -->
 			<button
 				onclick={() => (picking = true)}
-				class="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-dashed p-4 text-left transition-colors hover:border-foreground/30 hover:bg-accent/5 {before ===
+				class="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-dashed border-foreground/25 p-4 text-left transition-colors hover:border-foreground/40 hover:bg-accent/5 {before ===
 				null
 					? 'border-primary bg-accent/5'
 					: ''}"
 			>
 				<span
-					class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-dashed text-muted-foreground"
+					class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-dashed border-foreground/25 text-muted-foreground"
 				>
 					<HugeiconsIcon icon={Add01Icon} class="h-5 w-5" />
 				</span>
@@ -180,7 +180,7 @@
 							<div class="absolute -left-1 bottom-0 top-0 z-20 w-0.5 rounded-full bg-primary"></div>
 						{/if}
 						<div
-							class="flex h-16 cursor-pointer items-center gap-3 overflow-hidden rounded-xl border bg-card/40 text-left transition-colors hover:border-foreground/20 hover:bg-card"
+							class="flex h-16 cursor-pointer items-center gap-3 overflow-hidden rounded-xl bg-card text-left transition-colors hover:bg-muted"
 							role="button"
 							tabindex="0"
 							draggable="true"

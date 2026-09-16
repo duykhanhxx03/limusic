@@ -18,7 +18,7 @@
 	import { onMount } from 'svelte';
 	import { beforeNavigate } from '$app/navigation';
 	import { fade, fly, scale } from 'svelte/transition';
-	import { cubicOut } from 'svelte/easing';
+	import { cubicOut, quintOut } from 'svelte/easing';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import {
 		Cancel01Icon,
@@ -274,7 +274,8 @@
      which have to stay reachable from in here: Ctrl+K opened the palette behind this view. -->
 <!-- svelte-ignore a11y_no_static_element_interactions -- wheel is the volume gesture, move only wakes the chrome -->
 <section
-	transition:fade={{ duration: 220 }}
+	in:fade={{ duration: 400, easing: quintOut }}
+	out:fade={{ duration: 350, easing: quintOut }}
 	onwheel={wheelVolume}
 	onpointermove={wake}
 	class="theater fixed inset-0 z-40 flex flex-col overflow-hidden bg-background text-foreground {idle
@@ -327,7 +328,7 @@
 		</div>
 		<button
 			onclick={close}
-			class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border border-border/50 bg-card/70 text-muted-foreground transition-colors hover:bg-card hover:text-foreground"
+			class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-card/70 text-muted-foreground transition-colors hover:bg-card hover:text-foreground"
 			title="{t('player.exit_theater')} (Esc)"
 			aria-label={t('player.exit_theater')}
 		>

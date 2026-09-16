@@ -7,6 +7,7 @@
 	// The sheets are full-size siblings behind an opaque cover, scaled narrower and lifted, so only
 	// their top strips are ever visible. Transform-only, so the fan composites.
 	import { HugeiconsIcon } from '@hugeicons/svelte';
+	import { imgReveal } from '$lib/imgreveal';
 	import { PlayIcon, MusicNote01Icon, ListRestartIcon } from '@hugeicons/core-free-icons';
 	import { ON_REPEAT_ID } from '$lib/api';
 	import type { BrowseItem } from '$lib/api';
@@ -63,10 +64,10 @@
 	>
 		<div class="relative aspect-square w-full">
 			<div
-				class="absolute inset-0 origin-bottom -translate-y-[7px] scale-x-[0.84] rounded-xl bg-muted-foreground/15 transition-transform duration-300 ease-out group-hover:-translate-y-[13px]"
+				class="absolute inset-0 origin-bottom -translate-y-[7px] scale-x-[0.84] rounded-xl bg-muted-foreground/15 transition-transform duration-[var(--duration-fast)] ease-[var(--ease-smooth-out)] group-hover:-translate-y-[13px]"
 			></div>
 			<div
-				class="absolute inset-0 origin-bottom -translate-y-[3px] scale-x-[0.92] rounded-xl bg-muted-foreground/25 transition-transform duration-300 ease-out group-hover:-translate-y-[7px]"
+				class="absolute inset-0 origin-bottom -translate-y-[3px] scale-x-[0.92] rounded-xl bg-muted-foreground/25 transition-transform duration-[var(--duration-fast)] ease-[var(--ease-smooth-out)] group-hover:-translate-y-[7px]"
 			></div>
 			<!-- No resting shadow: see MediaCard. The sheet edges above are what gives the card
 			     its depth, and they cost a transform instead of a gaussian blur per card. -->
@@ -75,8 +76,8 @@
 					<img
 						{src}
 						alt=""
-						class="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
-						loading="lazy"
+						class="h-full w-full object-cover transition-[transform,opacity] duration-[var(--duration-fast)] ease-[var(--ease-smooth-out)] group-hover:scale-105"
+						loading="lazy" {@attach imgReveal}
 						draggable="false"
 						onerror={imgFailed}
 					/>
@@ -96,7 +97,7 @@
 					</div>
 				{/if}
 				<button
-					class="absolute bottom-2 right-2 flex h-9 w-9 translate-y-1 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition-[opacity,transform] duration-200 ease-out focus-visible:opacity-100 group-hover:translate-y-0 group-hover:opacity-100"
+					class="absolute bottom-2 right-2 flex h-9 w-9 translate-y-1 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground opacity-0 transition-[opacity,transform] duration-200 ease-out focus-visible:opacity-100 group-hover:translate-y-0 group-hover:opacity-100"
 					class:animate-pulse={busy}
 					disabled={busy}
 					aria-label={t('a11y.play_item', { title: item.title })}
@@ -118,6 +119,6 @@
 	</div>
 	<PlaylistMenu
 		{item}
-		triggerClass="absolute right-2 top-6 flex h-8 w-8 items-center justify-center rounded-full bg-background/90 text-foreground opacity-0 shadow-md transition hover:bg-background focus-visible:opacity-100 group-hover:opacity-100 cursor-pointer z-10"
+		triggerClass="absolute right-2 top-6 flex h-8 w-8 items-center justify-center rounded-full bg-background/90 text-foreground opacity-0 transition hover:bg-background focus-visible:opacity-100 group-hover:opacity-100 cursor-pointer z-10"
 	/>
 </div>

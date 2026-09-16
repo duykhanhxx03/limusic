@@ -96,8 +96,9 @@ export function anchorMenu(e: Event, { align = 'left' }: { align?: 'left' | 'rig
 export function fitMenu(a: Anchor) {
 	return (el: HTMLElement) => {
 		el.style.cssText = `${UNPLACED};left:0;top:0;right:auto;bottom:auto`;
-		// offset*, not a client rect: the popup opens under a `zoom-in-95` animation, and a client
-		// rect is the *transformed* box, so it would report 95% of the real size.
+		// offset*, not a client rect: the popup opens under a zoom-in animation (the dropdown
+		// pre-scale, --scale-medium), and a client rect is the *transformed* box, so it would
+		// report the menu smaller than it really is.
 		const { offsetWidth, offsetHeight } = el;
 		el.style.cssText = place(a, offsetWidth, offsetHeight);
 	};

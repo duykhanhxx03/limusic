@@ -271,7 +271,7 @@
 	{/if}
 </div>
 {#if lyrics && !loading && !compact}
-	<p class="border-t px-4 py-2 text-xs text-muted-foreground">
+	<p class="hairline-t px-4 py-2 text-xs text-muted-foreground">
 		{lyrics.source.startsWith('Source:') ? lyrics.source : `Lyrics from ${lyrics.source}`}
 	</p>
 {/if}

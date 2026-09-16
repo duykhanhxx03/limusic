@@ -194,7 +194,7 @@
 						}}
 						title={top.name ?? t('common.artist_singular')}
 					>
-						<div class="h-full w-full transition-transform duration-500 ease-out group-hover:scale-[1.05]">
+						<div class="h-full w-full transition-transform duration-[var(--duration-fast)] ease-[var(--ease-smooth-out)] group-hover:scale-[1.05]">
 							{@render avatar(top, 'h-10 w-10')}
 						</div>
 						<div

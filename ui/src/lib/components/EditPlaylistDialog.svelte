@@ -135,7 +135,7 @@
 				<div class="flex shrink-0 flex-col items-center gap-1.5">
 					<button
 						type="button"
-						class="group relative h-32 w-32 cursor-pointer overflow-hidden rounded-xl border bg-muted"
+						class="group relative h-32 w-32 cursor-pointer overflow-hidden rounded-xl bg-muted"
 						onclick={pickCover}
 						aria-label={t('dialogs.edit_playlist.change_cover')}
 					>
@@ -175,11 +175,11 @@
 						placeholder={t('dialogs.edit_playlist.desc_placeholder')}
 						aria-label={t('dialogs.edit_playlist.desc_label')}
 						rows="4"
-						class="w-full flex-1 resize-none rounded-2xl border border-input bg-input/30 px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+						class="w-full flex-1 resize-none rounded-2xl bg-input px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-[3px] focus-visible:ring-ring"
 					></textarea>
 				</div>
 			</div>
-			<div class="flex items-center justify-between gap-4 rounded-2xl border px-3 py-2.5">
+			<div class="flex items-center justify-between gap-4 rounded-2xl bg-muted px-3 py-2.5">
 				<div class="min-w-0">
 					<div class="text-sm font-medium">{t('common.public')}</div>
 					<p class="text-xs text-muted-foreground">

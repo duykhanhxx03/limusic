@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { HugeiconsIcon } from '@hugeicons/svelte';
+	import { imgReveal } from '$lib/imgreveal';
 	import {
 		PlayIcon,
 		MusicNote01Icon,
@@ -88,7 +89,7 @@
 		     A wrapper, because the shadow has to paint outside a box that the cover below clips. -->
 		<div class="relative">
 			<div
-				class="pointer-events-none absolute inset-0 opacity-0 shadow-xl transition-opacity duration-300 group-hover:opacity-100 {round
+				class="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover:opacity-100 {round
 					? 'rounded-full'
 					: 'rounded-lg'}"
 			></div>
@@ -108,8 +109,8 @@
 						{src}
 						{srcset}
 						alt=""
-						class="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-105"
-						loading="lazy"
+						class="h-full w-full object-cover transition-[transform,opacity] duration-[var(--duration-fast)] ease-[var(--ease-smooth-out)] group-hover:scale-105"
+						loading="lazy" {@attach imgReveal}
 						draggable="false"
 						onerror={imgFailed}
 					/>
@@ -138,7 +139,7 @@
 					<!-- transition-[opacity,transform], not transition-all: opacity and translate are the
 					     only things that change, and both composite. -->
 					<button
-						class="absolute flex translate-y-1 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition-[opacity,transform] duration-200 ease-out group-hover:translate-y-0 group-hover:opacity-100 focus-visible:opacity-100 {compact
+						class="absolute flex translate-y-1 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground opacity-0 transition-[opacity,transform] duration-200 ease-out group-hover:translate-y-0 group-hover:opacity-100 focus-visible:opacity-100 {compact
 							? 'bottom-1.5 right-1.5 h-7 w-7'
 							: 'bottom-2 right-2 h-9 w-9'}"
 						class:animate-pulse={playing}
@@ -175,6 +176,6 @@
 	     hovered. At 90% over artwork there is nothing left to blur that you can see. -->
 	<ItemMenu
 		{item}
-		triggerClass="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-background/90 text-foreground opacity-0 shadow-md transition hover:bg-background focus-visible:opacity-100 group-hover:opacity-100 cursor-pointer"
+		triggerClass="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-background/90 text-foreground opacity-0 transition hover:bg-background focus-visible:opacity-100 group-hover:opacity-100 cursor-pointer"
 	/>
 </div>

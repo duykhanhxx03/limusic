@@ -13,7 +13,7 @@
 	bind:ref
 	data-slot="radio-group-item"
 	class={cn(
-		"border-input text-primary focus-visible:border-ring focus-visible:ring-ring/50 aspect-square size-4 shrink-0 cursor-pointer rounded-full border shadow-xs outline-none transition focus-visible:ring-[3px] data-checked:border-primary data-disabled:cursor-not-allowed data-disabled:opacity-50",
+		"border-foreground/35 text-primary focus-visible:border-ring focus-visible:ring-ring aspect-square size-4 shrink-0 cursor-pointer rounded-full border outline-none transition focus-visible:ring-[3px] data-checked:border-primary data-disabled:cursor-not-allowed data-disabled:opacity-50",
 		className
 	)}
 	{...restProps}

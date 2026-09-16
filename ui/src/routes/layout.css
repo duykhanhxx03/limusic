@@ -31,7 +31,12 @@
 	/* Hue of the artwork tint, written by theme.svelte.ts. Only the `.art-tint` rules read it; the
 	   default here just keeps those rules valid if the class ever outlives the variable. */
 	--art-h: 326;
-	--background: oklch(1 0 0);
+	/* The page is a canvas, the surfaces sit on it. This used to be pure white with --card also
+	   pure white, so a card, the titlebar, the sidebar and the player bar all measured 1.000
+	   against the page — the same colour — and only a shadow told them apart. 0.962 puts the step
+	   at 1.118, which is what dark mode has always had and what every preset palette here already
+	   does (catppuccin 1.131, tokyonight 1.175). Tone does the separating now; nothing casts. */
+	--background: oklch(0.962 0.004 var(--hue));
 	--foreground: oklch(0.145 0.008 var(--hue));
 	--card: oklch(1 0 0);
 	--card-foreground: oklch(0.145 0.008 var(--hue));
@@ -39,30 +44,35 @@
 	--popover-foreground: oklch(0.145 0.008 var(--hue));
 	--primary: oklch(0.514 0.222 16.935);
 	--primary-foreground: oklch(0.969 0.015 12.422);
-	--secondary: oklch(0.967 0.001 var(--hue));
+	--secondary: oklch(0.925 0.004 var(--hue));
 	--secondary-foreground: oklch(0.21 0.006 var(--hue));
-	--muted: oklch(0.96 0.003 var(--hue));
+	/* A well *inside* a white surface, so it has to clear the page as well as the card: 1.270
+	   against white and 1.136 against the page. */
+	--muted: oklch(0.92 0.006 var(--hue));
 	--muted-foreground: oklch(0.542 0.034 var(--hue));
 	--accent: oklch(0.514 0.222 16.935);
 	--accent-foreground: oklch(0.969 0.015 12.422);
 	--destructive: oklch(0.577 0.245 27.325);
 	--border: oklch(0.922 0.005 var(--hue));
-	--input: oklch(0.922 0.005 var(--hue));
-	--ring: oklch(0.711 0.019 var(--hue));
+	--input: oklch(0.9 0.008 var(--hue));
+	/* 0.60, not shadcn's 0.711: a focus ring at 0.711 measures 2.59:1 on white, so the one
+	   affordance a keyboard user navigates by was the least visible thing on screen. 0.60 is
+	   3.98:1 — and `ring-ring/50` halves that again, which is why the base has margin. */
+	--ring: oklch(0.6 0.019 var(--hue));
 	--chart-1: oklch(0.828 0.111 230.318);
 	--chart-2: oklch(0.685 0.169 237.323);
 	--chart-3: oklch(0.588 0.158 241.966);
 	--chart-4: oklch(0.5 0.134 242.749);
 	--chart-5: oklch(0.443 0.11 240.79);
 	--radius: 0.45rem;
-	--sidebar: oklch(0.985 0 0);
+	--sidebar: oklch(1 0 0);
 	--sidebar-foreground: oklch(0.145 0.008 var(--hue));
 	--sidebar-primary: oklch(0.586 0.253 17.585);
 	--sidebar-primary-foreground: oklch(0.969 0.015 12.422);
-	--sidebar-accent: oklch(0.96 0.003 var(--hue));
+	--sidebar-accent: oklch(0.92 0.006 var(--hue));
 	--sidebar-accent-foreground: oklch(0.212 0.019 var(--hue));
 	--sidebar-border: oklch(0.922 0.005 var(--hue));
-	--sidebar-ring: oklch(0.711 0.019 var(--hue));
+	--sidebar-ring: oklch(0.6 0.019 var(--hue));
 	--font-sans: 'Oxanium Variable', sans-serif;
 	--font-heading: 'IBM Plex Sans Variable', sans-serif;
 	--font-serif: ui-serif, Georgia, serif;
@@ -95,8 +105,10 @@
 	--accent-foreground: oklch(0.969 0.015 12.422);
 	--destructive: oklch(0.704 0.191 22.216);
 	--border: oklch(1 0 0 / 10%);
-	--input: oklch(1 0 0 / 15%);
-	--ring: oklch(0.542 0.034 var(--hue));
+	/* 15% over --card measured 1.57:1, which read as no field at all on a dark surface. */
+	--input: oklch(1 0 0 / 22%);
+	/* 3.88:1 at 0.542, 4.55:1 here — same reasoning as the light ring above. */
+	--ring: oklch(0.58 0.034 var(--hue));
 	--chart-1: oklch(0.828 0.111 230.318);
 	--chart-2: oklch(0.685 0.169 237.323);
 	--chart-3: oklch(0.588 0.158 241.966);
@@ -109,7 +121,7 @@
 	--sidebar-accent: oklch(0.263 0.024 var(--hue));
 	--sidebar-accent-foreground: oklch(0.985 0 0);
 	--sidebar-border: oklch(1 0 0 / 10%);
-	--sidebar-ring: oklch(0.542 0.034 var(--hue));
+	--sidebar-ring: oklch(0.58 0.034 var(--hue));
 }
 
 /* --- Full-palette preset themes ---
@@ -535,13 +547,13 @@
    Chroma is what makes it visible: the default palette's neutrals sit at 0.003-0.034, which reads
    as grey. Turn the numbers here down together if a saturated cover is too much. */
 html.art-tint:not(.dark) {
-	--background: oklch(0.985 0.014 var(--art-h));
+	--background: oklch(0.948 0.02 var(--art-h));
 	--card: oklch(0.995 0.01 var(--art-h));
 	--popover: oklch(0.995 0.01 var(--art-h));
-	--secondary: oklch(0.945 0.03 var(--art-h));
-	--muted: oklch(0.945 0.028 var(--art-h));
-	--sidebar: oklch(0.965 0.022 var(--art-h));
-	--sidebar-accent: oklch(0.935 0.035 var(--art-h));
+	--secondary: oklch(0.908 0.032 var(--art-h));
+	--muted: oklch(0.905 0.03 var(--art-h));
+	--sidebar: oklch(0.995 0.01 var(--art-h));
+	--sidebar-accent: oklch(0.9 0.035 var(--art-h));
 }
 
 html.art-tint.dark {
@@ -550,8 +562,104 @@ html.art-tint.dark {
 	--popover: oklch(0.225 0.038 var(--art-h));
 	--secondary: oklch(0.285 0.04 var(--art-h));
 	--muted: oklch(0.275 0.042 var(--art-h));
-	--sidebar: oklch(0.195 0.032 var(--art-h));
+	--sidebar: oklch(0.225 0.038 var(--art-h));
 	--sidebar-accent: oklch(0.275 0.042 var(--art-h));
+}
+
+/* --- Surfaces ---
+   What replaces borders, and what replaces the shadows that replaced them.
+
+   A 1px --border line measured 1.26:1 against --background and 1.33:1 against --card
+   (scratchpad/contrast.py) — below the 3:1 WCAG asks of a UI edge, and well under what a WebKitGTK
+   subpixel line survives at fractional zoom. So the seams were noise that separated nothing, and
+   they went. Elevation shadows replaced them, and those went too: they are a look, and this app
+   does not want it.
+
+   What is left is tone, which means the palette has to carry real steps — see the note on
+   --background, which used to be the same pure white as --card and is now 1.118 against it, the
+   step dark mode and every preset palette here already had. A surface is lighter (dark mode) or
+   whiter (light mode) than what it sits on, and that is the whole system. Nothing casts, nothing
+   is outlined, except the one rim below.
+
+   Everything derives from --popover / --card, so these follow the selected palette *and* the
+   artwork tint (html.art-tint rewrites those fills) without adding a single new inherited custom
+   property. That matters: #217 is exactly the bug where root properties that change per track
+   restyle the whole document, so the tint set is deliberately kept to flat fills and nothing here
+   widens it. The per-mode knobs below key off `.dark`, which every palette already carries. */
+:root {
+	/* How much of a glass pane is fill. With nothing blurring the backdrop this is the only thing
+	   standing between the panel's text and the page's, so it is high. 94% was tried first and a
+	   heading behind a menu was still faintly readable through it, which is the exact failure this
+	   is meant to avoid; at 96% the backdrop comes through as a tint on artwork — where the
+	   contrast is high enough to tint with — and as nothing at all on text. */
+	--glass-opacity: 96%;
+	--glass-opacity-strong: 98%; /* dialogs and menus — the densest text in the app */
+	/* The one outline left in the app. A floating overlay lands on arbitrary content — a black
+	   cover, a white one — and a tonal step only separates it from one of them, so this is what
+	   holds its edge on the other. Nothing docked or in-flow gets one. */
+	--glass-rim: oklch(0.145 0.008 var(--hue) / 12%);
+}
+
+.dark {
+	/* The dark pane's worst case is the mirror — a dark fill over a bright cover — and it holds up
+	   better there, so it can afford to show a little more. */
+	--glass-opacity: 95%;
+	--glass-opacity-strong: 97%;
+	--glass-rim: oklch(1 0 0 / 10%);
+}
+
+/* A floating overlay — dialog, menu, popover, the queue and lyrics panels, the toasts.
+
+   No `backdrop-filter`. That was the first thing tried here and it does nothing on this app's main
+   target: WebKitGTK ignored it on both its software and its GPU path (checked 2026-09-16 on
+   WebKitGTK 2.5x, X11 and with /dev/dri present — dropping the pane to 45% opacity made the page
+   behind it plainly *more* visible, and every line of it stayed sharp). `@supports` cannot gate
+   that, because the property parses fine and is simply not painted, so a filter left in would cost
+   on the platforms that do implement it while the platform most users are on got a pane you can
+   see straight through — the worst of both. This codebase had already reached the same conclusion
+   three separate times from the performance side (MediaCard's hover plate, the home sticky header,
+   TheaterMode); this is the same call from the rendering side.
+
+   So the glass is a fill that is *nearly* opaque plus a rim. The few percent of translucency is
+   what keeps it feeling layered — the backdrop reads as a tint rather than as text competing with
+   the panel's own, which is the failure mode of transparent-but-not-blurred. */
+@utility glass {
+	background-color: color-mix(in oklab, var(--popover) var(--glass-opacity), transparent);
+	box-shadow: inset 0 0 0 1px var(--glass-rim);
+}
+
+/* The same surface for the densest text — a settings dialog, a long menu — where those last few
+   percent of fill are worth more than the hint of what is behind. */
+@utility glass-strong {
+	background-color: color-mix(in oklab, var(--popover) var(--glass-opacity-strong), transparent);
+	box-shadow: inset 0 0 0 1px var(--glass-rim);
+}
+
+/* `glass` with no translucency at all, for the surfaces that sit directly on artwork — the
+   now-playing volume flash, and anything else that lands on a picture rather than on the page.
+   A few percent of bleed-through reads as a tint over a flat page and as dirt over a photograph,
+   and these have to stay legible against whatever the cover happens to be. */
+@utility plate {
+	background-color: var(--popover);
+	box-shadow: inset 0 0 0 1px var(--glass-rim);
+}
+
+/* An edge that has to stay an edge — a dialog header, a settings-row separator, the rule between
+   what you arranged on home and what the app chose — where removing it would let two lists run
+   together. There are about a dozen of these left, down from the ~200 borders the app had.
+
+   20% of --foreground, which is 1.57:1 on a white card and 1.86:1 on a dark one, against the
+   1.26:1 / 1.33:1 that --border managed. Still deliberately below the 3:1 WCAG asks of a *control*
+   boundary: none of these identify a control, they group content, and a separator at 3:1 is a rule
+   that competes with the text on either side of it. The point of deriving it from --foreground
+   rather than from --border is that it holds that ratio on every palette — tokyonight's own border
+   token measured 1.08:1 against its sidebar. */
+@utility hairline-b {
+	box-shadow: inset 0 -1px 0 0 color-mix(in oklab, var(--foreground) 20%, transparent);
+}
+
+@utility hairline-t {
+	box-shadow: inset 0 1px 0 0 color-mix(in oklab, var(--foreground) 20%, transparent);
 }
 
 @theme inline {
@@ -559,6 +667,8 @@ html.art-tint.dark {
 	--font-heading: var(--font-heading);
 	--font-serif: var(--font-serif);
 	--font-mono: var(--font-mono);
+	/* Unused: nothing in the app draws a shadow (see the Surfaces note — surfaces separate by
+	   tone). Kept because every preset palette ships its own set as part of its token contract. */
 	--shadow-2xs: var(--shadow-2xs);
 	--shadow-xs: var(--shadow-xs);
 	--shadow-sm: var(--shadow-sm);
@@ -585,7 +695,12 @@ html.art-tint.dark {
 	--color-destructive: var(--destructive);
 	--color-accent-foreground: var(--accent-foreground);
 	--color-accent: var(--accent);
-	--color-muted-foreground: var(--muted-foreground);
+	/* Pulled 18% toward --foreground. The raw token measures 4.16:1 on the tinted sidebar and
+	   4.30:1 on tinted muted — under AA — and several preset palettes are far worse (tokyonight
+	   dark bottoms out at 2.17:1). At 82% the default theme's worst pair is 5.4:1 and every preset
+	   improves, while the text still reads as secondary rather than as body copy. Verified by
+	   scratchpad/mixcheck.py across all ten palettes x light/dark x artwork tint. */
+	--color-muted-foreground: color-mix(in oklab, var(--muted-foreground) 82%, var(--foreground));
 	--color-muted: var(--muted);
 	--color-secondary-foreground: var(--secondary-foreground);
 	--color-secondary: var(--secondary);
@@ -604,6 +719,23 @@ html.art-tint.dark {
 	--radius-2xl: calc(var(--radius) * 1.8);
 	--radius-3xl: calc(var(--radius) * 2.2);
 	--radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* The accent used as *text* rather than as a fill.
+   --primary is chosen to carry white button labels (--primary-foreground on --primary is 7.20:1),
+   which forces it dark — and that same colour as a label on the dark background measures 2.50:1,
+   under AA, on the 60-odd places that mark "playing", "shuffle on", "liked", an active nav item.
+   Those are status indicators, so failing them is not cosmetic.
+
+   Lifting it toward --foreground rather than hardcoding a second accent keeps it following the
+   inline --primary that "adapt colours to artwork" writes, and keeps it a class: only elements
+   carrying `text-primary` restyle when the accent changes, where a new root custom property would
+   invalidate inheritance on every element in the document (#217). Light mode already passes at
+   6.06:1 and is left alone, so the accent keeps its saturation where it can afford to.
+   58%, not 62%: --card is the tighter surface of the two and 62% landed on exactly 4.50:1 there,
+   which the artwork tint then pushed to 4.39:1. 58% is 4.94:1 / 4.82:1. */
+.dark .text-primary {
+	color: color-mix(in oklab, var(--primary) 58%, var(--foreground));
 }
 
 @layer base {
@@ -644,12 +776,38 @@ html.art-tint.dark {
 
 /* --- Motion & interaction polish --- */
 
+/* The shared motion scale (transitions.dev tokens). One place to tune how the app moves, so a
+   dropdown, a modal and a panel can't drift apart. Pick the token by what the motion *does*, not
+   by the nearest number — the comment on each line is its usage.
+   Two rules ride on top of the values:
+   - Opens invite, closes get out of the way: a close is quicker and quieter than its open.
+   - Overshoot belongs to entrances only. Never bounce a close or a hover-out. */
+:root {
+	--duration-stagger: 40ms;   /* per-item stagger offset */
+	--duration-micro: 80ms;     /* intent delay (tooltip), shake segment */
+	--duration-quick: 150ms;    /* modal/dropdown close, text swap, tooltip appear */
+	--duration-fast: 250ms;     /* dropdown/modal open, icon swap, tabs, page slide, hover lift */
+	--duration-medium: 350ms;   /* panel close, toast close */
+	--duration-slow: 400ms;     /* panel open, content reveal over a skeleton */
+	--duration-very-slow: 500ms; /* emphasis moments: badge appear, success check */
+
+	--ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1); /* the default: open/close, slide, resize */
+	--ease-in-out: ease-in-out; /* icon swap, text swap, content reveal */
+	--ease-out: ease-out;       /* tooltip open/close */
+	--ease-bounce: cubic-bezier(0.34, 1.36, 0.64, 1); /* badge/heart pop — entrances only */
+
+	--scale-large: 0.96;        /* modal open/close */
+	--scale-medium: 0.97;       /* dropdown open */
+	--scale-small: 0.98;        /* tooltip open */
+}
+
+
 /* Loaded page content fades in over the skeleton/route swap it replaces. Opacity-only —
    cheap to composite on WebKitGTK. */
 @keyframes content-in {
 	from { opacity: 0; }
 }
-.content-in { animation: content-in 150ms ease-out; }
+.content-in { animation: content-in var(--duration-quick) var(--ease-out); }
 
 /* The card grid behind Library, Local music, search results and "See all". Same reasoning as
    Shelf.svelte: WebKit keeps every card in style, layout and paint, and because it rasterizes in
@@ -693,6 +851,14 @@ html.art-tint.dark {
    Triggered from the clipping box, not the scrolling track: the trailing copy is inert, so it is
    not hit-testable and hovering it would never reach the track itself. */
 .marquee-box:hover .marquee { animation-play-state: paused; }
+
+/* A cover holds at zero until it decodes, so it fades onto its `bg-muted` box instead of
+   snapping in (imgreveal.ts sets and clears the attribute). The element owns the transition, so
+   an image that also scales on hover lists both properties and keeps one shorthand. A cached
+   image never gets the attribute and appears at once, which is the point of it being cached. */
+img[data-revealing] {
+	opacity: 0;
+}
 
 /* A small "pop" for the like button when a track is favourited. */
 @keyframes heart-pop {

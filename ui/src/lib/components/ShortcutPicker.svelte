@@ -4,7 +4,7 @@
 	// ponytail: library only. Anything else in YouTube still gets there by dragging its card onto the
 	// grid, or ⋯ → Add to shortcuts — wire a search box in here if that turns out to be the common case.
 	import { fade, scale } from 'svelte/transition';
-	import { cubicOut } from 'svelte/easing';
+	import { quintOut } from 'svelte/easing';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import { Cancel01Icon, Tick02Icon, Add01Icon } from '@hugeicons/core-free-icons';
 	import { thumb } from '$lib/thumb';
@@ -29,12 +29,14 @@
 <svelte:window onkeydown={(e) => e.key === 'Escape' && onclose()} />
 
 <div
-	transition:fade={{ duration: 150 }}
+	in:fade={{ duration: 250 }}
+		out:fade={{ duration: 150 }}
 	class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
 >
 	<div
-		transition:scale={{ duration: 180, start: 0.96, easing: cubicOut }}
-		class="flex max-h-[32rem] w-full max-w-sm flex-col rounded-xl border bg-card p-4 shadow-xl"
+		in:scale={{ duration: 250, start: 0.96, easing: quintOut }}
+			out:scale={{ duration: 150, start: 0.96, easing: quintOut }}
+		class="flex max-h-[32rem] w-full max-w-sm flex-col rounded-xl glass p-4"
 	>
 		<div class="mb-3 flex items-center justify-between">
 			<h2 class="font-heading text-base font-semibold">{t('home.add_shortcut')}</h2>
@@ -51,7 +53,7 @@
 			bind:value={filter}
 			autofocus
 			placeholder={t('common.filter_library')}
-			class="mb-2 w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			class="mb-2 w-full rounded-lg bg-input px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
 		/>
 		{#if library.loading && !library.items.length}
 			<p class="p-2 text-sm text-muted-foreground">{t('common.loading')}</p>

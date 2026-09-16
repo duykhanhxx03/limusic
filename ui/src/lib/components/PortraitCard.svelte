@@ -7,6 +7,7 @@
 	// object-position sits above centre: press photos are shot with headroom, and a square-ish crop
 	// of the middle lands on a chest.
 	import { HugeiconsIcon } from '@hugeicons/svelte';
+	import { imgReveal } from '$lib/imgreveal';
 	import { UserIcon } from '@hugeicons/core-free-icons';
 	import type { BrowseItem } from '$lib/api';
 	import { thumb } from '$lib/thumb';
@@ -48,8 +49,8 @@
 			<img
 				{src}
 				alt=""
-				class="h-full w-full object-cover object-[center_22%] transition-transform duration-500 ease-out group-hover:scale-[1.06]"
-				loading="lazy"
+				class="h-full w-full object-cover object-[center_22%] transition-[transform,opacity] duration-[var(--duration-fast)] ease-[var(--ease-smooth-out)] group-hover:scale-[1.06]"
+				loading="lazy" {@attach imgReveal}
 				draggable="false"
 				onerror={imgFailed}
 			/>

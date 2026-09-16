@@ -202,7 +202,7 @@
 		{#each view.blocks as block, b (block.key)}
 			{#if block.autoplay}
 				<div
-					class="mt-3 flex items-center gap-2 border-t px-2 pt-2.5 pb-1.5 text-muted-foreground"
+					class="mt-3 flex items-center gap-2 hairline-t px-2 pt-2.5 pb-1.5 text-muted-foreground"
 					title={t('player.autoplay_notice')}
 				>
 					<HugeiconsIcon icon={InfinityIcon} class="h-3.5 w-3.5" />

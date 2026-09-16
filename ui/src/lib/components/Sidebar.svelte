@@ -99,7 +99,7 @@
 </script>
 
 <aside
-	class="flex h-full w-16 shrink-0 flex-col border-r bg-sidebar p-3 text-sidebar-foreground {wide(
+	class="flex h-full w-16 shrink-0 flex-col bg-sidebar p-3 text-sidebar-foreground {wide(
 		'lg:w-60'
 	)}"
 >
@@ -179,7 +179,7 @@
 	     the list fill the space and scroll. Signed out the section still appears once there is
 	     something in it: On Repeat, or a playlist saved on this machine. -->
 	{#if auth.account?.signedIn || playlists.length}
-		<div class="mt-3 hidden min-h-0 flex-1 flex-col border-t pt-3 {wide('lg:flex')}">
+		<div class="mt-3 hidden min-h-0 flex-1 flex-col hairline-t pt-3 {wide('lg:flex')}">
 			<!-- Creating one is a YouTube write action, so it needs an account. -->
 			{#if auth.account?.signedIn}
 				<Button
@@ -232,7 +232,7 @@
 							</div>
 							{#if personal.pins.includes(pl.id)}
 								<span
-									class="absolute left-9 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground shadow"
+									class="absolute left-9 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground"
 								>
 									<HugeiconsIcon icon={PinIcon} class="h-2.5 w-2.5" />
 								</span>
@@ -247,7 +247,7 @@
 						<PlaylistMenu item={pl} />
 					</div>
 					{#if pinnedCount && i === pinnedCount - 1}
-						<div class="mx-3 my-1.5 h-px bg-border"></div>
+						<div class="mx-3 my-1.5 h-px bg-foreground/10"></div>
 					{/if}
 				{:else}
 					{#if library.loading}

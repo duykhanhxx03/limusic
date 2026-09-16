@@ -26,17 +26,19 @@
 	class="absolute inset-0 z-20 cursor-default bg-black/40 lg:hidden"
 	onclick={onClose}
 	aria-label={t('a11y.close_lyrics')}
-	transition:fade={{ duration: 150 }}
+	in:fade={{ duration: 250 }}
+	out:fade={{ duration: 150 }}
 ></button>
 <aside
-	transition:fly={{ x: 32, duration: 220, easing: cubicOut }}
+	in:fly={{ x: 32, duration: 250, easing: cubicOut }}
+	out:fly={{ x: 32, duration: 150, easing: cubicOut }}
 	class={expanded
 		? // ponytail: left offsets mirror Sidebar's w-16/lg:w-60 (and its manual collapse), right
 			// offset mirrors QueuePanel's w-80 — keep in sync if those change.
-			`absolute inset-y-0 left-16 right-0 z-30 flex h-full flex-col border-l bg-card shadow-2xl ${ui.sidebarCollapsed ? '' : 'lg:left-60'} ${queueOpen ? 'lg:right-80' : ''}`
-		: `absolute inset-y-0 right-0 z-30 flex h-full w-80 max-w-[80vw] flex-col border-l bg-card shadow-2xl ${queueOpen ? 'lg:right-80' : ''}`}
+			`absolute inset-y-0 left-16 right-0 z-30 flex h-full flex-col glass ${ui.sidebarCollapsed ? '' : 'lg:left-60'} ${queueOpen ? 'lg:right-80' : ''}`
+		: `absolute inset-y-0 right-0 z-30 flex h-full w-80 max-w-[80vw] flex-col glass ${queueOpen ? 'lg:right-80' : ''}`}
 >
-	<div class="flex items-center justify-between border-b px-4 py-3">
+	<div class="flex items-center justify-between hairline-b px-4 py-3">
 		<h2 class="font-heading text-sm font-semibold">{t('lyrics.title')}</h2>
 		<button
 			onclick={() => (expanded = !expanded)}

@@ -71,7 +71,7 @@
 
 <Dialog.Root bind:open>
 	<Dialog.Content class="gap-0 overflow-hidden p-0 sm:max-w-md">
-		<div class="border-b px-5 py-4">
+		<div class="hairline-b px-5 py-4">
 			<Dialog.Title class="text-lg font-semibold">{t('home.edit_home')}</Dialog.Title>
 			<Dialog.Description class="text-xs text-muted-foreground">
 				{t('home.shortcuts_desc')}
@@ -149,7 +149,7 @@
 			{/each}
 		</div>
 
-		<div class="flex justify-end gap-2 border-t px-5 py-3">
+		<div class="flex justify-end gap-2 hairline-t px-5 py-3">
 			<Button variant="outline" size="sm" onclick={() => (open = false)}>
 				<HugeiconsIcon icon={Cancel02Icon} class="h-4 w-4" />
 				{t('common.cancel')}

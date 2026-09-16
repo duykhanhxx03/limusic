@@ -226,7 +226,7 @@
 </script>
 
 {#if loading}
-	<div class="mb-4 h-36 animate-pulse rounded-2xl border bg-card/40"></div>
+	<div class="mb-4 h-36 animate-pulse rounded-2xl bg-card/40"></div>
 	{#each Array(8) as _, i (i)}
 		<TrackRowSkeleton />
 	{/each}
@@ -235,7 +235,7 @@
 {:else}
 	<!-- The header of the list rather than a page header: a rounded band the covers of your own
 	     library tint, so the tab has a face without pretending to be a playlist page. -->
-	<div class="relative mb-4 overflow-hidden rounded-2xl border">
+	<div class="relative mb-4 overflow-hidden rounded-2xl bg-card">
 		{#if covers[0] && !artFailed}
 			<!-- 96px: blur-2xl throws away every detail bigger than a few pixels anyway (HomeHero). -->
 			<img
@@ -248,13 +248,13 @@
 		<div class="absolute inset-0 bg-gradient-to-r from-background via-background/80 to-background/40"></div>
 		<div class="relative flex flex-wrap items-center gap-4 p-4">
 			{#if covers.length >= 4}
-				<div class="grid h-28 w-28 shrink-0 grid-cols-2 grid-rows-2 overflow-hidden rounded-xl shadow-lg">
+				<div class="grid h-28 w-28 shrink-0 grid-cols-2 grid-rows-2 overflow-hidden rounded-xl">
 					{#each covers.slice(0, 4) as cover (cover)}
 						<img src={thumb(cover, 400)} alt="" class="h-full w-full object-cover" />
 					{/each}
 				</div>
 			{:else if covers.length}
-				<img src={thumb(covers[0], 400)} alt="" class="h-28 w-28 shrink-0 rounded-xl object-cover shadow-lg" />
+				<img src={thumb(covers[0], 400)} alt="" class="h-28 w-28 shrink-0 rounded-xl object-cover" />
 			{:else}
 				<div class="flex h-28 w-28 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
 					<HugeiconsIcon icon={uploads ? CloudUploadIcon : MusicNote01Icon} class="h-10 w-10" />

@@ -132,7 +132,7 @@
 			src={thumb(auth.account.thumbnail, 64)}
 			alt=""
 			style="width:1.25rem;height:1.25rem;max-width:none"
-			class="shrink-0 rounded-full object-cover ring-1 ring-border"
+			class="shrink-0 rounded-full object-cover ring-1 ring-foreground/15"
 		/>
 	{:else}
 		<HugeiconsIcon icon={UserCircleIcon} class="h-5 w-5 shrink-0 text-muted-foreground" />
@@ -155,7 +155,7 @@
 		aria-label={t('common.close')}
 	></button>
 	<div
-		class="fixed z-50 w-72 animate-in rounded-xl border bg-popover p-4 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95"
+		class="fixed z-50 w-72 animate-in rounded-xl glass p-4 text-popover-foreground duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] fade-in-0 zoom-in-[0.97]"
 		style={anchor.style}
 		{@attach fitMenu(anchor)}
 	>
@@ -185,7 +185,7 @@
 									src={thumb(account.thumbnail, 48)}
 									alt=""
 									style="width:1.25rem;height:1.25rem;max-width:none"
-									class="shrink-0 rounded-full object-cover ring-1 ring-border"
+									class="shrink-0 rounded-full object-cover ring-1 ring-foreground/15"
 								/>
 							{:else}
 								<HugeiconsIcon

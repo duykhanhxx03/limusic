@@ -3,10 +3,15 @@
 	// with a system frame (`win.chrome`, issue #65) this bar stays as a toolbar and only drops its
 	// own window buttons, since everything else on it is app navigation, not window management.
 	// Everything on the bar is a drag region except the buttons; double-click maximizes (Tauri's
-	// drag region itself). Right cluster: account (sign in/out, its own component), then the
-	// app-level buttons, then a separator and minimize / maximize / close — per the design, the
-	// window controls sit with the rest but visually apart.
-	import { afterNavigate } from '$app/navigation';
+	// drag region itself).
+	//
+	// Three clusters. Left: the app icon and back/forward. Centre, floating over the flow so it is
+	// centred on the window: home, search, history — the strip you navigate from, wherever you are.
+	// Right: account (sign in/out, its own component), then the app-level buttons, then a separator
+	// and minimize / maximize / close — per the design, the window controls sit with the rest but
+	// visually apart.
+	import { afterNavigate, goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import {
@@ -17,9 +22,13 @@
 		Cancel01Icon,
 		MinimizeScreenIcon,
 		CameraVideoIcon,
-		Link04Icon
+		Link04Icon,
+		Home01Icon,
+		HistoryIcon,
+		Search01Icon
 	} from '@hugeicons/core-free-icons';
 	import AccountMenu from './AccountMenu.svelte';
+	import SearchSuggest from './SearchSuggest.svelte';
 	import { appIcon } from '$lib/appicon.svelte';
 	import { openMiniPlayer, playback, ui } from '$lib/player.svelte';
 	import { win } from '$lib/win.svelte';
@@ -39,6 +48,14 @@
 		else if (nav.delta !== undefined) depth = Math.max(0, depth + nav.delta);
 		else deepest = depth += 1;
 	});
+
+	// Search lives on the bar rather than on the home page, so it is in the same place from inside a
+	// playlist, an album or the library — the point of a command strip.
+	let searchQuery = $state('');
+	function goSearch() {
+		if (!searchQuery.trim()) return;
+		goto(`/search?${new URLSearchParams({ q: searchQuery }).toString()}`);
+	}
 </script>
 
 <!-- `relative` makes this a stacking context, so the account/window dropdowns inside it are capped
@@ -47,17 +64,86 @@
      under it instead of the other way round. -->
 <header
 	data-tauri-drag-region
-	class="relative {ui.theaterOpen ? 'z-0' : 'z-50'} flex h-9 shrink-0 select-none items-center justify-between border-b border-border/60 bg-background"
+	class="relative {ui.theaterOpen ? 'z-0' : 'z-50'} flex h-12 shrink-0 select-none items-center justify-between bg-card"
 >
-	<span
-		class="pointer-events-none absolute inset-x-0 text-center text-xs font-medium tracking-wide text-muted-foreground"
+	<!-- Centred on the *window*, not on the gap between the two clusters: this is the thing the eye
+	     goes to, and the right cluster is three times the width of the left, so centring it in the
+	     flow would park it visibly off to one side.
+
+	     The horizontal guard is the width of the widest cluster — the right one, which grows at `lg`
+	     where the account name appears — so the field shrinks as the window narrows instead of
+	     sliding under the window controls. At the 900px minimum window that still leaves it ~290px.
+
+	     pointer-events-none on the layer, auto on the group: the layer spans the whole bar, and
+	     without that the dead space either side of the field would stop being a drag region. -->
+	<div
+		class="pointer-events-none absolute inset-x-0 flex h-full items-center justify-center px-[19rem] lg:px-[26rem]"
 	>
-		Limusic
-	</span>
+		<!-- data-tauri-drag-region so the gaps between the three controls still drag the window. Bare,
+		     not `deep`: `deep` would make every descendant a drag handle, and the suggestion panel
+		     hanging below this group would then pull the window out from under the pointer. -->
+		<div
+			data-tauri-drag-region
+			class="pointer-events-auto flex w-full max-w-lg items-center gap-2"
+		>
+			<!-- Home. The sidebar has one as well, and deliberately: this is the one that stays in the
+			     same place however deep into a playlist you are. -->
+			<a
+				href="/"
+				title={t('nav.home')}
+				aria-label={t('nav.home')}
+				class="flex size-8 shrink-0 items-center justify-center rounded-full transition-colors {page
+					.url.pathname === '/'
+					? 'bg-primary/15 text-primary'
+					: 'bg-foreground/10 text-muted-foreground hover:bg-foreground/20 hover:text-foreground'}"
+			>
+				<HugeiconsIcon icon={Home01Icon} class="h-4 w-4" />
+			</a>
+
+			<!-- Must be a <form>: SearchSuggest falls through to onsubmit for a bare Enter and for its
+			     own "all results" row (see the note at the top of that component). -->
+			<form
+				class="relative min-w-0 flex-1"
+				onsubmit={(e) => {
+					e.preventDefault();
+					goSearch();
+				}}
+			>
+				<HugeiconsIcon
+					icon={Search01Icon}
+					class="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+				/>
+				<!-- The panel is wider than the field and centred under it with a margin rather than a
+				     translate: the open animation animates `transform`, so a -translate-x-1/2 here would
+				     be overwritten for the length of it and the panel would slide sideways into place. -->
+				<SearchSuggest
+					bind:value={searchQuery}
+					placeholder={t('common.search')}
+					inputClass="h-8 rounded-full pl-9"
+					panelClass="left-1/2 -ml-[13rem] w-[26rem]"
+				/>
+			</form>
+
+			<a
+				href="/history"
+				title={t('nav.history')}
+				aria-label={t('nav.history')}
+				class="flex size-8 shrink-0 items-center justify-center rounded-full transition-colors {page
+					.url.pathname === '/history'
+					? 'bg-primary/15 text-primary'
+					: 'bg-foreground/10 text-muted-foreground hover:bg-foreground/20 hover:text-foreground'}"
+			>
+				<HugeiconsIcon icon={HistoryIcon} class="h-4 w-4" />
+			</a>
+		</div>
+	</div>
 
 	<!-- macOS overlay style floats the traffic lights over the top-left of the webview, so the row
 	     starts clear of them. 70px is the standard reservation for the three buttons. -->
-	<div class="flex h-full items-center {win.chrome === 'overlay' ? 'pl-[70px]' : ''}">
+	<div
+		data-tauri-drag-region
+		class="flex h-full items-center {win.chrome === 'overlay' ? 'pl-[70px]' : ''}"
+	>
 		<!-- pointer-events-none: the logo is decoration; clicks on it should drag the window. -->
 		<img src={appIcon.src} alt="" class="pointer-events-none ml-3 mr-1 h-4 w-4" />
 		<!-- Bigger and heavier than the icons on the right: these are navigation, and at their
@@ -82,11 +168,11 @@
 		</button>
 	</div>
 
-	<div class="flex h-full items-center">
+	<div data-tauri-drag-region class="flex h-full items-center">
 		<!-- Account first, then the app-level buttons, then the window controls. The drag region lives
 		     on <header> only, so these children are ordinary buttons — don't add the attribute here. -->
 		<AccountMenu />
-		<div class="mx-1.5 h-4 w-px bg-border"></div>
+		<div class="mx-1.5 h-4 w-px bg-foreground/15"></div>
 
 		<!-- Paste a YouTube Music link and go to it: the only way into a playlist that is shared by
 		     link and never appears in search or the library (#63). -->
@@ -125,7 +211,7 @@
 		</button>
 
 		{#if win.chrome === 'off'}
-			<div class="mx-1.5 h-4 w-px bg-border"></div>
+			<div class="mx-1.5 h-4 w-px bg-foreground/15"></div>
 
 			<button
 				class="flex h-full w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground"

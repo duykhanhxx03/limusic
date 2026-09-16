@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { fade, fly, scale } from 'svelte/transition';
-	import { cubicOut } from 'svelte/easing';
+	import { cubicOut, quintOut } from 'svelte/easing';
 	import { beforeNavigate } from '$app/navigation';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import {
@@ -96,7 +96,8 @@
      ponytail: left offsets mirror Sidebar's w-16/lg:w-60 (and its manual collapse) — keep in sync
      if those change. -->
 <div
-	transition:fly={{ y: '100%', duration: 320, easing: cubicOut }}
+	in:fly={{ y: '100%', duration: 350, easing: quintOut }}
+	out:fly={{ y: '100%', duration: 250, easing: quintOut }}
 	class="absolute inset-y-0 left-16 right-0 z-20 flex justify-center overflow-hidden bg-background px-4 py-4 sm:px-6 sm:py-6 lg:px-10 {ui.sidebarCollapsed
 		? ''
 		: 'lg:left-60'} {inset}"
@@ -161,7 +162,7 @@
 						     primary-on-muted as the volume slider in the player bar. -->
 						<div
 							transition:fade={{ duration: 120 }}
-							class="pointer-events-none absolute left-3 top-1/2 z-10 flex -translate-y-1/2 flex-col items-center gap-2 rounded-full border bg-popover/90 px-2 py-3 text-popover-foreground"
+							class="pointer-events-none absolute left-3 top-1/2 z-10 flex -translate-y-1/2 flex-col items-center gap-2 rounded-full plate px-2 py-3 text-popover-foreground"
 						>
 							<HugeiconsIcon
 								icon={VolumeHighIcon}
@@ -226,7 +227,7 @@
 								alt=""
 								onerror={imgFailed}
 								style={srcs[2] ? `background-image:url(${srcs[2]})` : undefined}
-								class="aspect-square w-full rounded-2xl bg-cover object-cover shadow-2xl"
+								class="aspect-square w-full rounded-2xl bg-cover object-cover"
 							/>
 						{:else if !showVideo()}
 							<div

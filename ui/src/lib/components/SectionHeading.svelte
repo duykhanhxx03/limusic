@@ -50,7 +50,7 @@
 		<h2 class="{headingClass} min-w-0 truncate">{title}</h2>
 	{/if}
 	{@render lead?.()}
-	<div class="h-px min-w-6 flex-1 bg-gradient-to-r from-border to-transparent"></div>
+	<div class="h-px min-w-6 flex-1 bg-gradient-to-r from-foreground/15 to-transparent"></div>
 	{@render children?.()}
 	{#if onMore}
 		<button

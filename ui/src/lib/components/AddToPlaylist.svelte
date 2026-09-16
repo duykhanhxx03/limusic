@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { fade, scale } from 'svelte/transition';
-	import { cubicOut } from 'svelte/easing';
+	import { quintOut } from 'svelte/easing';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import { Cancel01Icon } from '@hugeicons/core-free-icons';
 	import * as api from '$lib/api';
@@ -135,7 +135,8 @@
 
 {#if ui.addSongs}
 	<div
-		transition:fade={{ duration: 150 }}
+		in:fade={{ duration: 250 }}
+		out:fade={{ duration: 150 }}
 		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
 		role="presentation"
 		onclick={(e) => {
@@ -143,8 +144,9 @@
 		}}
 	>
 		<div
-			transition:scale={{ duration: 180, start: 0.96, easing: cubicOut }}
-			class="flex max-h-[32rem] w-full max-w-sm flex-col rounded-xl border bg-card p-4 shadow-xl"
+			in:scale={{ duration: 250, start: 0.96, easing: quintOut }}
+			out:scale={{ duration: 150, start: 0.96, easing: quintOut }}
+			class="flex max-h-[32rem] w-full max-w-sm flex-col rounded-xl glass p-4"
 		>
 			<div class="mb-3 flex items-center justify-between">
 				<h2 class="font-heading text-base font-semibold">{t('player.add_to_playlist')}</h2>
@@ -162,7 +164,7 @@
 					bind:value={filter}
 					placeholder={t('library.search_playlists')}
 					onkeydown={(e) => e.key === 'Enter' && matches[0] && pick(matches[0])}
-					class="mb-2 w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+					class="mb-2 w-full rounded-lg bg-input px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
 				/>
 			{/if}
 			{#if loading}

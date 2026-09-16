@@ -3,7 +3,7 @@
 	// see what you're about to send. Opened from any ⋯ menu via `openShare`, mounted once in the
 	// layout like AddToPlaylist.
 	import { fade, scale } from 'svelte/transition';
-	import { cubicOut } from 'svelte/easing';
+	import { quintOut } from 'svelte/easing';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import { Cancel01Icon, Copy01Icon, Tick02Icon, Alert02Icon } from '@hugeicons/core-free-icons';
 	import * as api from '$lib/api';
@@ -109,7 +109,8 @@
 
 {#if ui.share}
 	<div
-		transition:fade={{ duration: 150 }}
+		in:fade={{ duration: 250 }}
+		out:fade={{ duration: 150 }}
 		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
 		role="presentation"
 		onclick={(e) => {
@@ -117,8 +118,9 @@
 		}}
 	>
 		<div
-			transition:scale={{ duration: 180, start: 0.96, easing: cubicOut }}
-			class="w-full max-w-md rounded-xl border bg-card p-4 shadow-xl"
+			in:scale={{ duration: 250, start: 0.96, easing: quintOut }}
+			out:scale={{ duration: 150, start: 0.96, easing: quintOut }}
+			class="w-full max-w-md rounded-xl glass p-4"
 		>
 			<div class="mb-4 flex items-center justify-between">
 				<h2 class="text-base font-semibold">{t('dialogs.share.title')}</h2>
@@ -151,7 +153,7 @@
 				</div>
 			</div>
 
-			<div class="mt-4 flex items-center gap-2 rounded-lg border bg-muted/40 py-1 pl-3 pr-1">
+			<div class="mt-4 flex items-center gap-2 rounded-lg bg-muted/60 py-1 pl-3 pr-1">
 				<input
 					class="min-w-0 flex-1 bg-transparent py-1 text-sm text-muted-foreground outline-none"
 					value={url}
@@ -177,7 +179,7 @@
 			{/if}
 
 			{#if wasPrivate && canToggle}
-				<div class="mt-3 flex items-center justify-between gap-4 rounded-lg border px-3 py-2.5">
+				<div class="mt-3 flex items-center justify-between gap-4 rounded-lg bg-muted px-3 py-2.5">
 					<div class="min-w-0">
 						<div class="text-sm font-medium">{t('common.public')}</div>
 						<p class="text-xs text-muted-foreground">

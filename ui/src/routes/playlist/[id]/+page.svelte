@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import { imgReveal } from '$lib/imgreveal';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
@@ -767,7 +768,7 @@
 
 <div class="flex h-full flex-col">
 	{#if loading}
-		<div class="flex items-end gap-6 border-b p-6">
+		<div class="flex items-end gap-6 p-6">
 			<Skeleton class="h-40 w-40 shrink-0 rounded-xl" />
 			<div class="flex-1 space-y-3">
 				<Skeleton class="h-3 w-16 rounded" />
@@ -787,13 +788,16 @@
 		<!-- One scroller for the whole page: the header scrolls away above the rows, same as the
 		     album page. -->
 		<div class="content-in min-h-0 flex-1 overflow-y-auto" {@attach sc.attach}>
-			<div class="relative flex min-h-[38vh] shrink-0 items-end gap-6 overflow-hidden border-b p-6">
+			<div class="relative flex min-h-[38vh] shrink-0 items-end gap-6 overflow-hidden p-6">
 				{#if backdrop}
-					<img
-						src={backdrop}
-						alt=""
-						class="pointer-events-none absolute inset-0 h-full w-full object-cover object-center"
-					/>
+					{#key backdrop}
+						<img
+							src={backdrop}
+							alt=""
+							class="pointer-events-none absolute inset-0 h-full w-full object-cover object-center transition-opacity duration-[var(--duration-fast)] ease-[var(--ease-in-out)]"
+							{@attach imgReveal}
+						/>
+					{/key}
 				{/if}
 				<!-- Fade the cover into the page so the text stays readable: solid at the bottom and on the
 				     left (behind the title), the image itself visible toward the top-right. -->
@@ -803,12 +807,21 @@
 				<div class="absolute inset-0 bg-gradient-to-r from-background via-background/50 to-transparent"></div>
 				{#if isOnRepeat}
 					<div
-						class="relative flex h-40 w-40 items-center justify-center rounded-xl bg-primary/10 text-primary shadow-lg"
+						class="relative flex h-40 w-40 items-center justify-center rounded-xl bg-primary/10 text-primary"
 					>
 						<HugeiconsIcon icon={ListRestartIcon} class="h-20 w-20" />
 					</div>
 				{:else if art}
-					<img src={art} alt="" class="relative h-40 w-40 rounded-xl object-cover shadow-lg" />
+					{#key art}
+						<!-- bg-muted, so the moment before the new cover decodes is the same grey box the
+						     no-cover branch below shows, not a hole in the header. -->
+						<img
+							src={art}
+							alt=""
+							class="relative h-40 w-40 rounded-xl bg-muted object-cover transition-opacity duration-[var(--duration-fast)] ease-[var(--ease-in-out)]"
+							{@attach imgReveal}
+						/>
+					{/key}
 				{:else}
 					<div class="relative h-40 w-40 rounded-xl bg-muted"></div>
 				{/if}
@@ -822,7 +835,7 @@
 							>
 						{/if}
 					</div>
-					<h1 class="mt-1 font-heading text-4xl font-bold tracking-tight drop-shadow-lg">
+					<h1 class="mt-1 font-heading text-4xl font-bold tracking-tight">
 						{pl.title ?? t('common.playlist_singular')}
 					</h1>
 					{#if subtitle}<p class="mt-2 text-sm text-muted-foreground">{subtitle}</p>{/if}
@@ -976,7 +989,7 @@
 		aria-label={t('a11y.close_menu')}
 	></button>
 	<div
-		class="fixed z-50 min-w-44 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95"
+		class="fixed z-50 min-w-44 animate-in rounded-lg glass p-1 text-popover-foreground duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] fade-in-0 zoom-in-[0.97]"
 		style={sortAnchor.style}
 		{@attach fitMenu(sortAnchor)}
 	>
@@ -1008,7 +1021,7 @@
 		aria-label={t('a11y.close_menu')}
 	></button>
 	<div
-		class="fixed z-50 min-w-52 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95"
+		class="fixed z-50 min-w-52 animate-in rounded-lg glass p-1 text-popover-foreground duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] fade-in-0 zoom-in-[0.97]"
 		style={anchor.style}
 		{@attach fitMenu(anchor)}
 	>
