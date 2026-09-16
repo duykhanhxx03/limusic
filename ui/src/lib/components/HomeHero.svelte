@@ -84,8 +84,6 @@
 				</h1>
 			</div>
 			<div class="flex shrink-0 items-center gap-2">
-				<!-- Listen Together moved out of here and lives on the titlebar alone: history is the thing
-				     you reach for from the home page. -->
 				<button
 					onclick={() => goto('/history')}
 					title={t('nav.history')}

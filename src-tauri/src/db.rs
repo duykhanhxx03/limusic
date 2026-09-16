@@ -157,11 +157,12 @@ impl Db {
         // Local files are no longer recorded as plays (see `AppState::on_position`), but 0.3.1
         // recorded them for a while, so clear out anything already sitting in On Repeat's table.
         let _ = conn.execute("DELETE FROM plays WHERE video_id LIKE 'LOCAL:%'", []);
-        // Last.fm and Discord are gone. Nothing reads these rows any more, and one of them is a
-        // Last.fm session key: a live credential the user can no longer revoke from inside the
-        // app, so it should not sit in the database of everyone who upgrades.
+        // Last.fm, Discord and Listen Together are gone. Nothing reads these rows any more, and
+        // one of them is a Last.fm session key: a live credential the user can no longer revoke
+        // from inside the app, so it should not sit in the database of everyone who upgrades.
         let _ = conn.execute(
-            "DELETE FROM settings WHERE key IN ('lastfm_session_key', 'lastfm_username', 'discord_rpc')",
+            "DELETE FROM settings WHERE key IN \
+             ('lastfm_session_key', 'lastfm_username', 'discord_rpc', 'lt_server_url')",
             [],
         );
         // Sweep dead stream URLs here as well as on write. `put_stream` only runs on a cache miss,

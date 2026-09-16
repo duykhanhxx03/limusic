@@ -38,13 +38,11 @@ export interface SongItem {
 	/** The signed-in user's rating (absent when the response didn't say — same as 'indifferent'). */
 	rating?: Rating;
 	/** "Add to library" off the row's own menu, with a token for each direction. Absent on rows
-	 *  YouTube sent no menu for, and on the ones built here (local files, On Repeat, a Listen
-	 *  Together guest's queue) — the menu hides the action rather than offering a dead one.
+	 *  YouTube sent no menu for, and on the ones built here (local files, On Repeat) — the menu
+	 *  hides the action rather than offering a dead one.
 	 *  Library ▸ Songs is not Liked Music: this is a feedback write, not a rating. */
 	library?: { in_library: boolean; add_token?: string; remove_token?: string };
-	/** Listen Together: name of the guest who added this queue item (session adds only). */
-	queued_by?: string;
-	/** Queued to play next ("Play next", or a guest's session add) — the "Next in queue" block. */
+	/** Queued to play next ("Play next") — the "Next in queue" block. */
 	queued?: boolean;
 	/** Appended by "Add to queue" — its own block at the tail of the queue. */
 	queued_end?: boolean;
@@ -707,63 +705,3 @@ export const getLyrics = (args: {
  *  maximized state undone first and the frame recalculated after, in that order, on the main
  *  thread. Rust also puts the maximized state back when theater closes. */
 export const theaterFullscreen = (on: boolean) => invoke<void>('theater_fullscreen', { on });
-
-// --- Listen Together (context/19) -----------------------------------------------------------
-export interface LtUser {
-	user_id: string;
-	username: string;
-	is_host: boolean;
-	is_connected: boolean;
-}
-export interface LtTrack {
-	id: string;
-	title: string;
-	artist: string;
-	thumbnail?: string | null;
-	duration_ms: number;
-	/** Name of the guest who added this track to the session queue. */
-	queued_by?: string | null;
-}
-export interface LtPendingJoin {
-	userId: string;
-	username: string;
-}
-export interface LtSuggestion {
-	id: string;
-	from_user_id: string;
-	from_username: string;
-	track: LtTrack;
-}
-export interface LtState {
-	status: 'disconnected' | 'connecting' | 'connected';
-	role: 'none' | 'host' | 'guest';
-	/** Asked to create/join and awaiting the room (host approval) — show a waiting state. */
-	requesting: boolean;
-	roomCode: string | null;
-	myId: string | null;
-	serverUrl: string;
-	users: LtUser[];
-	currentTrack: LtTrack | null;
-	queue: LtTrack[];
-	pendingJoins: LtPendingJoin[];
-	suggestions: LtSuggestion[];
-}
-
-export const ltGetState = () => invoke<LtState>('lt_get_state');
-export const ltSetServerUrl = (url: string) => invoke<void>('lt_set_server_url', { url });
-export const ltCreateRoom = (username: string) => invoke<void>('lt_create_room', { username });
-export const ltJoinRoom = (code: string, username: string) =>
-	invoke<void>('lt_join_room', { code, username });
-export const ltLeave = () => invoke<void>('lt_leave');
-export const ltApproveJoin = (userId: string) => invoke<void>('lt_approve_join', { userId });
-export const ltRejectJoin = (userId: string) => invoke<void>('lt_reject_join', { userId });
-export const ltKick = (userId: string) => invoke<void>('lt_kick', { userId });
-export const ltTransferHost = (userId: string) => invoke<void>('lt_transfer_host', { userId });
-export const ltApproveSuggestion = (id: string) => invoke<void>('lt_approve_suggestion', { id });
-export const ltRejectSuggestion = (id: string) => invoke<void>('lt_reject_suggestion', { id });
-export const ltRequestSync = () => invoke<void>('lt_request_sync');
-
-export const onLtState = (cb: (s: LtState) => void): Promise<UnlistenFn> =>
-	listen<LtState>('lt-state', (e) => cb(e.payload));
-export const onLtNotice = (cb: (msg: string) => void): Promise<UnlistenFn> =>
-	listen<string>('lt-notice', (e) => cb(e.payload));

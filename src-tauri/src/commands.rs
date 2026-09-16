@@ -146,7 +146,6 @@ pub async fn toggle_pause(state: St<'_>) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn seek(state: St<'_>, position: f64) -> Result<(), String> {
-    // Routed through AppState so a Listen Together host broadcasts the seek and a guest is blocked.
     state.user_seek(position).await
 }
 
@@ -703,17 +702,15 @@ fn on_repeat_songs(state: &Arc<AppState>) -> Vec<SongItem> {
 }
 
 /// A play record is the whole `SongItem` as it sat in the queue, so it carries that slot's queue
-/// metadata: `queued`/`queued_by` when the track was "added to queue" (in a Listen Together session,
-/// stamped with who added it), `autoplay` when radio appended it, `set_video_id` from whatever
-/// playlist it was played from. None of that describes the song, so On Repeat sheds it: otherwise
-/// the row wears a session member's name forever, and playing On Repeat drops it into "Next in
-/// queue" instead of the playlist. Strips on read so rows already stored this way are fixed too.
+/// metadata: `queued` when the track was "added to queue", `autoplay` when radio appended it,
+/// `set_video_id` from whatever playlist it was played from. None of that describes the song, so On
+/// Repeat sheds it: otherwise playing an On Repeat row drops it into "Next in queue" instead of the
+/// playlist it belongs to. Strips on read so rows already stored this way are fixed too.
 fn shed_queue_context(s: SongItem) -> SongItem {
     SongItem {
         queued: false,
         queued_end: false,
         queued_from: None,
-        queued_by: None,
         autoplay: false,
         set_video_id: None,
         added_by: None,
@@ -1294,96 +1291,6 @@ async fn scan_local(state: &Arc<AppState>) -> Result<crate::local::LocalLibrary,
     Ok(lib)
 }
 
-// --- Listen Together (context/19) ----------------------------------------------------------
-
-/// Current client-side LT state (status, role, room, participants, pending joins, suggestions).
-#[tauri::command]
-pub async fn lt_get_state(state: St<'_>) -> Result<serde_json::Value, String> {
-    Ok(state.lt.snapshot().await)
-}
-
-/// Set + persist the sync server URL (e.g. the Tailscale Funnel `wss://…` address).
-#[tauri::command]
-pub async fn lt_set_server_url(state: St<'_>, url: String) -> Result<(), String> {
-    let url = url.trim().to_string();
-    state.db.set_setting("lt_server_url", &url);
-    state.lt.set_server_url(url).await;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn lt_create_room(state: St<'_>, username: String) -> Result<(), String> {
-    state.lt.create_room(username).await;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn lt_join_room(state: St<'_>, code: String, username: String) -> Result<(), String> {
-    state.lt.join_room(code, username).await;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn lt_leave(state: St<'_>) -> Result<(), String> {
-    state.lt.leave().await;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn lt_approve_join(state: St<'_>, user_id: String) -> Result<(), String> {
-    state.lt.approve_join(user_id).await;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn lt_reject_join(state: St<'_>, user_id: String) -> Result<(), String> {
-    state.lt.reject_join(user_id).await;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn lt_kick(state: St<'_>, user_id: String) -> Result<(), String> {
-    state.lt.kick(user_id).await;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn lt_transfer_host(state: St<'_>, user_id: String) -> Result<(), String> {
-    state.lt.transfer_host(user_id).await;
-    Ok(())
-}
-
-/// Guest: send a track to the session queue (auto-approved by the host client, which stamps
-/// who added it).
-#[tauri::command]
-pub async fn lt_suggest(state: St<'_>, item: SongItem) -> Result<(), String> {
-    state.lt.suggest(crate::state::song_to_track(&item)).await;
-    Ok(())
-}
-
-/// Host: approve a suggestion — add it to the real queue and notify the suggester. (Unused since
-/// guest adds auto-approve, kept for a future "require approval" setting.)
-#[tauri::command]
-pub async fn lt_approve_suggestion(state: St<'_>, id: String) -> Result<(), String> {
-    if let Some(track) = state.lt.approve_suggestion(id).await {
-        state.inner().clone().lt_enqueue_track(track).await;
-    }
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn lt_reject_suggestion(state: St<'_>, id: String) -> Result<(), String> {
-    state.lt.reject_suggestion(id).await;
-    Ok(())
-}
-
-/// Guest: force a re-sync with the room (drift correction).
-#[tauri::command]
-pub async fn lt_request_sync(state: St<'_>) -> Result<(), String> {
-    state.lt.request_sync().await;
-    Ok(())
-}
-
 // --- lyrics ---------------------------------------------------------------------------------
 
 /// Lyrics for a track (cached). The UI passes the metadata it already has from `now-playing`;
@@ -1625,7 +1532,6 @@ mod tests {
             video_id: "abc".into(),
             title: "Grace".into(),
             queued: true,
-            queued_by: Some("simohypers".into()),
             autoplay: true,
             set_video_id: Some("SVI".into()),
             ..Default::default()

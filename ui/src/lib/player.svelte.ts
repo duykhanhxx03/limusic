@@ -12,7 +12,6 @@ import type {
 	Rating,
 	SongItem
 } from './api';
-import { applyLtState, lt } from './lt.svelte';
 import { clearCached, invalidateCached, LIBRARY_SONGS_KEY } from './pagecache';
 import * as pl from './personal';
 import type { Personal } from './personal';
@@ -996,7 +995,6 @@ export async function enqueue(
 		toast.error(String(e));
 		return;
 	}
-	if (lt.role === 'guest') return;
 	const n = items.length;
 	if (next)
 		toast.success(n === 1 ? t('toasts.playing_next_one') : t('toasts.playing_next', { count: n }));
@@ -1032,7 +1030,6 @@ export const ui = $state({
 	share: null as BrowseItem | null, // the share modal's target
 	toast: null as Toast | null,
 	settingsOpen: false, // the settings modal
-	ltOpen: false, // the Listen Together modal
 	linkOpen: false, // the "open a pasted link" modal
 	paletteOpen: false, // the Ctrl+K search palette
 	theaterOpen: false, // fullscreen theater view (artwork + lyrics)
@@ -1107,8 +1104,7 @@ export function notePlaylistAdd(playlistId: string, songs: SongItem[]) {
 		autoplay: undefined,
 		queued: undefined,
 		queued_end: undefined,
-		queued_from: undefined,
-		queued_by: undefined
+		queued_from: undefined
 	}));
 	lastPlaylistAdd.epoch++;
 }
@@ -1119,8 +1115,8 @@ let started = false;
  * Wire the Tauri event listeners once and seed initial state. Returns a teardown fn.
  *
  * `mini` is the floating-widget window (mini.rs): it runs this same module, and the events are
- * emitted app-wide so it gets playback for free — but it has no library, no local tab, no account
- * menu and no Listen Together UI, so it skips those fetches rather than duplicating the app's.
+ * emitted app-wide so it gets playback for free — but it has no library, no local tab and no
+ * account menu, so it skips those fetches rather than duplicating the app's.
  */
 export function initApp(mini = false): () => void {
 	if (started) return () => {};
@@ -1214,16 +1210,7 @@ export function initApp(mini = false): () => void {
 		}),
 		api.onAccountSelectionRequired(() => openChannelPicker(true)),
 		api.onLoginError((msg) => toast.error(msg)),
-		api.onLoginDone(() => toast.success(t('toasts.signed_in'))),
-		// Listen Together (context/19): mirror the Rust session state; surface notices as toasts.
-		api.onLtState((s) => {
-			// A room is a shared clock, so tempo is off while one is on (the stepper hides itself).
-			// Dropping back to 1x here too, or a speed set before joining strands you off the beat
-			// with no visible control to undo it.
-			if (s.role !== 'none' && playback.speed !== 1) setTempoPitch(1, playback.semitones);
-			applyLtState(s);
-		}),
-		api.onLtNotice((msg) => toast(msg))
+		api.onLoginDone(() => toast.success(t('toasts.signed_in')))
 	];
 	const teardown = () => subs.forEach((u) => u.then((f) => f()));
 	api.getQueue()
@@ -1268,7 +1255,5 @@ export function initApp(mini = false): () => void {
 	// point, prunes shortcuts for music that was deleted while the app was closed.
 	scanLocal();
 	loadBlocked();
-	// Seed the Listen Together state (server URL, any active room after a UI reload).
-	api.ltGetState().then(applyLtState).catch(() => {});
 	return teardown;
 }

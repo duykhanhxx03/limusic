@@ -11,19 +11,14 @@
 	import { rowScroller } from '$lib/rows.svelte';
 	import { dragScroll, QUEUE_ROW_MIME } from '$lib/dnd';
 	import { playback, openAddToPlaylist } from '$lib/player.svelte';
-	import { lt } from '$lib/lt.svelte';
 	import { t } from '$lib/i18n.svelte';
-
-	// Guests are add-only in a session — no removing (theirs or anyone's) and no reordering. The
-	// playing row can't be removed either (backend guards it too).
-	const canRemove = $derived(lt.role !== 'guest');
 
 	// --- drag to reorder ---------------------------------------------------------------------
 	// Upcoming rows only: the playing track and the history stay put (the backend clamps to the
 	// same range). `dropAt` is the queue index the dragged row goes *in front of*.
 	let dragFrom = $state<number | null>(null);
 	let dropAt = $state<number | null>(null);
-	const canDrag = (i: number) => canRemove && i > playback.queue.currentIndex;
+	const canDrag = (i: number) => i > playback.queue.currentIndex;
 
 	function onDragStart(e: DragEvent, i: number) {
 		if (!e.dataTransfer) return;
@@ -147,7 +142,7 @@
 					hideRating
 					onplay={() => api.playIndex(i)}
 					onAdd={() => openAddToPlaylist(item)}
-					onRemove={canRemove && i !== playback.queue.currentIndex
+					onRemove={i !== playback.queue.currentIndex
 						? () => api.removeFromQueue(i)
 						: undefined}
 					removeLabel={t('player.remove_from_queue')}
@@ -216,7 +211,7 @@
 			{:else}
 				<div class="mt-3 flex items-center justify-between gap-2 px-2 pb-1.5">
 					<h3 class="truncate text-sm font-semibold">{block.heading}</h3>
-					{#if block.clearable && canRemove}
+					{#if block.clearable}
 						<button
 							class="shrink-0 cursor-pointer text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
 							onclick={() => api.clearQueued()}

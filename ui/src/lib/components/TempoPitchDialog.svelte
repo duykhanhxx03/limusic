@@ -12,7 +12,6 @@
 	import type { IconSvgElement } from '@hugeicons/svelte';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import { inRoom } from '$lib/lt.svelte';
 	import { playback, setTempoPitch as apply } from '$lib/player.svelte';
 	import { t } from '$lib/i18n.svelte';
 
@@ -70,18 +69,14 @@
 		</div>
 
 		<div class="flex flex-col gap-4">
-			<!-- Tempo moves you off the shared clock, so it's out while a room is on. Pitch is yours
-			     alone: it changes nothing about when the next track starts. -->
-			{#if !inRoom()}
-				{@render stepper(
-					FastForwardIcon,
-					t('dialogs.tempo_pitch.tempo'),
-					`${playback.speed.toFixed(2)}x`,
-					(d) => apply(SPEEDS[speedIndex + d], playback.semitones),
-					speedIndex === 0,
-					speedIndex === SPEEDS.length - 1
-				)}
-			{/if}
+			{@render stepper(
+				FastForwardIcon,
+				t('dialogs.tempo_pitch.tempo'),
+				`${playback.speed.toFixed(2)}x`,
+				(d) => apply(SPEEDS[speedIndex + d], playback.semitones),
+				speedIndex === 0,
+				speedIndex === SPEEDS.length - 1
+			)}
 			{@render stepper(
 				AudioWave02Icon,
 				t('dialogs.tempo_pitch.pitch'),

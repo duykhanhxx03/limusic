@@ -5,7 +5,6 @@ import {
   DashboardSpeed01Icon,
   AudioWave01Icon,
   QuoteDownIcon,
-  UserMultiple02Icon,
   LibraryIcon,
   Folder01Icon,
   PaintBoardIcon,
@@ -39,7 +38,6 @@ import screenPlaylist from '@/assets/screen-playlist.webp'
 import screenLyrics from '@/assets/screen-lyrics.webp'
 import screenAlbum from '@/assets/screen-album.webp'
 import screenVideo from '@/assets/screen-video.webp'
-import screenTogether from '@/assets/screen-listen-together.webp'
 import screenMini from '@/assets/screen-mini.webp'
 
 const SPOTLIGHT = 'rgba(229, 72, 110, 0.16)' as const
@@ -68,11 +66,6 @@ const FEATURES = [
     icon: QuoteDownIcon,
     title: 'Lyrics that follow along',
     body: 'Synced lyrics scroll with the song, and where the source has word timings the line lights up as it is sung. Translations sit under each line.',
-  },
-  {
-    icon: UserMultiple02Icon,
-    title: 'Listen Together',
-    body: 'Host a session, share an invite code, and play music in perfect sync with friends.',
   },
   {
     icon: LibraryIcon,
@@ -127,13 +120,6 @@ const SCREENS = [
     body: 'Turn music videos on and the video plays where the artwork usually sits, with the same gapless audio leading. One click in the corner puts the cover back for the rest of the session.',
     img: screenVideo,
     alt: 'A music video playing in Limusic with lyrics alongside it',
-  },
-  {
-    eyebrow: 'Together',
-    title: 'Press play with friends',
-    body: 'Start a Listen Together session and send one invite code. Every play, skip and queue change stays in sync, and everyone streams their own audio, so the room only relays the controls.',
-    img: screenTogether,
-    alt: 'The Listen Together dialog in Limusic',
   },
   {
     eyebrow: 'Mini player',

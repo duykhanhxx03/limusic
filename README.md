@@ -45,7 +45,6 @@ YouTube Music client, and grew from there.
 - **Local Music**: play your own files, with all metadata still intact
 - **OS media keys** and now-playing integration (MPRIS on Linux, SMTC on Windows, plus playback buttons on the Windows taskbar preview)
 - **System tray**: close the window, keep the music; play/pause and skip from the tray, optional start-on-login
-- **Listen Together**: synced listening rooms over a small self-hosted relay
 - **Keyboard and mouse**: `Ctrl+K` searches from anywhere, `Ctrl+H` lists every shortcut, right-click menus throughout, `Ctrl` and the wheel zooms the interface
 - **Six languages**: English, Spanish, French, Turkish, Brazilian Portuguese and Indonesian, with more in progress
 - **Self-updating builds** (AppImage on Linux, setup.exe on Windows, .app on macOS)
@@ -111,23 +110,6 @@ each line where it has them.
 
 Note that YouTube Music's lyrics are licensed per region and are missing
 entirely in some countries. Where that's the case, LRCLIB does all the work.
-
----
-
-## Listen Together
-
-Synced listening with friends. Everyone streams their own audio from YouTube;
-the room only relays play/pause, seeks, track changes and the queue. One person
-hosts the relay:
-
-```bash
-cargo run -p sync-server        # plain WebSocket on 0.0.0.0:8080
-```
-
-Front it with something that terminates TLS (Tailscale Funnel, Cloudflare
-Tunnel), then paste the `wss://` URL into the Listen Together panel in the app.
-Rooms have join codes and the host approves every join and every track
-suggestion.
 
 ---
 

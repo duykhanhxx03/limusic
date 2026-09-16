@@ -17,14 +17,12 @@
 		Cancel01Icon,
 		MinimizeScreenIcon,
 		CameraVideoIcon,
-		UserGroup02Icon,
 		Link04Icon
 	} from '@hugeicons/core-free-icons';
 	import AccountMenu from './AccountMenu.svelte';
 	import { appIcon } from '$lib/appicon.svelte';
 	import { openMiniPlayer, playback, ui } from '$lib/player.svelte';
 	import { win } from '$lib/win.svelte';
-	import { lt } from '$lib/lt.svelte';
 	import { t } from '$lib/i18n.svelte';
 
 	// `w` is this window; `win` (imported) is the shared frame state.
@@ -99,31 +97,6 @@
 			aria-label={t('dialogs.link.title')}
 		>
 			<HugeiconsIcon icon={Link04Icon} class="h-4 w-4" />
-		</button>
-
-		<!-- Opens the same modal as the home hero's button (one dialog, mounted in +layout). -->
-		<button
-			class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground {lt.role !==
-			'none'
-				? 'text-primary'
-				: ''}"
-			onclick={() => (ui.ltOpen = true)}
-			title={t('nav.listen_together')}
-			aria-label={t('nav.listen_together')}
-		>
-			<span class="relative">
-				<HugeiconsIcon icon={UserGroup02Icon} class="h-4 w-4" />
-				{#if lt.role !== 'none'}
-					<!-- A live-status dot with a ping behind it: two layers, because animate-ping
-					     scales and fades the element it's on, so a lone dot would blink out. -->
-					<span class="absolute -right-0.5 -top-0.5 h-1.5 w-1.5">
-						<span class="absolute inset-0 animate-ping rounded-full bg-emerald-500 opacity-75"
-						></span>
-						<span class="absolute inset-0 rounded-full bg-emerald-500 ring-[1.5px] ring-background"
-						></span>
-					</span>
-				{/if}
-			</span>
 		</button>
 
 		<!-- Theater mode: fullscreen, cover and lyrics, nothing else. Next to the mini player because

@@ -35,7 +35,6 @@
 	import SettingsDialog from '$lib/components/SettingsDialog.svelte';
 	import ShareDialog from '$lib/components/ShareDialog.svelte';
 	import ChannelPicker from '$lib/components/ChannelPicker.svelte';
-	import ListenTogether from '$lib/components/ListenTogether.svelte';
 	import LinkDialog from '$lib/components/LinkDialog.svelte';
 	import MiniPlayer from '$lib/components/MiniPlayer.svelte';
 	import NowPlaying from '$lib/components/NowPlaying.svelte';
@@ -217,7 +216,6 @@
 	<ShareDialog />
 	<SettingsDialog />
 	<ChannelPicker />
-	<ListenTogether />
 	<LinkDialog />
 
 	<!-- The two notification banners below run at z-[100]. Dialogs and menus sit at z-50 and portal to

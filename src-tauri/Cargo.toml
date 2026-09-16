@@ -45,12 +45,8 @@ http-body-util = "0.1"
 innertube = { path = "../crates/innertube" }
 player = { path = "../crates/player" }
 souvlaki = { version = "0.8.3", default-features = false, features = ["use_zbus"] }
-# Listen Together: shared wire types + WebSocket client (wss via rustls). context/19.
-listen-protocol = { workspace = true }
-tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 futures-util = { workspace = true }
 rand = { workspace = true }
-rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # The stable saved-account key (db.rs::account_key).
 md-5 = "0.10"
 lofty = "0.22.2"
