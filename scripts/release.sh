@@ -27,7 +27,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-REPO="SimoHypers/limusic"
+# Whichever repo this checkout points at, so a fork releases on itself rather than trying to
+# publish on the original. Override with LIMUSIC_RELEASE_REPO=owner/name.
+REPO="${LIMUSIC_RELEASE_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner)}"
 KEY="${TAURI_SIGNING_PRIVATE_KEY_FILE:-$HOME/.tauri/limusic.key}"
 NOTES="${1:-See the commit history for changes.}"
 
