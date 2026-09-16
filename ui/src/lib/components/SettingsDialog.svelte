@@ -300,7 +300,6 @@
 	// Off by default: shuffle applies to the queue it was turned on for (issue #117).
 	const stickyShuffleOn = $derived(settings.sticky_shuffle === 'true');
 	const updateBannerOn = $derived(settings.update_banner !== 'false');
-	const discordOn = $derived(settings.discord_rpc === 'true');
 	const trayOn = $derived(settings.close_to_tray !== 'false');
 	const autostartOn = $derived(settings.autostart === 'true');
 	// `native_chrome` is read-only and platform-derived (commands.rs). `overlay` is macOS, where the
@@ -371,11 +370,6 @@
 	async function setUpdateBanner(on: boolean) {
 		settings.update_banner = on ? 'true' : 'false';
 		await api.setSetting('update_banner', settings.update_banner);
-	}
-
-	async function setDiscord(on: boolean) {
-		settings.discord_rpc = on ? 'true' : 'false';
-		await api.setSetting('discord_rpc', settings.discord_rpc);
 	}
 
 	async function setTray(on: boolean) {
@@ -551,11 +545,6 @@
 									title: t('player.history'),
 									desc: t('settings.playback.play_history_hint'),
 									control: historySwitch
-								})}
-								{@render row({
-									title: t('settings.general.discord_rpc'),
-									desc: t('settings.general.discord_rpc_hint'),
-									control: discordSwitch
 								})}
 							</div>
 						</section>
@@ -883,7 +872,6 @@
 {/snippet}
 
 {#snippet historySwitch()}<Switch checked={historyOn} onCheckedChange={setHistory} />{/snippet}
-{#snippet discordSwitch()}<Switch checked={discordOn} onCheckedChange={setDiscord} />{/snippet}
 {#snippet traySwitch()}<Switch checked={trayOn} onCheckedChange={setTray} />{/snippet}
 {#snippet autostartSwitch()}<Switch checked={autostartOn} onCheckedChange={setAutostart} />{/snippet}
 {#snippet systemTitlebarSwitch()}<Switch

@@ -179,13 +179,12 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 /// `visitor_data`) and internal blobs (`queue_json`, `queue_index`, `queue_position`) never cross
 /// into the webview: they'd otherwise ship the login credential to the renderer on every open, and
 /// the webview can't overwrite them either.
-const UI_SETTINGS: [&str; 16] = [
+const UI_SETTINGS: [&str; 15] = [
     "volume",
     "proxy",
     "quality",
     "enable_history",
     "disabled_stream_clients",
-    "discord_rpc",
     "close_to_tray",
     "autostart",
     "autoplay",
@@ -276,11 +275,6 @@ pub async fn set_setting(
         return Err(format!("unknown setting: {key}"));
     }
     state.db.set_setting(&key, &value);
-    // Presence connects/clears the moment it's toggled — the user shouldn't have to skip a track
-    // to see it take effect.
-    if key == "discord_rpc" {
-        state.set_discord_enabled(value == "true");
-    }
     // Applies to what's fetched from here on: the live queue keeps whatever is already in it.
     if key == "hide_videos" {
         state.it.set_hide_videos(value == "true");
@@ -1499,7 +1493,7 @@ pub async fn open_external(url: String) -> Result<(), String> {
     if !url.starts_with("https://") && !url.starts_with("http://") {
         return Err("only http(s) links".into());
     }
-    crate::lastfm::open_browser(&url)
+    crate::browser::open_browser(&url)
 }
 
 // --- Diagnostics ----------------------------------------------------------------------------
@@ -1537,27 +1531,6 @@ pub fn log_ui(level: String, message: String) {
         "warn" => tracing::warn!(target: "ui", "{message}"),
         _ => tracing::error!(target: "ui", "{message}"),
     }
-}
-
-// --- Last.fm scrobbling ---------------------------------------------------------------------
-
-/// Start the browser auth flow. Returns once the authorize page is open; the outcome (session
-/// stored, or an error) arrives via the `lastfm-state` event.
-#[tauri::command]
-pub async fn lastfm_connect(state: St<'_>) -> Result<(), String> {
-    crate::lastfm::connect(state.inner().clone()).await
-}
-
-#[tauri::command]
-pub async fn lastfm_disconnect(state: St<'_>) -> Result<(), String> {
-    crate::lastfm::disconnect(&state);
-    Ok(())
-}
-
-/// `{ connected, username }` from the persisted session — seeds the titlebar button on mount.
-#[tauri::command]
-pub async fn lastfm_status(state: St<'_>) -> Result<serde_json::Value, String> {
-    Ok(crate::lastfm::status(&state))
 }
 
 /// Theater mode's fullscreen toggle (#139).

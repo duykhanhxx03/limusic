@@ -249,8 +249,6 @@
 			"autostart_hint": "Iniciar automáticamente Limusic cuando se encienda el sistema.",
 			"close_to_tray": "Minimizar a la bandeja del sistema",
 			"close_to_tray_hint": "Mantener Limusic ejecutándose en segundo plano al cerrar la ventana.",
-			"discord_rpc": "Presencia en Discord",
-			"discord_rpc_hint": "Mostrar la canción que se está reproduciendo en tu perfil de Discord.",
 			"update_banner": "Notificaciones de actualización",
 			"update_banner_hint": "Mostrar un banner cuando haya una nueva versión de Limusic disponible.",
 			"proxy": "Proxy HTTP/HTTPS",
@@ -461,18 +459,6 @@
 			"err_paste_code": "Pega el código de invitación que te envió tu amigo",
 			"err_paste_full_invite": "Pega la invitación completa del anfitrión, lleva la dirección del servidor"
 		}
-	},
-	"integrations": {
-		"discord_on": "Presencia de Discord activada",
-		"discord_off": "Presencia de Discord desactivada",
-		"discord_tooltip_on": "Presencia de Discord activada — haz clic para desactivar",
-		"discord_tooltip_off": "Muestra lo que reproduces en Discord",
-		"lastfm_scrobbling_as": "Registrando como {user}",
-		"lastfm_disconnected": "Last.fm desconectado",
-		"lastfm_approve_in_browser": "Aprueba Limusic en tu navegador",
-		"lastfm_connecting": "Conectando a Last.fm — haz clic para cancelar",
-		"lastfm_scrobble_to": "Registrar en Last.fm",
-		"disconnect": "Desconectar"
 	},
 	"a11y": {
 		"close": "Cerrar",

@@ -11,8 +11,8 @@ import { enqueue, playFrom, playSong, toast, touchPick } from './player.svelte';
 /**
  * A song card carries everything a queue entry needs; the ⋯ menus take this shape. The one mapping
  * for every card surface (search rows, home shelves, carousels): a card's `subtitle` is already the
- * artist alone for songs, and that string is what the player bar shows and what gets scrobbled, so
- * a second copy of this that drifts is a wrong scrobble.
+ * artist alone for songs, and that string is what the player bar and the OS media widget show, so
+ * a second copy of this that drifts shows the wrong artist.
  */
 export const asSong = (i: BrowseItem): SongItem => ({
 	video_id: i.id,

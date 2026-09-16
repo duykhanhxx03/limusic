@@ -248,8 +248,6 @@
 			"autostart_hint": "Avvia automaticamente Limusic all'avvio del sistema.",
 			"close_to_tray": "Chiudi nel tray di sistema",
 			"close_to_tray_hint": "Mantieni Limusic in esecuzione in background quando chiudi la finestra.",
-			"discord_rpc": "Discord Rich Presence",
-			"discord_rpc_hint": "Mostra il brano attualmente in riproduzione sul tuo profilo Discord.",
 			"update_banner": "Notifiche degli aggiornamenti",
 			"update_banner_hint": "Mostra un banner quando è disponibile una nuova versione di Limusic.",
 			"proxy": "",
@@ -441,18 +439,6 @@
 			"err_paste_code": "",
 			"err_paste_full_invite": ""
 		}
-	},
-	"integrations": {
-		"discord_on": "",
-		"discord_off": "",
-		"discord_tooltip_on": "",
-		"discord_tooltip_off": "",
-		"lastfm_scrobbling_as": "",
-		"lastfm_disconnected": "",
-		"lastfm_approve_in_browser": "",
-		"lastfm_connecting": "",
-		"lastfm_scrobble_to": "",
-		"disconnect": ""
 	},
 	"a11y": {
 		"close": "",

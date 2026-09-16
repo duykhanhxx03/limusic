@@ -260,8 +260,6 @@
 			"close_to_tray_hint": "",
 			"system_titlebar": "",
 			"system_titlebar_hint": "",
-			"discord_rpc": "",
-			"discord_rpc_hint": "",
 			"update_banner": "",
 			"update_banner_hint": "",
 			"proxy": "",
@@ -470,18 +468,6 @@
 			"err_paste_code": "",
 			"err_paste_full_invite": ""
 		}
-	},
-	"integrations": {
-		"discord_on": "",
-		"discord_off": "",
-		"discord_tooltip_on": "",
-		"discord_tooltip_off": "",
-		"lastfm_scrobbling_as": "",
-		"lastfm_disconnected": "",
-		"lastfm_approve_in_browser": "",
-		"lastfm_connecting": "",
-		"lastfm_scrobble_to": "",
-		"disconnect": ""
 	},
 	"a11y": {
 		"close": "",

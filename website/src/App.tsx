@@ -11,8 +11,6 @@ import {
   PaintBoardIcon,
   TranslateIcon,
   KeyboardIcon,
-  LastFmIcon,
-  DiscordIcon,
   Video01Icon,
   Minimize01Icon,
   MaximizeScreenIcon,
@@ -100,8 +98,6 @@ const FEATURES = [
 
 const EXTRAS = [
   { icon: KeyboardIcon, label: 'Media keys & shortcuts' },
-  { icon: LastFmIcon, label: 'Last.fm scrobbling' },
-  { icon: DiscordIcon, label: 'Discord Rich Presence' },
   { icon: Video01Icon, label: 'Music videos' },
   { icon: MaximizeScreenIcon, label: 'Theater mode' },
   { icon: Minimize01Icon, label: 'Mini player' },

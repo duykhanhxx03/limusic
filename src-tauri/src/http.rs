@@ -1,9 +1,9 @@
 //! The app's one outbound HTTP client.
 //!
-//! There used to be six of these inside `src-tauri` (orchestrator, PoToken, cipher fetcher, cipher
-//! config, lyrics, and Last.fm twice), each built from its own `Client::builder()`. `reqwest` pools
-//! connections and holds its TLS config per client, so that was six rustls configs, six connection
-//! pools and six sets of idle sockets to the same handful of Google hosts.
+//! There used to be half a dozen of these inside `src-tauri` (orchestrator, PoToken, cipher
+//! fetcher, cipher config, lyrics, and more), each built from its own `Client::builder()`.
+//! `reqwest` pools connections and holds its TLS config per client, so that was a rustls config, a
+//! connection pool and a set of idle sockets each, to the same handful of Google hosts.
 //!
 //! Everything the separate clients were configured for (a User-Agent, a timeout) is per-request
 //! state, so it moved to the call sites. The User-Agent is deliberately NOT a default here: what

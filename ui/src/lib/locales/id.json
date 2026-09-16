@@ -249,8 +249,6 @@
 			"autostart_hint": "Mulai Limusic secara otomatis saat sistem Anda booting.",
 			"close_to_tray": "Tutup ke baki sistem (system tray)",
 			"close_to_tray_hint": "Biarkan Limusic tetap berjalan di latar belakang saat menutup jendela.",
-			"discord_rpc": "Discord Rich Presence",
-			"discord_rpc_hint": "Tampilkan lagu yang sedang diputar di profil Discord Anda.",
 			"update_banner": "Notifikasi pembaruan",
 			"update_banner_hint": "Tampilkan banner saat versi baru Limusic tersedia.",
 			"proxy": "Proksi HTTP/HTTPS",
@@ -461,18 +459,6 @@
 			"err_paste_code": "Tempelkan kode undangan yang dikirim teman Anda",
 			"err_paste_full_invite": "Tempelkan undangan lengkap dari host, yang berisi alamat server"
 		}
-	},
-	"integrations": {
-		"discord_on": "Status Discord aktif",
-		"discord_off": "Status Discord mati",
-		"discord_tooltip_on": "Status Discord aktif — klik untuk mematikan",
-		"discord_tooltip_off": "Tampilkan apa yang Anda putar di Discord",
-		"lastfm_scrobbling_as": "Scrobbling sebagai {user}",
-		"lastfm_disconnected": "Last.fm terputus",
-		"lastfm_approve_in_browser": "Setujui Limusic di peramban Anda",
-		"lastfm_connecting": "Menghubungkan ke Last.fm — klik untuk membatalkan",
-		"lastfm_scrobble_to": "Scrobble ke Last.fm",
-		"disconnect": "Putuskan"
 	},
 	"a11y": {
 		"close": "Tutup",

@@ -728,7 +728,7 @@ fn parse_panel_video(node: &Value) -> Option<SongItem> {
     let byline = node.get("longBylineText").or_else(|| node.get("shortBylineText"));
     let byline_runs = byline.and_then(|b| b.get("runs")).and_then(Value::as_array);
     // The byline is a full descriptor ("Delara • Sjelen • 2026"), not a name: take its artist
-    // field only, or the queue (and the scrobbler behind it) gets the whole string as the artist.
+    // field only, or the queue (and the player bar behind it) gets the whole string as the artist.
     let artists = artists_from_runs(byline_runs).unwrap_or_default();
     let artist_id = byline_runs.and_then(|r| first_artist_id(r));
     let duration = node.get("lengthText").and_then(runs_text_opt);
@@ -859,7 +859,7 @@ fn subtitle_groups(runs: &[Value]) -> Vec<Group> {
 }
 
 /// Result rows on an unfiltered search lead with the result type: "Song • Delara • 3:02". Nothing
-/// downstream wants that word, and taken as an artist it lands in the user's Last.fm scrobbles.
+/// downstream wants that word, and taken as an artist it lands in the player bar as the name.
 fn is_type_label(s: &str) -> bool {
     matches!(
         s,
@@ -899,7 +899,7 @@ fn split_subtitle(runs: Option<&Vec<Value>>) -> (String, Option<String>, Option<
     let groups: Vec<String> = groups.into_iter().map(|g| g.text).collect();
     // A row can carry no artist field at all: YouTube drops it when the query is the artist, so
     // every song row of a "boygenius" search reads "Song • 3:55". The length is not a name, and
-    // taken as one it reaches the player bar and the user's scrobbles (#216). Leave it empty and
+    // taken as one it reaches the player bar and the OS media widget (#216). Leave it empty and
     // let `backfill_metadata` fill it from the player's author when the row is played.
     let artists = groups.first().filter(|g| !is_duration(g)).cloned().unwrap_or_default();
     // Last group that is a duration is the duration; the middle is album.
@@ -1289,7 +1289,7 @@ mod tests {
 
     // #216: search for an artist by name and YouTube drops the artist from the song rows it
     // returns, leaving "Song • 3:55". The length is not a name; taking it as one put a time in the
-    // artist field of the row, the card, the player bar and the scrobble.
+    // artist field of the row, the card and the player bar.
     #[test]
     fn a_duration_only_subtitle_has_no_artist() {
         let row = json!({
@@ -1385,7 +1385,7 @@ mod tests {
     }
 
     /// An unfiltered search row leads with the result type ("Song • Delara • 3:02"). It must not
-    /// end up in `artists` — that string is what gets scrobbled.
+    /// end up in `artists` — that string is what the player bar shows.
     #[test]
     fn drops_the_result_type_from_a_search_row() {
         let root = json!({

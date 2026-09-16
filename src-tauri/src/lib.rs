@@ -2,13 +2,12 @@
 
 mod appicon;
 mod blocked;
+mod browser;
 mod cipher;
 mod commands;
 mod db;
 mod diagnostics;
-mod discord;
 mod http;
-mod lastfm;
 mod listentogether;
 mod local;
 mod lyrics;
@@ -354,13 +353,6 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             taskbar::init(&handle);
 
-            // Discord rich presence — off unless the user opted in; parks on its channel until then.
-            let discord = discord::spawn(db.get_setting("discord_rpc").as_deref() == Some("true"));
-
-            // Last.fm scrobbler — parks until a session key exists (titlebar connect flow).
-            let lastfm =
-                lastfm::spawn(db.get_setting("lastfm_session_key").filter(|s| !s.is_empty()));
-
             // Listen Together session (context/19). Server URL is a DB setting so "home PC → VPS" is
             // config, not a rebuild. The sync channel feeds the guest-playback bridge below.
             let lt_url = db
@@ -379,8 +371,6 @@ pub fn run() {
                 lt,
                 cache_dir.clone(),
                 media,
-                discord,
-                lastfm,
             ));
             app.manage(app_state.clone());
 
@@ -647,9 +637,6 @@ pub fn run() {
             commands::lt_reject_suggestion,
             commands::lt_request_sync,
             commands::get_lyrics,
-            commands::lastfm_connect,
-            commands::lastfm_disconnect,
-            commands::lastfm_status,
             commands::theater_fullscreen,
             commands::release_notes,
             commands::can_self_update,

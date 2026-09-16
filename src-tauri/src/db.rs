@@ -10,10 +10,10 @@ pub struct Db(Mutex<Connection>);
 
 /// The stored-account key (multi-account support): a stable per-Google-account identifier derived
 /// from the long-lived `SAPISID` cookie value, the one piece of the jar Google does not rotate.
-/// Versioned MD5 (the `md-5` crate is already here for the Last.fm signature), hex-encoded,
-/// deliberately not `DefaultHasher`, whose output Rust does not guarantee to stay stable across
-/// releases: a persisted key must survive toolchain upgrades. Not a security digest, just a stable
-/// identifier, and the SAPISID itself never appears in the key the UI gets to see.
+/// Versioned MD5, hex-encoded, deliberately not `DefaultHasher`, whose output Rust does not
+/// guarantee to stay stable across releases: a persisted key must survive toolchain upgrades. Not
+/// a security digest, just a stable identifier, and the SAPISID itself never appears in the key
+/// the UI gets to see.
 ///
 /// `None` for a jar with no SAPISID, which is not a signed-in session at all: every caller needs
 /// to skip such a cookie rather than file it under a key shared with every other broken jar.
@@ -157,6 +157,13 @@ impl Db {
         // Local files are no longer recorded as plays (see `AppState::on_position`), but 0.3.1
         // recorded them for a while, so clear out anything already sitting in On Repeat's table.
         let _ = conn.execute("DELETE FROM plays WHERE video_id LIKE 'LOCAL:%'", []);
+        // Last.fm and Discord are gone. Nothing reads these rows any more, and one of them is a
+        // Last.fm session key: a live credential the user can no longer revoke from inside the
+        // app, so it should not sit in the database of everyone who upgrades.
+        let _ = conn.execute(
+            "DELETE FROM settings WHERE key IN ('lastfm_session_key', 'lastfm_username', 'discord_rpc')",
+            [],
+        );
         // Sweep dead stream URLs here as well as on write. `put_stream` only runs on a cache miss,
         // so a session spent replaying cached tracks never triggers one, and the backlog that
         // built up before anything pruned at all (1803 rows, 1772 of them expired, on a real

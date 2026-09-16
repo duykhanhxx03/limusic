@@ -1,7 +1,7 @@
 <script lang="ts">
 	// Account control for the titlebar (context/15) — moved out of the sidebar so sign-in lives in the
 	// top bar. Its own component because Titlebar.svelte already uses a single shared mx/my/menuOpen
-	// for the Last.fm menu; a second menu in that file would fight over them.
+	// for the window-control cluster; a second menu in that file would fight over them.
 	// Multi-account: below the active account the menu lists the *other* saved Google accounts, one
 	// click each to switch to, plus Add account (Google's AddSession flow) and per-account removal.
 	import { HugeiconsIcon } from '@hugeicons/svelte';
@@ -33,7 +33,7 @@
 	const others = $derived(accounts.filter((a) => !a.active));
 
 	/**
-	 * Right-anchored under the trigger, like the Last.fm menu next to it. The saved-account list
+	 * Right-anchored under the trigger. The saved-account list
 	 * is refetched on every open so it can't go stale while the menu was closed.
 	 */
 	async function openMenu(e: MouseEvent) {

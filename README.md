@@ -43,8 +43,6 @@ YouTube Music client, and grew from there.
 - **Music videos**: optional, the video plays where the artwork sits, with the same gapless audio behind it
 - **Mini Player and theater mode**: shrink to a strip that keeps playing, or go fullscreen with cover and lyrics side by side
 - **Local Music**: play your own files, with all metadata still intact
-- **Last.fm scrobbling**: connect once from the title bar, every play is scrobbled
-- **Discord Rich Presence**: artwork, live progress bar, one click to toggle
 - **OS media keys** and now-playing integration (MPRIS on Linux, SMTC on Windows, plus playback buttons on the Windows taskbar preview)
 - **System tray**: close the window, keep the music; play/pause and skip from the tray, optional start-on-login
 - **Listen Together**: synced listening rooms over a small self-hosted relay
@@ -88,32 +86,6 @@ YouTube Music client, and grew from there.
 | Windows | `.msi` | Plain installer, no auto-update |
 | macOS (Apple Silicon) | `.dmg` | Self-updating. Unsigned, so the first launch needs `xattr -dr com.apple.quarantine /Applications/limusic.app` |
 | macOS (Intel) | none | Build from source, see [docs/BUILD-PLATFORMS.md](docs/BUILD-PLATFORMS.md) |
-
----
-
-## Scrobbling & Discord
-
-Both live in the title bar, next to the window controls.
-
-- **Last.fm**: click the Last.fm mark, approve Limusic in the browser tab that
-  opens, and you're connected for good. Tracks scrobble at the halfway point (or
-  four minutes, whichever comes first), which is Last.fm's own rule. Click again
-  to see the account or disconnect.
-- **Discord**: click the Discord mark to toggle Rich Presence. Green dot means
-  it's live. The card shows the track, artist, album art, and a progress bar, and
-  it disappears when you pause.
-
-Building from source? Last.fm needs your own API credentials, and they are not in
-the repo. Get a key at [last.fm/api/account/create](https://www.last.fm/api/account/create)
-and put it in `src-tauri/lastfm.keys`:
-
-```
-LIMUSIC_LASTFM_API_KEY=your_key
-LIMUSIC_LASTFM_API_SECRET=your_secret
-```
-
-Without that file everything else still builds and runs; the Last.fm button just
-reports that it isn't configured.
 
 ---
 

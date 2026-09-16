@@ -258,8 +258,6 @@
 			"autostart_hint": "Pornește automat Limusic când se pornește sistemul.",
 			"close_to_tray": "Închide bara de sistem",
 			"close_to_tray_hint": "Ține Limusic pornit în fundal când fereastra este închisă.",
-			"discord_rpc": "Discord Rich Presence",
-			"discord_rpc_hint": "Arată melodia ascultată in timp real pe profilul tău Discord.",
 			"update_banner": "Notificări de actualizare",
 			"update_banner_hint": "Arată un banner când o nouă versiune de Limusic este disponibilă.",
 			"proxy": "HTTP/HTTPS Proxy",
@@ -470,18 +468,6 @@
 			"err_paste_code": "Inserează codul de invitație primit de la prietenul tău",
 			"err_paste_full_invite": "Inserează invitația completă primită de la gazdă; aceasta conține adresa serverului"
 		}
-	},
-	"integrations": {
-		"discord_on": "Discord presence pornit",
-		"discord_off": "Discord presence oprit",
-		"discord_tooltip_on": "Discord presence pornit - apasă ca să oprești",
-		"discord_tooltip_off": "Arată ce asculți pe Discord",
-		"lastfm_scrobbling_as": "Scroblează ca {user}",
-		"lastfm_disconnected": "Last.fm deconectat",
-		"lastfm_approve_in_browser": "Aprobă Limusic în browser-ul tău",
-		"lastfm_connecting": "Se conectează la Last.fm — apasă pentru a anula",
-		"lastfm_scrobble_to": "Scroblează în Last.fm",
-		"disconnect": "Deconectare"
 	},
 	"a11y": {
 		"close": "Închide",

@@ -249,8 +249,6 @@
 			"autostart_hint": "Sistem açıldığında Limusic uygulamasını otomatik başlatın.",
 			"close_to_tray": "Sistem tepsisine küçült",
 			"close_to_tray_hint": "Pencere kapatıldığında arka planda çalışmaya devam etsin.",
-			"discord_rpc": "Discord Zengin Varlık",
-			"discord_rpc_hint": "Çalan şarkıyı Discord profilinizde gösterin.",
 			"update_banner": "Güncelleme bildirimleri",
 			"update_banner_hint": "Yeni bir Limusic sürümü çıktığında bildirim çubuğu gösterilsin.",
 			"proxy": "HTTP/HTTPS Proxy",
@@ -461,18 +459,6 @@
 			"err_paste_code": "Arkadaşınızın gönderdiği davet kodunu yapıştırın",
 			"err_paste_full_invite": "Ev sahibinin gönderdiği tam davet kodunu yapıştırın"
 		}
-	},
-	"integrations": {
-		"discord_on": "Discord durumu açık",
-		"discord_off": "Discord durumu kapalı",
-		"discord_tooltip_on": "Discord durumu açık — kapatmak için tıklayın",
-		"discord_tooltip_off": "Çaldığınız parçayı Discord'da gösterin",
-		"lastfm_scrobbling_as": "{user} olarak Scrobble ediliyor",
-		"lastfm_disconnected": "Last.fm bağlantısı kesildi",
-		"lastfm_approve_in_browser": "Tarayıcınızda Limusic'e izin verin",
-		"lastfm_connecting": "Last.fm'e bağlanılıyor — iptal etmek için tıklayın",
-		"lastfm_scrobble_to": "Last.fm'e scrobble et",
-		"disconnect": "Bağlantıyı kes"
 	},
 	"a11y": {
 		"close": "Kapat",

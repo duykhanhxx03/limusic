@@ -249,8 +249,6 @@
 			"autostart_hint": "Автоматически запускать Limusic, при загрузке системы.",
 			"close_to_tray": "Свернуть в трей",
 			"close_to_tray_hint": "Оставить Limusic на заднем плане, когда окно закрыто.",
-			"discord_rpc": "Discord Rich Presence",
-			"discord_rpc_hint": "Показать песню, играющую сейчас в вашем профиле Discord.",
 			"update_banner": "Уведомления",
 			"update_banner_hint": "Показать баннер, когда доступна новая версия Limusic.",
 			"proxy": "HTTP/HTTPS Прокси",
@@ -452,18 +450,6 @@
 			"err_paste_code": "Вставьте код приглашения, который прислал ваш друг",
 			"err_paste_full_invite": ""
 		}
-	},
-	"integrations": {
-		"discord_on": "Discord presence включён",
-		"discord_off": "Discord presence отключён",
-		"discord_tooltip_on": "Discord presence включено — нажмте что-бы отключить",
-		"discord_tooltip_off": "Показывает что у вас играет в Discord",
-		"lastfm_scrobbling_as": "",
-		"lastfm_disconnected": "Last.fm отключён",
-		"lastfm_approve_in_browser": "Разрешите Limusic в своем браузере",
-		"lastfm_connecting": "Подключаемся к Last.fm — нажмите что-бы остановить",
-		"lastfm_scrobble_to": "",
-		"disconnect": "Отключить"
 	},
 	"a11y": {
 		"close": "Закрыть",

@@ -41,8 +41,7 @@ const AUDIO_EXT: [&str; 15] = [
 const COVER_FILES: [&str; 6] =
     ["cover.jpg", "cover.png", "folder.jpg", "folder.png", "front.jpg", "album.jpg"];
 
-/// What an untagged file's artist reads as. Shared so the scrobbler can refuse to send it: a
-/// Last.fm profile full of "Unknown artist" is worse than a gap.
+/// What an untagged file's artist reads as.
 pub const UNKNOWN_ARTIST: &str = "Unknown artist";
 
 /// How deep a folder tree is walked. Music/Artist/Album/Disc 1 is four; ten is room to spare
@@ -417,7 +416,7 @@ pub fn to_song(t: &LocalTrack) -> SongItem {
         album: Some(t.album.clone()),
         // No `album_id`: that field is what puts "Go to album" in a track's ⋯ menu, and a file on
         // this disk has no album page worth offering there. The Local tab's album grid is how you
-        // get to one. The album *name* stays — scrobbling and lyrics matching both use it.
+        // get to one. The album *name* stays — lyrics matching uses it.
         album_id: None,
         // 0 means "the tag reader couldn't say"; mpv fills the real length in once it plays.
         duration: (t.duration_secs > 0).then(|| fmt_duration(t.duration_secs)),
@@ -714,7 +713,7 @@ mod tests {
     #[test]
     fn a_local_song_offers_no_album_to_go_to() {
         let s = to_song(&track("/m/x/a.mp3", "Drake", "Views", "drake--views"));
-        assert_eq!(s.album.as_deref(), Some("Views"), "the name still travels (scrobbles, lyrics)");
+        assert_eq!(s.album.as_deref(), Some("Views"), "the name still travels (lyrics matching)");
         assert_eq!(s.album_id, None, "but nothing for the ⋯ menu to navigate to");
     }
 

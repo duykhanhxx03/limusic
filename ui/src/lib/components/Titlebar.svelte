@@ -3,10 +3,9 @@
 	// with a system frame (`win.chrome`, issue #65) this bar stays as a toolbar and only drops its
 	// own window buttons, since everything else on it is app navigation, not window management.
 	// Everything on the bar is a drag region except the buttons; double-click maximizes (Tauri's
-	// drag region itself). Right cluster: Last.fm scrobbler | separator | minimize / maximize /
-	// close — per the design, the scrobbler lives with the window controls but visually apart.
-	// Account (sign in/out) sits first in that cluster, in its own component.
-	import { onMount } from 'svelte';
+	// drag region itself). Right cluster: account (sign in/out, its own component), then the
+	// app-level buttons, then a separator and minimize / maximize / close — per the design, the
+	// window controls sit with the rest but visually apart.
 	import { afterNavigate } from '$app/navigation';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
@@ -18,21 +17,14 @@
 		Cancel01Icon,
 		MinimizeScreenIcon,
 		CameraVideoIcon,
-		CheckmarkCircle01Icon,
-		Loading03Icon,
-		HotspotOfflineIcon,
 		UserGroup02Icon,
 		Link04Icon
 	} from '@hugeicons/core-free-icons';
-	import LastFmIcon from './LastFmIcon.svelte';
-	import DiscordIcon from './DiscordIcon.svelte';
 	import AccountMenu from './AccountMenu.svelte';
 	import { appIcon } from '$lib/appicon.svelte';
-	import * as api from '$lib/api';
-	import { openMiniPlayer, playback, toast, ui } from '$lib/player.svelte';
+	import { openMiniPlayer, playback, ui } from '$lib/player.svelte';
 	import { win } from '$lib/win.svelte';
 	import { lt } from '$lib/lt.svelte';
-	import { anchorMenu, fitMenu, NO_ANCHOR } from '$lib/menu';
 	import { t } from '$lib/i18n.svelte';
 
 	// `w` is this window; `win` (imported) is the shared frame state.
@@ -49,91 +41,6 @@
 		else if (nav.delta !== undefined) depth = Math.max(0, depth + nav.delta);
 		else deepest = depth += 1;
 	});
-
-	// Last.fm connection state. `connecting` is UI-local: set on click, cleared by the
-	// `lastfm-state` event (success, failure, or timeout) — the backend always answers.
-	let connected = $state(false);
-	let username = $state<string | null>(null);
-	let connecting = $state(false);
-	let menuOpen = $state(false);
-	let anchor = $state(NO_ANCHOR);
-
-	// Discord Rich Presence — a plain on/off toggle of the `discord_rpc` setting (the backend
-	// connects/clears the presence the moment it flips). Optimistic; reverted on failure.
-	let discordOn = $state(false);
-
-	async function toggleDiscord() {
-		const next = !discordOn;
-		discordOn = next;
-		try {
-			await api.setSetting('discord_rpc', next ? 'true' : 'false');
-			toast.success(next ? t('integrations.discord_on') : t('integrations.discord_off'));
-		} catch (e) {
-			discordOn = !next;
-			toast.error(String(e));
-		}
-	}
-
-	onMount(() => {
-		api.getSettings()
-			.then((s) => (discordOn = s.discord_rpc === 'true'))
-			.catch(() => {});
-		api.lastfmStatus()
-			.then((s) => {
-				connected = s.connected;
-				username = s.username ?? null;
-			})
-			.catch(() => {});
-		const sub = api.onLastfmState((s) => {
-			const wasConnecting = connecting;
-			connecting = false;
-			connected = s.connected;
-			username = s.username ?? null;
-			if (s.error) toast.error(s.error);
-			else if (s.connected) toast.success(t('integrations.lastfm_scrobbling_as', { user: s.username ?? '' }));
-			else if (!wasConnecting) toast.success(t('integrations.lastfm_disconnected'));
-		});
-		return () => sub.then((u) => u());
-	});
-
-	async function onScrobblerClick(e: MouseEvent) {
-		if (connecting) {
-			// A second click cancels the pending browser authorization. The `lastfm-state` event it
-			// triggers clears the spinner (and, arriving while `connecting`, stays toast-silent).
-			api.lastfmDisconnect().catch(() => {});
-			return;
-		}
-		if (connected) {
-			openMenu(e);
-			return;
-		}
-		connecting = true;
-		try {
-			await api.lastfmConnect();
-			toast(t('integrations.lastfm_approve_in_browser'));
-		} catch (err) {
-			connecting = false;
-			toast.error(String(err));
-		}
-	}
-
-	function openMenu(e: MouseEvent) {
-		anchor = anchorMenu(e, { align: 'right' });
-		menuOpen = true;
-	}
-
-	function disconnect() {
-		menuOpen = false;
-		api.lastfmDisconnect().catch((e) => toast.error(String(e)));
-	}
-
-	const scrobblerTitle = $derived(
-		connecting
-			? t('integrations.lastfm_connecting')
-			: connected
-				? t('integrations.lastfm_scrobbling_as', { user: username ?? '' })
-				: t('integrations.lastfm_scrobble_to')
-	);
 </script>
 
 <!-- `relative` makes this a stacking context, so the account/window dropdowns inside it are capped
@@ -178,8 +85,8 @@
 	</div>
 
 	<div class="flex h-full items-center">
-		<!-- Account first, then the integrations, then the window controls. The drag region lives on
-		     <header> only, so these children are ordinary buttons — don't add the attribute here. -->
+		<!-- Account first, then the app-level buttons, then the window controls. The drag region lives
+		     on <header> only, so these children are ordinary buttons — don't add the attribute here. -->
 		<AccountMenu />
 		<div class="mx-1.5 h-4 w-px bg-border"></div>
 
@@ -207,7 +114,7 @@
 			<span class="relative">
 				<HugeiconsIcon icon={UserGroup02Icon} class="h-4 w-4" />
 				{#if lt.role !== 'none'}
-					<!-- Discord's status dot with a ping behind it: two layers, because animate-ping
+					<!-- A live-status dot with a ping behind it: two layers, because animate-ping
 					     scales and fades the element it's on, so a lone dot would blink out. -->
 					<span class="absolute -right-0.5 -top-0.5 h-1.5 w-1.5">
 						<span class="absolute inset-0 animate-ping rounded-full bg-emerald-500 opacity-75"
@@ -215,52 +122,6 @@
 						<span class="absolute inset-0 rounded-full bg-emerald-500 ring-[1.5px] ring-background"
 						></span>
 					</span>
-				{/if}
-			</span>
-		</button>
-
-		<button
-			class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground {discordOn
-				? 'text-foreground'
-				: ''}"
-			onclick={toggleDiscord}
-			title={discordOn ? t('integrations.discord_tooltip_on') : t('integrations.discord_tooltip_off')}
-			aria-label={t('settings.general.discord_rpc')}
-		>
-			<span class="relative">
-				<DiscordIcon class="h-4 w-4" />
-				<!-- Presence status dot, Discord-style: green = live, red = off. -->
-				<span
-					class="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full ring-[1.5px] ring-background {discordOn
-						? 'bg-emerald-500'
-						: 'bg-red-500'}"
-				></span>
-			</span>
-		</button>
-
-		<button
-			class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground {connected
-				? 'text-foreground'
-				: ''}"
-			onclick={onScrobblerClick}
-			title={scrobblerTitle}
-			aria-label={scrobblerTitle}
-		>
-			<span class="relative">
-				<LastFmIcon class="h-4 w-4 {connecting ? 'animate-pulse opacity-60' : ''}" />
-				{#if connecting}
-					<HugeiconsIcon
-						icon={Loading03Icon}
-						strokeWidth={2.5}
-						class="absolute -bottom-1.5 -right-2 h-3.5 w-3.5 animate-spin text-primary"
-					/>
-				{:else if connected}
-					<!-- bg-background ring so the badge reads over the icon's stroke. -->
-					<HugeiconsIcon
-						icon={CheckmarkCircle01Icon}
-						strokeWidth={2.5}
-						class="absolute -bottom-1.5 -right-2 h-3.5 w-3.5 rounded-full bg-background text-primary"
-					/>
 				{/if}
 			</span>
 		</button>
@@ -279,7 +140,7 @@
 		</button>
 
 		<!-- Mini player: hides the app to the tray and hands over to the floating widget (mini.rs).
-		     It sits with the integrations rather than the window controls because it swaps what
+		     It sits with the app-level buttons rather than the window controls because it swaps what
 		     you're using, not the size of this window. -->
 		<button
 			class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground"
@@ -320,33 +181,3 @@
 		{/if}
 	</div>
 </header>
-
-{#if menuOpen}
-	<button
-		class="fixed inset-0 z-40 cursor-default"
-		onclick={() => (menuOpen = false)}
-		aria-label={t('common.close')}
-	></button>
-	<div
-		class="fixed z-50 min-w-52 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95"
-		style={anchor.style}
-		{@attach fitMenu(anchor)}
-	>
-		<div class="flex items-center gap-2.5 px-2 py-2">
-			<LastFmIcon class="h-4 w-4 shrink-0" />
-			<div class="min-w-0">
-				<div class="text-sm font-medium leading-tight">Last.fm</div>
-				<div class="truncate text-xs text-muted-foreground">
-					{t('integrations.lastfm_scrobbling_as', { user: username ?? '' })}
-				</div>
-			</div>
-		</div>
-		<div class="mx-1 my-1 h-px bg-border"></div>
-		<button
-			class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
-			onclick={disconnect}
-		>
-			<HugeiconsIcon icon={HotspotOfflineIcon} class="h-4 w-4" /> {t('integrations.disconnect')}
-		</button>
-	</div>
-{/if}

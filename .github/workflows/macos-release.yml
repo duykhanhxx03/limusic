@@ -30,7 +30,6 @@ name: macOS release binaries
 #
 # Requires repo secrets (same set as the other two):
 #   TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD   (mandatory, no sig no update)
-#   LASTFM_API_KEY / LASTFM_API_SECRET                               (optional, warn-only)
 
 # DISPATCH ONLY, ON PURPOSE, for the reason spelled out in the other two workflows: Actions caches
 # are ref-scoped, and a run triggered by `release: published` executes on the tag ref, so it can
@@ -180,21 +179,6 @@ jobs:
         # The npm CLI ships a prebuilt binary; `cargo install tauri-cli` would compile it from
         # source on every cache miss.
         run: npm install -g "@tauri-apps/cli@^2"
-
-      # The gitignored src-tauri/lastfm.keys (read by build.rs) is not in the checkout, so recreate
-      # it from repo secrets. Missing secrets are a warning: the app works fine without Last.fm.
-      - name: Last.fm API keys
-        env:
-          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
-          LASTFM_API_SECRET: ${{ secrets.LASTFM_API_SECRET }}
-        run: |
-          if [ -n "$LASTFM_API_KEY" ] && [ -n "$LASTFM_API_SECRET" ]; then
-            printf 'LIMUSIC_LASTFM_API_KEY=%s\nLIMUSIC_LASTFM_API_SECRET=%s\n' \
-              "$LASTFM_API_KEY" "$LASTFM_API_SECRET" > src-tauri/lastfm.keys
-            echo "lastfm.keys written"
-          else
-            echo "::warning::LASTFM_API_KEY / LASTFM_API_SECRET secrets not set, this macOS build ships without Last.fm scrobbling"
-          fi
 
       # Only the .app. The .dmg and the updater tarball are built further down, from the *fixed and
       # re-signed* bundle: anything tauri packaged here would contain the pre-dylibbundler app.

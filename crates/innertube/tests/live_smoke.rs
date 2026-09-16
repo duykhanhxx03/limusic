@@ -189,23 +189,21 @@ async fn playlist_sort_params_still_order_the_server_side_list() {
     eprintln!("title sort verified against {} tracks, Liked Music restored", plain.items.len());
 }
 
-/// Every surface has to hand the queue an artist that is a *name*. That string is the player bar,
-/// the OS media widget, Discord, and the Last.fm scrobble, so the two bad shapes are: nothing at all
+/// Every surface has to hand the queue an artist that is a *name*. That string is what the player
+/// bar and the OS media widget show, so the two bad shapes are: nothing at all
 /// (YouTube ships the per-track artist column empty on single-artist albums, `"text": {}`, because
 /// the header names the artist) and a whole display subtitle ("Aqua • 1.7B views" off a song card).
 /// The unit tests pin how we parse a fixture; this pins the shape YouTube actually sends, which is
 /// the half that moves under us.
 ///   cargo test -p innertube --features integration-tests every_surface -- --nocapture
 #[tokio::test]
-async fn every_surface_yields_a_scrobbleable_artist() {
-    /// Mirrors `lastfm::scrobbleable` plus the "•" tell: a real artist line separates collabs with
-    /// "&" or ",", never a bullet, so a bullet means a display string leaked into the field.
+async fn every_surface_yields_a_usable_artist() {
+    /// The "•" tell: a real artist line separates collabs with "&" or ",", never a bullet, so a
+    /// bullet means a display string leaked into the field.
     fn bad(artist: &str) -> Option<&'static str> {
         match artist {
-            a if a.trim().is_empty() => Some("no artist (would never scrobble)"),
-            a if a.contains('•') => {
-                Some("display subtitle, not an artist (would scrobble wrong)")
-            }
+            a if a.trim().is_empty() => Some("no artist (the player bar would show a bare title)"),
+            a if a.contains('•') => Some("display subtitle, not an artist"),
             _ => None,
         }
     }
@@ -275,7 +273,7 @@ async fn every_surface_yields_a_scrobbleable_artist() {
     );
     assert!(
         problems.is_empty(),
-        "{checked} tracks checked, {} unscrobbleable:\n  {}",
+        "{checked} tracks checked, {} with an unusable artist:\n  {}",
         problems.len(),
         problems.join("\n  ")
     );

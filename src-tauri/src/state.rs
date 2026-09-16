@@ -17,7 +17,6 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 
 use crate::db::{now_secs, Db, StoredAccount};
-use crate::discord::DiscordHandle;
 use crate::listentogether::{LtSession, SyncCommand};
 use crate::media::MediaHandle;
 use crate::orchestrator::{Orchestrator, PlaybackData, PlaybackPing, ResolveError};
@@ -45,11 +44,6 @@ pub struct AppState {
     cache_dir: std::path::PathBuf,
     /// OS media integration (MPRIS/SMTC/NowPlaying). `None` if it failed to init. context/16.
     media: Option<MediaHandle>,
-    /// Discord rich presence. Fed the same track/playback changes as `media`; gated on the
-    /// `discord_rpc` setting inside its own thread.
-    discord: Option<DiscordHandle>,
-    /// Last.fm scrobbler. Same feed again; parks until a session key is set (titlebar button).
-    pub lastfm: crate::lastfm::LastfmHandle,
     queue: Mutex<QueueState>,
     /// Bumped on every explicit `play`/jump so superseded async resolves discard their result
     /// (cancellation without JoinHandle bookkeeping). context/06 §6.
@@ -364,8 +358,6 @@ impl AppState {
         lt: Arc<LtSession>,
         cache_dir: std::path::PathBuf,
         media: Option<MediaHandle>,
-        discord: Option<DiscordHandle>,
-        lastfm: crate::lastfm::LastfmHandle,
     ) -> Self {
         AppState {
             it,
@@ -377,8 +369,6 @@ impl AppState {
             lt,
             cache_dir,
             media,
-            discord,
-            lastfm,
             queue: Mutex::new(QueueState::default()),
             auth: tokio::sync::Mutex::default(),
             history_pinged: AtomicBool::new(false),
@@ -1511,7 +1501,7 @@ impl AppState {
             // extended it; this is the fallback when that didn't land in time). Off the pump:
             // spawn, and let the task either continue playback or do the pause bookkeeping —
             // pausing here and un-pausing a second later would flicker every consumer (UI,
-            // MPRIS, Discord).
+            // MPRIS).
             let me = self.clone();
             tauri::async_runtime::spawn(async move {
                 let gen = me.generation.fetch_add(1, Ordering::SeqCst) + 1;
@@ -1528,8 +1518,8 @@ impl AppState {
                     tracing::info!("queue exhausted");
                     let _ = me.app.emit("playback-state", "paused");
                     // mpv goes idle without flipping its pause flag, so no Paused event will fire
-                    // — tell the OS widget + Discord ourselves or they show "playing" forever
-                    // past the last song.
+                    // — tell the OS widget ourselves or it shows "playing" forever past the last
+                    // song.
                     me.media_set_playing(false);
                 }
             });
@@ -1772,9 +1762,9 @@ impl AppState {
         // or a radio track is nothing at all (issue #93). Ask.
         self.refresh_rating(&item.video_id, gen);
         // We just told mpv to play, but its `pause` flag was already `false`, so no property event
-        // will announce it (see `Player::is_playing`). Say so ourselves — otherwise MPRIS and
-        // Discord never learn the track started. After `emit_now_playing`, so the new track is the
-        // current one before anything renders it as playing.
+        // will announce it (see `Player::is_playing`). Say so ourselves — otherwise MPRIS never
+        // learns the track started. After `emit_now_playing`, so the new track is the current one
+        // before anything renders it as playing.
         self.media_set_playing(true);
         self.emit_queue().await;
         self.persist_queue().await;
@@ -1999,7 +1989,7 @@ impl AppState {
     fn emit_now_playing(&self, item: &SongItem, stream_client: &str) {
         let _ = self.app.emit("now-playing", Self::now_playing_json(item, stream_client));
         let _ = self.app.emit("playback-state", "playing");
-        // Push the same metadata to the OS media widget (context/16) and Discord.
+        // Push the same metadata to the OS media widget (context/16).
         if let Some(m) = &self.media {
             // MPRIS/SMTC want a URL; a local track's artwork is a path, so hand it a file:// one.
             // Scheme, not leading slash: a Windows cover path is `C:\...`, and SMTC drops the whole
@@ -2013,20 +2003,13 @@ impl AppState {
             });
             m.set_metadata(&item.title, &item.artists, item.album.as_deref(), cover.as_deref());
         }
-        if let Some(d) = &self.discord {
-            d.set_track(item);
-        }
-        self.lastfm.set_track(item);
         // New track ⇒ let the next position tick through immediately instead of waiting out the
         // ~1s throttle, so a restored seek position (and the play-state self-heal) lands at once.
         self.last_media_push.store(0, Ordering::Relaxed);
     }
 
-    /// Push play/pause state + the current position to the OS media controls (context/16) and
-    /// Discord. The single choke point for play/pause, so both stay in step with mpv. Discord gets
-    /// the flag only — its position flows exclusively through the ticks, so a stale
-    /// `current_position()` here (the last tick can predate a track change) can't poison its
-    /// timeline.
+    /// Push play/pause state + the current position to the OS media controls (context/16). The
+    /// single choke point for play/pause, so the controls stay in step with mpv.
     pub fn media_set_playing(&self, playing: bool) {
         self.is_playing.store(playing, Ordering::Relaxed);
         if let Some(m) = &self.media {
@@ -2037,17 +2020,6 @@ impl AppState {
         }
         #[cfg(target_os = "windows")]
         crate::taskbar::set_playing(&self.app, playing);
-        if let Some(d) = &self.discord {
-            d.set_playing(playing);
-        }
-    }
-
-    /// Toggle Discord presence at runtime (the `discord_rpc` setting). Turning it off clears the
-    /// presence and closes the socket; turning it on re-pushes the current track.
-    pub fn set_discord_enabled(&self, on: bool) {
-        if let Some(d) = &self.discord {
-            d.set_enabled(on);
-        }
     }
 
     /// Latest mpv position (secs) — for OS scrubber updates + relative media-key seeks.
@@ -2273,10 +2245,6 @@ impl AppState {
             if let Some(m) = &self.media {
                 m.set_duration(secs);
             }
-            if let Some(d) = &self.discord {
-                d.set_duration(secs);
-            }
-            self.lastfm.set_duration(secs);
         }
     }
 
@@ -2538,8 +2506,8 @@ impl AppState {
         if let Some(item) = self.current_item().await {
             // Restored, not playing — announce the track but leave playback paused. Declare the
             // paused state *first*: mpv reports `pause: false` while idle at boot, so a track
-            // announced before this would briefly look like it was playing (and put a presence card
-            // up for a song nobody started).
+            // announced before this would briefly look like it was playing, in the OS widget and
+            // everywhere else, for a song nobody started.
             self.media_set_playing(false);
             self.emit_now_playing(&item, "restored");
             // The stored rating is as old as the database: a like made on another device since
@@ -2559,10 +2527,9 @@ impl AppState {
             self.last_pos_persist.store(now, Ordering::Relaxed);
             self.db.set_setting("queue_position", &pos.to_string());
         }
-        // Update the OS scrubber (~1s), throttled separately from the DB write. Discord rides the
-        // same tick — not to redraw its bar (it runs its own clock off the timestamps we pushed)
-        // but so it can notice a seek and re-push. A tick is NOT proof of playback (mpv also fires
-        // `time-pos` on seeks while paused), so ask mpv for the play state rather than assuming it.
+        // Update the OS scrubber (~1s), throttled separately from the DB write. A tick is NOT
+        // proof of playback (mpv also fires `time-pos` on seeks while paused), so ask mpv for the
+        // play state rather than assuming it.
         if now.saturating_sub(self.last_media_push.load(Ordering::Relaxed)) >= 1 {
             self.last_media_push.store(now, Ordering::Relaxed);
             // Never ask mpv anything here — this runs on the event pump, and `mpv_get_property` is
@@ -2585,10 +2552,6 @@ impl AppState {
                     m.set_playback(playing, pos);
                 }
             }
-            if let Some(d) = &self.discord {
-                d.set_position(pos);
-            }
-            self.lastfm.set_position(pos);
         }
     }
 
@@ -3635,10 +3598,10 @@ fn format_duration(ms: i64) -> String {
 /// `videoDetails.author` from the MAIN client, i.e. YouTube's own artist for the track: it repairs
 /// an artist string that is missing (album rows ship the artist column empty) or that is a whole
 /// display subtitle rather than a name ("Miley Cyrus • Plastic Hearts • 2020"). A "•" never appears
-/// in a real artist line, collabs use "&" and ",". Both shapes reach the player bar, the OS widget
-/// and Last.fm, and a wrong artist there is worse than a missing one: it scrobbles as another
-/// artist entirely. Rows persisted before this existed are healed the next time they play, because
-/// the caller writes the repaired item back into the queue.
+/// in a real artist line, collabs use "&" and ",". Both shapes reach the player bar and the OS
+/// widget, and a wrong artist there is worse than a missing one: it names another artist entirely.
+/// Rows persisted before this existed are healed the next time they play, because the caller
+/// writes the repaired item back into the queue.
 fn backfill_metadata(
     item: &mut SongItem,
     length_seconds: Option<&str>,
@@ -3883,9 +3846,9 @@ mod tests {
         }
     }
 
-    /// The repair every entry path goes through. Covers the two shapes that reached Last.fm as an
-    /// artist name: nothing at all (album rows), and a whole display subtitle (song cards, and rows
-    /// replayed out of On Repeat that were recorded back when the card parser leaked one).
+    /// The repair every entry path goes through. Covers the two shapes that reached the player bar
+    /// as an artist name: nothing at all (album rows), and a whole display subtitle (song cards, and
+    /// rows replayed out of On Repeat that were recorded back when the card parser leaked one).
     #[test]
     fn player_response_repairs_a_missing_or_bogus_artist() {
         let with = |artists: &str, runs: Vec<&str>| innertube::SongItem {

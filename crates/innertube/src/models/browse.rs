@@ -33,7 +33,7 @@ pub struct BrowseItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thumbnail: Option<String>,
     /// "3:47" — only on song rows from a list-style carousel (a card shelf carries none). Kept out
-    /// of `subtitle` so the queue and the scrobbler still get a clean artist string.
+    /// of `subtitle` so the queue and the player bar still get a clean artist string.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration: Option<String>,
     /// The `subtitle` artist line run by run, each tagged with its channel id when it links one.
@@ -572,7 +572,7 @@ fn list_item_to_browse_item(node: &Value) -> Option<BrowseItem> {
         });
     }
     let vid = list_item_video_id(node)?;
-    // A song card's subtitle doubles as its artist string once it's played (and scrobbled), so it
+    // A song card's subtitle doubles as its artist string once it's played, so it
     // carries the artist alone, never the "Song • … • 3:02" descriptor YouTube puts on the row.
     let runs = flex_runs(node, 1);
     let subtitle = artists_from_runs(runs);
@@ -672,8 +672,8 @@ pub fn parse_album(root: &Value) -> AlbumPage {
     //
     // Same for the artist and the album name: on a single-artist album YouTube ships the artist
     // column empty (`"text": {}`) because the header already says it, so every track would arrive
-    // with no artist at all, which is what the player bar shows and what Last.fm refuses to
-    // scrobble. A compilation fills the column per row; keep those, they differ per track.
+    // with no artist at all, which is what the player bar then shows. A compilation fills the
+    // column per row; keep those, they differ per track.
     let items = find_all(root, "musicResponsiveListItemRenderer")
         .into_iter()
         .filter_map(parse_list_item)
@@ -947,7 +947,7 @@ fn parse_two_row_item(node: &Value) -> Option<BrowseItem> {
         .and_then(Value::as_str)
     {
         // Same rule as a search row: a song card's subtitle becomes its artist once it plays (and
-        // scrobbles), so keep the artist field alone, never the whole "Aqua • 1.7B views" or
+        // player bar), so keep the artist field alone, never the whole "Aqua • 1.7B views" or
         // "Miley Cyrus • Plastic Hearts • 2020" descriptor the card displays. Cards that navigate
         // keep the full subtitle below: there it is only ever text on screen.
         let runs = node.get("subtitle").and_then(|s| s.get("runs")).and_then(Value::as_array);
@@ -1257,7 +1257,7 @@ mod tests {
 
     /// A song *card* (`musicTwoRowItemRenderer`, used by home shelves and the artist page's
     /// "Videos"/"Live performances" carousels) puts its whole display subtitle where the artist
-    /// goes. Playing it scrobbled "Aqua • 1.7B views" as the artist. Cards that navigate keep the
+    /// goes. Playing it showed "Aqua • 1.7B views" as the artist. Cards that navigate keep the
     /// full subtitle: there it is only ever text under a cover.
     #[test]
     fn song_card_subtitle_is_the_artist_alone() {
@@ -1770,7 +1770,7 @@ mod tests {
     /// On a single-artist album YouTube ships the per-track artist column *empty* (`"text": {}`,
     /// live-verified 2026-08 on Rumours / SOS / Nevermind / IGOR / Midnights / RENAISSANCE), because
     /// the header already names the artist. Left as-is those tracks play with no artist at all: the
-    /// player bar shows a bare title and Last.fm drops the scrobble. A compilation fills the column
+    /// player bar shows a bare title with no artist under it. A compilation fills the column
     /// per row, and those differ from the header, so they must survive untouched.
     #[test]
     fn album_tracks_inherit_the_header_artist_only_when_they_have_none() {
@@ -1819,7 +1819,7 @@ mod tests {
             a.items[1].artist_runs.is_empty(),
             "an unlinked row artist must not borrow the header's links"
         );
-        // Every track on an album page is on *this* album; Last.fm takes the album too.
+        // Every track on an album page is on *this* album, so the album name travels with it.
         assert_eq!(a.items[0].album.as_deref(), Some("Sjelen"));
         assert_eq!(a.items[1].album.as_deref(), Some("Sjelen"));
     }
