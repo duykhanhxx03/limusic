@@ -16,21 +16,26 @@ const MIN_TO_CHUNK = 200;
 /** How many more cards each approach to the bottom reveals. */
 const CHUNK = 120;
 
-export function reveal() {
-	let shown = $state(CHUNK);
+/**
+ * Both sizes are arguments because the unit is not always a card. The home feed reveals *shelves*,
+ * and a shelf costs what a hundred cards cost — mounting its own row of them — so it counts in
+ * single figures where a grid counts in hundreds.
+ */
+export function reveal(chunk: number = CHUNK, minToChunk: number = MIN_TO_CHUNK) {
+	let shown = $state(chunk);
 
 	return {
 		/** How many cards to render. Pass the full list's length. */
 		count(total: number): number {
-			return total <= MIN_TO_CHUNK ? total : Math.min(shown, total);
+			return total <= minToChunk ? total : Math.min(shown, total);
 		},
 		/** True when a sentinel is worth rendering under the grid. */
 		more(total: number): boolean {
-			return total > MIN_TO_CHUNK && shown < total;
+			return total > minToChunk && shown < total;
 		},
 		/** Back to one chunk: a different list, or a different tab, starts over. */
 		reset() {
-			shown = CHUNK;
+			shown = chunk;
 		},
 		/**
 		 * Sentinel attachment. The observer only fires on *entering* view, so the chunk it reveals
@@ -38,7 +43,7 @@ export function reveal() {
 		 * reveal early enough that the cards are usually there by the time you reach them.
 		 */
 		sentinel(node: HTMLElement) {
-			const io = new IntersectionObserver(([e]) => e.isIntersecting && (shown += CHUNK), {
+			const io = new IntersectionObserver(([e]) => e.isIntersecting && (shown += chunk), {
 				rootMargin: '600px 0px'
 			});
 			io.observe(node);

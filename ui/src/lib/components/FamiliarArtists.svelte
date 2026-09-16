@@ -134,7 +134,7 @@
 {#snippet subButton(a: ArtistPage, onDark: boolean)}
 	<button
 		class="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors {onDark
-			? 'bg-black/40 backdrop-blur-sm hover:bg-black/60'
+			? 'bg-black/55 hover:bg-black/70'
 			: 'hover:bg-accent/10'} {subs[a.channelId]
 			? 'text-primary'
 			: onDark
@@ -221,7 +221,7 @@
 							showPin={false}
 							vertical
 							iconClass="h-5 w-5"
-							triggerClass="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-black/40 text-white/70 backdrop-blur-sm transition hover:bg-black/60 hover:text-white"
+							triggerClass="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-black/55 text-white/70 transition hover:bg-black/70 hover:text-white"
 						/>
 					</div>
 				</div>

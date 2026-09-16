@@ -37,6 +37,7 @@
 		topArtists
 	} from '$lib/personal';
 	import { getCached, putCached } from '$lib/pagecache';
+	import { reveal } from '$lib/reveal.svelte';
 
 	const FORGOTTEN_KEY = 'home:forgotten';
 
@@ -93,6 +94,15 @@
 	 * one still in flight. Updated wherever `home` is, never on the click.
 	 */
 	let rendered = $state<string | null>(null);
+
+	// Mounting the whole feed at once is the one hitch left in the app: measured at 194–229 ms on
+	// every arrival at `/` (startup, back from a page, back to the All chip), while `/playlist` and
+	// `/library` never crossed 50 ms. `content-visibility` on each shelf already skips the layout
+	// and paint of what is off screen, but it cannot skip *building* the components, and a shelf
+	// builds a whole row of cards. So the feed reveals a few shelves at a time, the same way the
+	// card grids do — four, because that already overflows the tallest window, and the sentinel
+	// starts the next four 600 px early.
+	const rv = reveal(4, 4);
 
 	// --- the arrangement the user set in the Edit modal (personal.ts) ---------------------------
 	// The two sections the app builds itself get reserved keys — a YouTube shelf title can't start
@@ -225,6 +235,7 @@
 		if (hit) {
 			home = hit;
 			rendered = params;
+			rv.reset();
 			loading = false;
 			noteForgotten();
 			cater(hit, params);
@@ -245,6 +256,7 @@
 			if (!hit) {
 				home = fresh;
 				rendered = params;
+				rv.reset();
 			}
 			putCached(key, fresh);
 			noteForgotten();
@@ -426,7 +438,7 @@
 				class="flex flex-col gap-10"
 				in:fade={{ duration: 250 }}
 			>
-			{#each visible as block (block.id)}
+			{#each visible.slice(0, rv.count(visible.length)) as block (block.id)}
 				{#if block.shelf}
 					<Shelf
 						title={block.shelf.title}
@@ -457,7 +469,9 @@
 					</div>
 				{/if}
 			{/each}
-			{#if loading}
+			{#if rv.more(visible.length)}
+				<div {@attach rv.sentinel}></div>
+			{:else if loading}
 				{@render shelfSkeletons(3)}
 			{:else if error}
 				<ErrorState message={error} onRetry={() => load(selected)} />
