@@ -211,7 +211,7 @@
 		"title": "Ayarlar",
 		"tabs": {
 			"general": "Genel",
-			"general_hint": "Geçmiş, entegrasyonlar ve uygulamanın nasıl başladığı.",
+			"general_hint": "Geçmiş ve uygulamanın nasıl başladığı.",
 			"themes": "Görünüm",
 			"themes_hint": "Renkler, yazı tipleri ve oynatıcı görünümü.",
 			"playback": "Oynatma",

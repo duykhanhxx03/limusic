@@ -211,7 +211,7 @@
 		"title": "Configuración",
 		"tabs": {
 			"general": "General",
-			"general_hint": "Historial, integraciones y cómo se inicia la aplicación.",
+			"general_hint": "Historial y cómo se inicia la aplicación.",
 			"themes": "Apariencia",
 			"themes_hint": "Colores, fuentes y vista del reproductor.",
 			"playback": "Reproducción",

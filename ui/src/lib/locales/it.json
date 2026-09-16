@@ -211,7 +211,7 @@
 		"title": "Impostazioni",
 		"tabs": {
 			"general": "Generale",
-			"general_hint": "Cronologia, integrazioni e avvio dell'app.",
+			"general_hint": "Cronologia e avvio dell'app.",
 			"themes": "Aspetto",
 			"themes_hint": "Colori, font e schermata del player",
 			"playback": "Riproduzione",

@@ -220,7 +220,7 @@
 		"title": "Setări",
 		"tabs": {
 			"general": "General",
-			"general_hint": "Istoric, integrări și cum pornește aplicația.",
+			"general_hint": "Istoric și cum pornește aplicația.",
 			"themes": "Aspect",
 			"themes_hint": "Culori, fonturi și vizionare player.",
 			"playback": "Redare",

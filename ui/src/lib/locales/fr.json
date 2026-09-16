@@ -211,7 +211,7 @@
 		"title": "Paramètres",
 		"tabs": {
 			"general": "Général",
-			"general_hint": "Historique, intégrations et comment l'application se lance.",
+			"general_hint": "Historique et comment l'application se lance.",
 			"themes": "Apparence",
 			"themes_hint": "Couleurs, polices et vue sur le lecteur.",
 			"playback": "Lecture",

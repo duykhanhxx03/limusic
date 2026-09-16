@@ -258,7 +258,7 @@
 		"title": "Settings",
 		"tabs": {
 			"general": "General",
-			"general_hint": "History, integrations and how the app starts.",
+			"general_hint": "History and how the app starts.",
 			"themes": "Appearance",
 			"themes_hint": "Colors, fonts and the player view.",
 			"playback": "Playback",

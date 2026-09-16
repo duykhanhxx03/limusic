@@ -211,7 +211,7 @@
 		"title": "Pengaturan",
 		"tabs": {
 			"general": "Umum",
-			"general_hint": "Riwayat, integrasi, dan cara aplikasi dimulai.",
+			"general_hint": "Riwayat dan cara aplikasi dimulai.",
 			"themes": "Tampilan",
 			"themes_hint": "Warna, font, dan tampilan pemutar.",
 			"playback": "Pemutaran",
