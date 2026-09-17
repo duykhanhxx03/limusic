@@ -49,7 +49,7 @@
 					<h3 class="mb-2 text-base font-semibold">{group.title}</h3>
 					<dl>
 						{#each group.rows as [what, keys] (what)}
-							<div class="grid grid-cols-2 items-center gap-4 hairline-b py-2 last:shadow-none">
+							<div class="grid grid-cols-2 items-center gap-4 py-2">
 								<dt class="text-sm text-muted-foreground">{what}</dt>
 								<dd class="font-mono text-xs font-medium">{keys}</dd>
 							</div>

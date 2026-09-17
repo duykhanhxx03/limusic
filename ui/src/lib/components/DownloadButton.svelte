@@ -99,8 +99,12 @@
 	{#if busy}
 		<!-- The ring: a track behind and an arc in front, rotated so it starts at twelve o'clock
 		     rather than three. `stroke-dashoffset` is the only thing that animates, and it
-		     composites. The transition is longer than the 250ms between progress events on purpose,
-		     so the arc glides between them instead of stepping. -->
+		     composites.
+		     320ms is not a token: it is a constraint, not a taste. Progress events arrive every
+		     250ms (the throttle in downloads.rs), and the tween has to outlast the gap or the arc
+		     reaches each value and then waits, which is the stepping this replaced.
+		     `--ease-linear`, not the usual `--ease-smooth-out`: an eased progress arc decelerates
+		     into every update, which reads as stalling. Progress advances at a steady rate. -->
 		<svg class="absolute inset-0 m-auto h-5 w-5 -rotate-90" viewBox="0 0 24 24" aria-hidden="true">
 			<circle cx="12" cy="12" r={R} fill="none" stroke="currentColor" stroke-width="2" opacity="0.25" />
 			<circle
@@ -114,7 +118,7 @@
 				class="text-primary"
 				stroke-dasharray={C}
 				stroke-dashoffset={C * (1 - progress)}
-				style="transition: stroke-dashoffset 320ms ease-out"
+				style="transition: stroke-dashoffset 320ms var(--ease-linear)"
 			/>
 		</svg>
 		<!-- A square inside the ring, not the download arrow: this is the stop control, and an arrow

@@ -63,13 +63,20 @@
 	// `rows × rowPx` and `rowPx` starts at the assumed 56 before settling to the panel's real 72 a
 	// frame later (`rows.svelte.ts`), which moves the heading down by a quarter of the run. So land,
 	// then land again once it has settled.
+	//
+	// The first landing is in a frame callback, not here. Called from `onMount` it read layout while
+	// the rows below were still mounting, so the whole player view was laid out twice in one task:
+	// ~30 ms of the ~120 the queue cost to open (profiled 2026-09-17). A frame callback runs before
+	// that frame is painted, so the list still never shows at the wrong scroll.
 	onMount(() => {
 		const land = () => {
 			if (!nowEl) return;
 			el.scrollTop += nowEl.getBoundingClientRect().top - el.getBoundingClientRect().top;
 		};
-		land();
-		let frame = requestAnimationFrame(() => (frame = requestAnimationFrame(land)));
+		let frame = requestAnimationFrame(() => {
+			land();
+			frame = requestAnimationFrame(land);
+		});
 		return () => cancelAnimationFrame(frame);
 	});
 
@@ -202,7 +209,7 @@
 		{#each view.blocks as block, b (block.key)}
 			{#if block.autoplay}
 				<div
-					class="mt-3 flex items-center gap-2 hairline-t px-2 pt-2.5 pb-1.5 text-muted-foreground"
+					class="mt-3 flex items-center gap-2 px-2 pt-2.5 pb-1.5 text-muted-foreground"
 					title={t('player.autoplay_notice')}
 				>
 					<HugeiconsIcon icon={InfinityIcon} class="h-3.5 w-3.5" />

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-const REPO = 'SimoHypers/limusic'
+const REPO = 'duykhanhxx03/limusic'
 export const REPO_URL = `https://github.com/${REPO}`
 export const RELEASES_URL = `${REPO_URL}/releases/latest`
 

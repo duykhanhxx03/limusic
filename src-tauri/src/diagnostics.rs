@@ -35,6 +35,7 @@ const ENV_KEYS: &[&str] = &[
     "LIMUSIC_PROXY",
     "LIMUSIC_DISABLED_CLIENTS",
     "WEBKIT_DISABLE_DMABUF_RENDERER",
+    "WEBKIT_FORCE_DMABUF_RENDERER",
     "WEBKIT_DMABUF_RENDERER_FORCE_SHM",
     "__NV_DISABLE_EXPLICIT_SYNC",
     "GDK_BACKEND",
@@ -47,9 +48,11 @@ const SECRET_ENV_KEYS: &[&str] = &["LIMUSIC_PROXY", "LIMUSIC_COOKIE", "LIMUSIC_V
 /// Environment header + redacted log tail, capped at [`MAX_CHARS`].
 pub fn report(app: &AppHandle, db: &Db) -> String {
     let mut out = String::new();
-    out.push_str(
-        "# Limusic diagnostics. Paste this into your bug report.\n\
-         # Cookies, tokens, signed URLs, file paths and IP addresses have been removed.\n\n",
+    let _ = writeln!(
+        out,
+        "# {} diagnostics. Paste this into your bug report.\n\
+         # Cookies, tokens, signed URLs, file paths and IP addresses have been removed.\n",
+        crate::APP_NAME,
     );
     header(&mut out, app, db);
 
@@ -74,7 +77,8 @@ pub fn summary(app: &AppHandle, db: &Db) -> String {
 fn header(out: &mut String, app: &AppHandle, db: &Db) {
     let _ = writeln!(
         out,
-        "Limusic {} ({} {}, {})",
+        "{} {} ({} {}, {})",
+        crate::APP_NAME,
         env!("CARGO_PKG_VERSION"),
         std::env::consts::OS,
         std::env::consts::ARCH,

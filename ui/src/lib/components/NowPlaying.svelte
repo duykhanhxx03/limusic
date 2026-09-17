@@ -1,6 +1,8 @@
 <script lang="ts">
-	import { fade, fly, scale } from 'svelte/transition';
-	import { cubicOut, quintOut } from 'svelte/easing';
+	import { onMount } from 'svelte';
+	import { fade, scale } from 'svelte/transition';
+	import { cubicOut } from 'svelte/easing';
+	import { slideUp } from '$lib/motion';
 	import { beforeNavigate } from '$app/navigation';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import {
@@ -13,16 +15,16 @@
 		Queue01Icon,
 		Video01Icon,
 		VideoOffIcon,
-		VolumeHighIcon,
-		VolumeMute02Icon
+		ArrowDown01Icon
 	} from '@hugeicons/core-free-icons';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import * as api from '$lib/api';
-	import { np, playback, ui, wheelVolume } from '$lib/player.svelte';
+	import { np, playback, ui } from '$lib/player.svelte';
 	import { canVideo, claimVideo, parkVideo, showVideo, video } from '$lib/video.svelte';
 	import { appearance } from '$lib/theme.svelte';
 	import { t } from '$lib/i18n.svelte';
-	import { thumb } from '$lib/thumb';
+	import { artworkLadder } from '$lib/thumb';
+	import ArtworkSwap from './ArtworkSwap.svelte';
 	import QueueList from './QueueList.svelte';
 	import LyricsView from './LyricsView.svelte';
 
@@ -48,20 +50,30 @@
 		if (np.tab !== 'lyrics') big = false; // nothing to enlarge on the queue tab
 	});
 
+	// The tab content waits for the slide to finish. Measured on the way in
+	// (2026-09-17, a 20-track queue): mounting everything at once held the main thread 120–190 ms
+	// before the first frame, and Svelte only creates a transition's real animation from a callback
+	// on that thread, so the slide started late by exactly that — then the queue's rows forced a
+	// layout mid-flight. The view that arrives is the cover and the controls; the list lands under
+	// them a beat later, when nothing is moving any more. The timer covers a mount with no intro.
+	let settled = $state(false);
+	onMount(() => {
+		const t = setTimeout(() => (settled = true), 700);
+		return () => clearTimeout(t);
+	});
+
 	// Google's CDN doesn't serve every rewritten size for every image (see MediaCard), and at this
 	// size a broken-image glyph *is* the page. So step down until one loads: crisp, then the size
 	// proven everywhere else in the app, then the 120 the player bar is already showing for this
-	// very track, and only then a music note.
-	let attempt = $state(0);
+	// very track, and only then a music note. `ArtworkSwap` walks the ladder.
 	let bgFailed = $state(false);
 	$effect(() => {
 		playback.now?.thumbnail; // re-arm on every track change
-		attempt = 0;
 		bgFailed = false;
 	});
-	const srcs = $derived([720, 400, 120].map((px) => thumb(playback.now?.thumbnail, px)));
-	const src = $derived(srcs[attempt]);
-	const imgFailed = () => attempt++;
+	// Largest first, sized for the display; see `artworkLadder` for why a music video's thumbnail
+	// needs its own list.
+	const srcs = $derived(artworkLadder(playback.now?.thumbnail));
 
 	// Clicking the artwork toggles playback, and flashes the action just taken over it so the click
 	// visibly did something. Read `paused` before the toggle: the backend event that flips it is a
@@ -75,17 +87,6 @@
 		api.togglePause();
 	}
 
-	// Scrolling the artwork is the volume, same step as the slider. The level only draws while the
-	// gesture is live (plus a second to read it) so the artwork is otherwise untouched.
-	let volFlash = $state(false);
-	let volTimer: ReturnType<typeof setTimeout>;
-	function onWheel(e: WheelEvent) {
-		wheelVolume(e);
-		volFlash = true;
-		clearTimeout(volTimer);
-		volTimer = setTimeout(() => (volFlash = false), 1000);
-	}
-
 </script>
 
 <!-- Covers the page but not the sidebar (you navigate away to minimise) and not the player bar,
@@ -96,11 +97,11 @@
      ponytail: left offsets mirror Sidebar's w-16/lg:w-60 (and its manual collapse) — keep in sync
      if those change. -->
 <div
-	in:fly={{ y: '100%', duration: 350, easing: quintOut }}
-	out:fly={{ y: '100%', duration: 250, easing: quintOut }}
-	class="absolute inset-y-0 left-16 right-0 z-20 flex justify-center overflow-hidden bg-background px-4 py-4 sm:px-6 sm:py-6 lg:px-10 {ui.sidebarCollapsed
-		? ''
-		: 'lg:left-60'} {inset}"
+	in:slideUp={{ duration: 460 }}
+	out:slideUp={{ duration: 340 }}
+	onintroend={() => (settled = true)}
+	style="left: var(--sidebar-w)"
+	class="absolute inset-y-0 right-0 z-20 flex justify-center overflow-hidden bg-background px-4 py-4 sm:px-6 sm:py-6 lg:px-10 {inset}"
 >
 	<!-- The artwork itself, blurred to a wash, is the background: same trick as HomeHero, and it
 	     needs no colour extraction (which a remote image would taint the canvas for anyway). The
@@ -118,13 +119,36 @@
 	     radius rather than the image. A video fills the view on its own, so there is nothing to
 	     replace it with. -->
 	{#if appearance.artworkBackground && !showVideo() && srcs[2] && !bgFailed}
-		<img
-			src={srcs[2]}
-			alt=""
-			onerror={() => (bgFailed = true)}
-			class="pointer-events-none absolute inset-0 h-full w-full art-wash scale-110 object-cover opacity-30 blur-2xl dark:opacity-40"
-		/>
+		<!-- Crossfaded on a track change (400 ms each way, overlapping, so the room's colour turns
+		     rather than blinking through the plain background). -->
+		{#key srcs[2]}
+			<img
+				src={srcs[2]}
+				alt=""
+				decoding="async"
+				onerror={() => (bgFailed = true)}
+				in:fade={{ duration: 400 }}
+				out:fade={{ duration: 400 }}
+				class="pointer-events-none absolute inset-0 h-full w-full art-wash scale-110 object-cover opacity-30 blur-2xl dark:opacity-40"
+			/>
+		{/key}
 	{/if}
+
+	<!-- Collapse, top left. It used to live only as a chevron in the player bar's right cluster,
+	     which is the far corner of the window from where your eye is while this view is open — and
+	     the same corner as the queue and lyrics buttons, so it read as one of them. Top left is
+	     where a full-screen view's way out belongs.
+	     Positioned against the view, not the content column, so it stays put whatever the artwork
+	     does to the layout. -->
+	<button
+		type="button"
+		onclick={() => (np.open = false)}
+		aria-label={t('player.minimize_player')}
+		title={t('player.minimize_player')}
+		class="absolute left-4 top-4 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-foreground/8 text-muted-foreground transition-colors hover:bg-foreground/15 hover:text-foreground"
+	>
+		<HugeiconsIcon icon={ArrowDown01Icon} class="h-5 w-5" />
+	</button>
 
 	<!-- Capped and centred, so a wide window doesn't park the artwork in the middle of an empty half
 	     with the tabs glued to the right edge. --art is the artwork's side: whichever is smaller of
@@ -147,38 +171,17 @@
 			     for both columns, and the queue wins. Untabbed there is no second column, so the
 			     artwork is the whole view at every width. -->
 			<div
-				class="min-w-0 flex-1 items-center justify-center {tabbed ? 'hidden md:flex' : 'flex'}"
+				class="min-w-0 items-center justify-center {tabbed ? 'hidden flex-[4] md:flex' : 'flex flex-1'}"
 			>
 				<!-- A div, not a button: the video-mode toggle has to be a sibling of the play/pause
 				     button rather than nested inside it (nested buttons are invalid HTML and the
 				     inner one never reliably gets the click). -->
+				<!-- No wheel handler here any more: scrolling over the artwork used to be the volume, and
+				     next to the lyrics column the same gesture meant two different things. The volume
+				     slider in the player bar still takes the wheel, since the pointer has to be on it. -->
 				<div
 					class="relative w-full {showVideo() ? 'max-w-[var(--vid)]' : 'max-w-[var(--art)]'}"
-					onwheel={onWheel}
 				>
-					{#if volFlash}
-						<!-- Middle left of the artwork, on a plate: it sits over whatever the picture is,
-						     so it needs its own background to stay readable. Theme tokens, same
-						     primary-on-muted as the volume slider in the player bar. -->
-						<div
-							transition:fade={{ duration: 120 }}
-							class="pointer-events-none absolute left-3 top-1/2 z-10 flex -translate-y-1/2 flex-col items-center gap-2 rounded-full plate px-2 py-3 text-popover-foreground"
-						>
-							<HugeiconsIcon
-								icon={VolumeHighIcon}
-								altIcon={VolumeMute02Icon}
-								showAlt={playback.volume === 0}
-								class="h-4 w-4"
-							/>
-							<div class="relative h-24 w-1 overflow-hidden rounded-full bg-muted">
-								<div
-									class="absolute inset-x-0 bottom-0 rounded-full bg-primary"
-									style="height:{playback.volume}%"
-								></div>
-							</div>
-							<span class="text-[10px] tabular-nums">{playback.volume}</span>
-						</div>
-					{/if}
 					<button
 						type="button"
 						onclick={toggle}
@@ -217,24 +220,16 @@
 						></div>
 						<!-- The artwork, when the video above isn't the picture. Both arms carry the same
 						     guard rather than nesting, so the branch below keeps its indentation. -->
-						{#if !showVideo() && src && attempt < srcs.length}
-							<!-- The 120 underneath is the one the player bar already has for this track, so it
-							     paints on the frame the track changes. Without it an <img> keeps showing the
-							     *previous* track's picture for as long as this one's fetch takes (#77): 720 is
-							     a size nothing else in the app asks for, so it is always a cold request. -->
-							<img
-								{src}
-								alt=""
-								onerror={imgFailed}
-								style={srcs[2] ? `background-image:url(${srcs[2]})` : undefined}
-								class="aspect-square w-full rounded-2xl bg-cover object-cover"
-							/>
-						{:else if !showVideo()}
-							<div
-								class="flex aspect-square w-full items-center justify-center rounded-2xl bg-muted text-muted-foreground/40"
-							>
-								<HugeiconsIcon icon={MusicNote01Icon} class="h-16 w-16" />
-							</div>
+						{#if !showVideo()}
+							<ArtworkSwap {srcs} class="rounded-2xl">
+								{#snippet fallback()}
+									<div
+										class="flex h-full w-full items-center justify-center bg-muted text-muted-foreground/40"
+									>
+										<HugeiconsIcon icon={MusicNote01Icon} class="h-16 w-16" />
+									</div>
+								{/snippet}
+							</ArtworkSwap>
 						{/if}
 					</button>
 					{#if canVideo()}
@@ -260,7 +255,9 @@
 		{/if}
 
 		{#if tabbed}
-			<div class="flex min-h-0 flex-col {big ? 'flex-1' : 'w-full md:w-[22rem] xl:w-[26rem]'}">
+			<!-- Five parts to the artwork's four: the lyrics are what this view is read for, and at a fixed
+			     22–26rem they wrapped nearly every line at 20px while the cover took the rest. -->
+			<div class="flex min-h-0 min-w-0 flex-col {big ? 'flex-1' : 'w-full md:w-auto md:flex-[5]'}">
 				<Tabs.Root
 					value={np.tab}
 					onValueChange={(v) => (np.tab = v as typeof np.tab)}
@@ -296,11 +293,19 @@
 					     leave LyricsView fetching lyrics for every track you never asked to see. -->
 					{#if np.tab === 'queue'}
 						<Tabs.Content value="queue" class="flex min-h-0 flex-col">
-							<QueueList />
+							{#if settled}
+								<div class="flex min-h-0 flex-1 flex-col" in:fade={{ duration: 160 }}>
+									<QueueList />
+								</div>
+							{/if}
 						</Tabs.Content>
 					{:else}
 						<Tabs.Content value="lyrics" class="flex min-h-0 flex-col">
-							<LyricsView expanded={big} />
+							{#if settled}
+								<div class="flex min-h-0 flex-1 flex-col" in:fade={{ duration: 160 }}>
+									<LyricsView expanded={big} />
+								</div>
+							{/if}
 						</Tabs.Content>
 					{/if}
 				</Tabs.Root>

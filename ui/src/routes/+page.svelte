@@ -413,7 +413,7 @@
 		     everything the app or YouTube chose. It steps aside entirely while a mood filter is
 		     active: none of it is filterable, and neither is the arrangement it edits. -->
 		{#if !rendered}
-			<div class="mb-10 hairline-b pb-8">
+			<div class="mb-10 pb-8">
 				<Shortcuts onEdit={() => (editing = true)} />
 			</div>
 		{/if}

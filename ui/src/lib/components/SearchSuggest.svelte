@@ -187,7 +187,7 @@
 						class="flex w-full cursor-pointer items-center gap-3 px-3 text-left transition-colors {i ===
 						active
 							? 'bg-accent/60'
-							: 'hover:bg-accent/40'} {hero ? 'hairline-b py-2.5' : 'py-1.5'}"
+							: 'hover:bg-accent/40'} {hero ? 'py-2.5' : 'py-1.5'}"
 						onmousedown={(e) => e.preventDefault()}
 						onmouseenter={() => {
 							active = i;
@@ -244,7 +244,7 @@
 			     submit button removed from the DOM before the click completes never submits (#125). -->
 			<button
 				type="button"
-				class="flex w-full cursor-pointer items-center gap-2 hairline-t bg-muted/30 px-3 py-2 text-left text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+				class="flex w-full cursor-pointer items-center gap-2 bg-muted/30 px-3 py-2 text-left text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
 				onmousedown={(e) => e.preventDefault()}
 				onmouseenter={() => (active = -1)}
 				onclick={(e) => {

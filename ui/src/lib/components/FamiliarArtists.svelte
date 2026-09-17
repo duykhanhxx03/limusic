@@ -52,6 +52,11 @@
 
 	const top = $derived(artists[0]);
 	const rest = $derived(artists.slice(1));
+	// The two-column layout needs enough rows to stand beside a 4:5 poster. With one or two it
+	// stretched them down the poster's whole height, leaving a row, a gap you could park a car in,
+	// and another row. Below this the poster gets shorter and the rows stack from the top at their
+	// natural height instead of being spread to fill.
+	const sparse = $derived(rest.length < 4);
 	// The bars are relative to #1. A floor, because a heavy favourite makes everything below it a
 	// sliver: the ranking is the information, the width is only the feel of it.
 	const busiest = $derived(Math.max(1, top?.plays ?? 1));
@@ -179,7 +184,10 @@
 			{#if loading || !top}
 				<Skeleton class="aspect-[16/9] w-full rounded-2xl md:aspect-[4/5]" />
 			{:else}
-				<div class="group relative aspect-[16/9] w-full md:aspect-[4/5]" data-ctx>
+				<div
+					class="group relative aspect-[16/9] w-full {sparse ? 'md:aspect-square' : 'md:aspect-[4/5]'}"
+					data-ctx
+				>
 					<div
 						class="relative h-full w-full cursor-pointer overflow-hidden rounded-2xl bg-muted"
 						role="button"
@@ -229,7 +237,7 @@
 
 			<!-- Ranks two and down. Each row's fill is its share of the leader's plays, so the shape of
 			     what you listen to is in the background of the list rather than in a second widget. -->
-			<div class="flex flex-col justify-between gap-1">
+			<div class="flex flex-col gap-1 {sparse ? 'justify-start' : 'justify-between'}">
 				{#if loading || !top}
 					{#each Array(Math.min(ids.length, COUNT) - 1) as _, i (i)}
 						<div class="flex items-center gap-3 p-2" aria-hidden="true">
@@ -258,7 +266,7 @@
 							}}
 						>
 							<div
-								class="pointer-events-none absolute inset-y-0 left-0 rounded-xl bg-gradient-to-r from-primary/[0.14] to-primary/[0.03] transition-[width,opacity] duration-300 ease-out group-hover/row:from-primary/25 group-hover/row:to-primary/[0.06]"
+								class="pointer-events-none absolute inset-y-0 left-0 rounded-xl bg-gradient-to-r from-primary/[0.14] to-primary/[0.03] transition-[width,opacity] duration-[var(--duration-fast)] ease-out group-hover/row:from-primary/25 group-hover/row:to-primary/[0.06]"
 								style="width:{share(a)}%"
 							></div>
 							<div

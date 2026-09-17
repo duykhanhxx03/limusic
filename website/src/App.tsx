@@ -41,16 +41,15 @@ import screenVideo from '@/assets/screen-video.webp'
 import screenMini from '@/assets/screen-mini.webp'
 
 const SPOTLIGHT = 'rgba(229, 72, 110, 0.16)' as const
-const WEBLATE_URL = 'https://hosted.weblate.org/engage/limusic/'
-const AUR_URL = 'https://aur.archlinux.org/packages/limusic-bin'
 const KOFI_URL = 'https://ko-fi.com/simohypers'
+const UPSTREAM_URL = 'https://github.com/SimoHypers/limusic'
 const BUILD_DOCS_URL = `${REPO_URL}/blob/master/docs/BUILD-PLATFORMS.md`
 
 const FEATURES = [
   {
     icon: MusicNote01Icon,
     title: 'No ads, ever',
-    body: 'Limusic plays the audio stream directly, so there is nothing to interrupt. No ad breaks, no premium subscription.',
+    body: 'YouTube Music ++ plays the audio stream directly, so there is nothing to interrupt. No ad breaks, no premium subscription.',
   },
   {
     icon: DashboardSpeed01Icon,
@@ -75,7 +74,7 @@ const FEATURES = [
   {
     icon: Folder01Icon,
     title: 'Your own files too',
-    body: 'Point Limusic at a folder and your local music sits beside the rest, artwork and tags intact, playable with no connection at all.',
+    body: 'Point the app at a folder and your local music sits beside the rest, artwork and tags intact, playable with no connection at all.',
   },
   {
     icon: PaintBoardIcon,
@@ -105,28 +104,28 @@ const SCREENS = [
     title: 'Sing every word',
     body: 'Synced lyrics stay locked to the music, word by word where the source has the timings. Six providers are tried in order, so coming up empty is rare, and matching goes by the track’s exact length rather than its title.',
     img: screenLyrics,
-    alt: 'Limusic showing word-by-word synced lyrics beside the album cover',
+    alt: 'Word-by-word synced lyrics beside the album cover',
   },
   {
     eyebrow: 'Browse',
     title: 'Go down the rabbit hole',
     body: 'Albums, artists, singles, moods and mixes: the whole YouTube Music catalog in a native window. Results preview as you type, Ctrl+K searches from any page, and the colors follow whatever is playing.',
     img: screenAlbum,
-    alt: 'An album page in Limusic with the track list and play counts',
+    alt: 'An album page with the track list and play counts',
   },
   {
     eyebrow: 'Video',
     title: 'Watch it when you feel like it',
     body: 'Turn music videos on and the video plays where the artwork usually sits, with the same gapless audio leading. One click in the corner puts the cover back for the rest of the session.',
     img: screenVideo,
-    alt: 'A music video playing in Limusic with lyrics alongside it',
+    alt: 'A music video playing with lyrics alongside it',
   },
   {
     eyebrow: 'Mini player',
     title: 'Out of the way, still there',
     body: 'Shrink the window to a strip with the artwork, the transport and the lyrics, and keep it on top while you work. Or go the other way with theater mode, fullscreen cover on one side, lyrics on the other.',
     img: screenMini,
-    alt: 'The Limusic mini player floating over a desktop, showing lyrics',
+    alt: 'The mini player floating over a desktop, showing lyrics',
     narrow: true,
   },
 ]
@@ -137,7 +136,7 @@ function Nav({ stars }: { stars: number | null }) {
       <nav className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-4 sm:px-6">
         <a href="#" className="flex items-center gap-2.5 font-semibold tracking-wide">
           <img src={logo} alt="" className="size-6" />
-          Limusic
+          YouTube Music ++
         </a>
         <div className="ml-auto hidden items-center gap-6 text-sm text-muted-foreground sm:flex">
           <a href="#features" className="transition-colors hover:text-foreground">Features</a>
@@ -192,7 +191,7 @@ function Hero({ version, downloadHref, osLabel }: { version: string | null; down
 
         <FadeContent duration={900} delay={400}>
           <p className="mx-auto mt-6 max-w-2xl text-base text-muted-foreground sm:text-lg">
-            Limusic is a lightweight desktop player for YouTube Music. Search anything, hit play, and
+            A lightweight desktop player for YouTube Music. Search anything, hit play, and
             listen without ads. Your playlists, your library, your own files, synced lyrics and
             friends listening along, in a window that opens instantly.
           </p>
@@ -226,7 +225,7 @@ function Hero({ version, downloadHref, osLabel }: { version: string | null; down
           <div className="mt-16">
             <img
               src={screenPlaylist}
-              alt="Limusic playing a playlist, with the sidebar and track list open"
+              alt="A playlist playing, with the sidebar and track list open"
               width={1920}
               height={1036}
               className="w-full rounded-xl border border-white/10 shadow-[0_0_120px_-24px_var(--primary-bright)]"
@@ -242,7 +241,7 @@ function Features() {
   return (
     <section id="features" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-24 sm:px-6">
       <FadeContent duration={800}>
-        <p className="text-center text-xs font-semibold tracking-widest text-primary-bright uppercase">Why Limusic</p>
+        <p className="text-center text-xs font-semibold tracking-widest text-primary-bright uppercase">Why this one</p>
         <h2 className="mx-auto mt-3 max-w-2xl text-center font-heading text-3xl font-bold tracking-tight text-balance sm:text-4xl">
           Everything the web player should have been
         </h2>
@@ -330,7 +329,6 @@ function Download({ info, os }: { info: ReturnType<typeof useGitHub>; os: string
         { label: '.AppImage, any distro', href: info.appimage },
         { label: '.deb, Ubuntu and Debian', href: info.deb },
         { label: '.rpm, Fedora and RHEL', href: info.rpm },
-        { label: 'AUR, Arch Linux', href: AUR_URL },
       ],
       note: 'Only the AppImage updates itself. All builds need glibc 2.39 or newer (Ubuntu 24.04+, Debian 13+, Fedora 40+), and the rpm needs mpv-libs installed.',
     },
@@ -368,7 +366,7 @@ function Download({ info, os }: { info: ReturnType<typeof useGitHub>; os: string
     <section id="download" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-24 sm:px-6">
       <FadeContent duration={800}>
         <p className="text-center text-xs font-semibold tracking-widest text-primary-bright uppercase">Download</p>
-        <h2 className="mt-3 text-center font-heading text-3xl font-bold tracking-tight sm:text-4xl">Get Limusic</h2>
+        <h2 className="mt-3 text-center font-heading text-3xl font-bold tracking-tight sm:text-4xl">Get YouTube Music ++</h2>
         <p className="mx-auto mt-4 max-w-xl text-center text-muted-foreground">
           Free and open source. Install it, sign in with your YouTube account if you want your
           library, and press play.
@@ -425,21 +423,20 @@ function Footer() {
       <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-4 py-10 text-center text-sm text-muted-foreground sm:px-6">
         <div className="flex items-center gap-2 font-semibold text-foreground">
           <img src={logo} alt="" className="size-5" />
-          Limusic
+          YouTube Music ++
         </div>
         <p className="max-w-2xl text-xs leading-relaxed">
-          Limusic is an unofficial, open-source client and is not affiliated with or endorsed by
-          YouTube or Google. YouTube Music is a trademark of Google LLC.
+          An unofficial, open-source client, not affiliated with or endorsed by YouTube or Google.
+          &quot;YouTube&quot; and &quot;YouTube Music&quot; are trademarks of Google LLC. A fork of{' '}
+          <a href={UPSTREAM_URL} target="_blank" rel="noreferrer" className="underline transition-colors hover:text-foreground">Limusic</a>{' '}
+          by SimoHypers.
         </p>
         <div className="flex flex-wrap items-center justify-center gap-5">
           <a href={REPO_URL} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 transition-colors hover:text-foreground">
             <HugeiconsIcon icon={GithubIcon} size={15} strokeWidth={2} /> Source
           </a>
-          <a href={WEBLATE_URL} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 transition-colors hover:text-foreground">
-            <HugeiconsIcon icon={TranslateIcon} size={15} strokeWidth={2} /> Translate
-          </a>
           <a href={KOFI_URL} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 transition-colors hover:text-foreground">
-            <HugeiconsIcon icon={Coffee02Icon} size={15} strokeWidth={2} /> Buy me a coffee
+            <HugeiconsIcon icon={Coffee02Icon} size={15} strokeWidth={2} /> Coffee for the original author
           </a>
           <a href={`${REPO_URL}/blob/master/LICENSE`} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 transition-colors hover:text-foreground">
             <HugeiconsIcon icon={SourceCodeIcon} size={15} strokeWidth={2} /> GPL-3.0

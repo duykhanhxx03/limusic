@@ -87,7 +87,7 @@
 		escapeKeydownBehavior={dismissable}
 		interactOutsideBehavior={dismissable}
 	>
-		<div class="hairline-b px-5 py-4">
+		<div class="px-5 py-4">
 			<Dialog.Title class="text-lg font-semibold">{t('nav.choose_channel')}</Dialog.Title>
 			<Dialog.Description class="mt-1 text-xs text-muted-foreground">
 				{t('nav.choose_channel_desc')}
@@ -116,7 +116,7 @@
 							<img
 								src={thumb(identity.thumbnail, 96)}
 								alt=""
-								class="h-10 w-10 shrink-0 rounded-full object-cover ring-1 ring-foreground/15"
+								class="h-10 w-10 shrink-0 rounded-full object-cover"
 							/>
 						{:else}
 							<span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted">
@@ -142,7 +142,7 @@
 			{/if}
 		</div>
 
-		<div class="flex justify-end hairline-t px-5 py-3">
+		<div class="flex justify-end px-5 py-3">
 			{#if ui.channelPickerRequired}
 				<Button variant="outline" size="sm" onclick={cancelSignIn} disabled={cancelling || switching !== null}>
 					{cancelling ? t('common.loading') : t('nav.cancel_sign_in')}

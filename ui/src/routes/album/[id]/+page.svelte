@@ -529,7 +529,7 @@
     <!-- Other versions of this release, and what sits near it. Ruled off from the tracks so the
          page reads as the album first and its surroundings second. -->
     {#if album.sections?.length}
-        <div class="content-in mt-2 flex flex-col gap-8 hairline-t px-6 pb-8 pt-8">
+        <div class="content-in mt-2 flex flex-col gap-8 px-6 pb-8 pt-8">
             {#each album.sections as section, i (i + ":" + section.title)}
                 <Shelf
                     title={section.title}

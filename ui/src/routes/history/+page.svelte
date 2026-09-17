@@ -191,7 +191,7 @@
 						class="sticky top-0 z-10 mb-1 flex items-baseline gap-3 bg-background py-2"
 					>
 						<span class="font-heading text-lg font-bold tracking-tight">{group.title}</span>
-						<span class="h-px flex-1 bg-foreground/10"></span>
+						<span class="flex-1"></span>
 						<span class="text-xs text-muted-foreground">
 							{t('history.songs_count', { count: group.items.length.toLocaleString() })}
 						</span>

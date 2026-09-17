@@ -97,7 +97,7 @@
 					</div>
 				{/if}
 				<button
-					class="absolute bottom-2 right-2 flex h-9 w-9 translate-y-1 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground opacity-0 transition-[opacity,transform] duration-200 ease-out focus-visible:opacity-100 group-hover:translate-y-0 group-hover:opacity-100"
+					class="absolute bottom-2 right-2 flex h-9 w-9 translate-y-1 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground opacity-0 transition-[opacity,transform] duration-[var(--duration-fast)] ease-out focus-visible:opacity-100 group-hover:translate-y-0 group-hover:opacity-100"
 					class:animate-pulse={busy}
 					disabled={busy}
 					aria-label={t('a11y.play_item', { title: item.title })}

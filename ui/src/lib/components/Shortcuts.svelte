@@ -151,13 +151,13 @@
 			     space by being a single line and an obvious place to drop something. -->
 			<button
 				onclick={() => (picking = true)}
-				class="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-dashed border-foreground/25 p-4 text-left transition-colors hover:border-foreground/40 hover:bg-accent/5 {before ===
+				class="flex w-full cursor-pointer items-center gap-3 rounded-xl p-4 text-left transition-colors {before ===
 				null
-					? 'border-primary bg-accent/5'
-					: ''}"
+					? 'bg-primary/10'
+					: 'bg-foreground/5 hover:bg-foreground/10'}"
 			>
 				<span
-					class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-dashed border-foreground/25 text-muted-foreground"
+					class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-foreground/10 text-muted-foreground"
 				>
 					<HugeiconsIcon icon={Add01Icon} class="h-5 w-5" />
 				</span>
@@ -269,7 +269,7 @@
 				     so nothing dangles off the last row the rest of the time. -->
 				{#if before === null && picks.length < MAX_PICKS}
 					<div
-						class="flex h-16 items-center justify-center rounded-xl border border-dashed border-primary text-xs font-medium text-primary"
+						class="flex h-16 items-center justify-center rounded-xl bg-primary/10 text-xs font-medium text-primary"
 					>
 						{t('home.add_to_end')}
 					</div>

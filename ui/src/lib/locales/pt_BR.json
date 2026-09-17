@@ -79,7 +79,7 @@
 		"history": "Histórico",
 		"add_account": "Adicionar conta",
 		"remove_account": "Remover conta",
-		"remove_account_title": "Remover do Limusic?",
+		"remove_account_title": "Remover do YouTube Music ++?",
 		"remove_account_desc": "{name} é removida apenas desta lista. A conta do Google em si não é afetada, e você pode fazer login com ela novamente quando quiser.",
 		"saved_accounts_hint": "Selecione uma conta salva para alternar."
 	},
@@ -245,18 +245,18 @@
 			"language_hint": "Selecione o idioma de exibição da interface.",
 			"shortcuts_hint": "Abra os atalhos de teclado com {key}",
 			"autostart": "Iniciar com o sistema",
-			"autostart_hint": "Iniciar o Limusic automaticamente quando o sistema ligar.",
+			"autostart_hint": "Iniciar o YouTube Music ++ automaticamente quando o sistema ligar.",
 			"close_to_tray": "Fechar na bandeja",
-			"close_to_tray_hint": "Manter o Limusic em execução em segundo plano ao fechar a janela.",
+			"close_to_tray_hint": "Manter o YouTube Music ++ em execução em segundo plano ao fechar a janela.",
 			"update_banner": "Notificações de atualização",
-			"update_banner_hint": "Mostrar um aviso quando uma nova versão do Limusic estiver disponível.",
+			"update_banner_hint": "Mostrar um aviso quando uma nova versão do YouTube Music ++ estiver disponível.",
 			"proxy": "Proxy HTTP/HTTPS",
 			"proxy_hint": "Encaminhar todas as requisições de rede por um servidor proxy personalizado.",
 			"proxy_placeholder": "http://host:porta (vazio = nenhum)",
 			"stream_clients": "Clientes de streaming",
 			"stream_clients_hint": "Desative um cliente para ignorá-lo ao resolver streams. Sobrescrito pela variável de ambiente {var}.",
 			"system_titlebar": "Usar barra de título do sistema",
-			"system_titlebar_hint": "Deixe sua área de trabalho desenhar a moldura e os botões da janela. O Limusic mantém sua própria barra de ferramentas abaixo dela."
+			"system_titlebar_hint": "Deixe sua área de trabalho desenhar a moldura e os botões da janela. O YouTube Music ++ mantém sua própria barra de ferramentas abaixo dela."
 		},
 		"themes": {
 			"accent_themes": "Temas de destaque",
@@ -356,7 +356,7 @@
 			"update_check_failed": "Falha ao verificar atualização: {error}",
 			"update_packaged": "Esta versão foi instalada por um gerenciador de pacotes. Atualize-a da mesma forma.",
 			"kofi": "Me pague um café",
-			"kofi_hint": "O Limusic é gratuito e continuará assim. O Ko-fi está à disposição caso você queira dar uma força.",
+			"kofi_hint": "O YouTube Music ++ é gratuito e continuará assim. O Ko-fi está à disposição caso você queira dar uma força.",
 			"kofi_button": "Abrir Ko-fi"
 		}
 	},

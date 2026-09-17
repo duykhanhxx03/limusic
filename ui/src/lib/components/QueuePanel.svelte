@@ -23,6 +23,6 @@
 	out:fly={{ x: 32, duration: 150, easing: cubicOut }}
 	class="absolute inset-y-0 right-0 z-30 flex h-full w-80 max-w-[80vw] flex-col glass"
 >
-	<h2 class="hairline-b px-4 py-3 font-heading text-sm font-semibold">{t('queue.title')}</h2>
+	<h2 class="px-4 py-3 font-heading text-sm font-semibold">{t('queue.title')}</h2>
 	<QueueList />
 </aside>

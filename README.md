@@ -1,18 +1,16 @@
 <div align="center">
 
-<img src="./assets/docs/limusic-github-image.png" alt="Limusic Banner" width="100%">
+<img src="./assets/docs/banner.png" alt="YouTube Music ++ banner" width="100%">
 
-# Limusic
+# YouTube Music ++
 
 **A native desktop YouTube Music client. Rust + Tauri, ad-free, no Electron.**
 
 <p align="center">
-  <a href="https://github.com/SimoHypers/limusic/releases/latest"><img alt="GitHub Downloads" src="https://img.shields.io/github/downloads/SimoHypers/limusic/total?style=for-the-badge&label=DOWNLOADS&color=a4c400"></a>
-  <a href="https://github.com/SimoHypers/limusic/releases/latest"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/SimoHypers/limusic?display_name=release&style=for-the-badge&color=a10935"></a>
-  <img alt="License" src="https://img.shields.io/github/license/SimoHypers/limusic?style=for-the-badge&color=1881cc">
-  <a href="https://hosted.weblate.org/engage/limusic/"><img alt="Translation status" src="https://img.shields.io/weblate/progress/limusic?server=https%3A%2F%2Fhosted.weblate.org&style=for-the-badge&label=TRANSLATED&color=6a3fb5"></a>
-  <a href="https://simohypers.github.io/limusic/"><img alt="Website" src="https://img.shields.io/badge/WEBSITE-limusic-e5486e?style=for-the-badge"></a>
-  <a href="https://ko-fi.com/simohypers"><img alt="Support on Ko-fi" src="https://img.shields.io/badge/KO--FI-support-ff5e5b?style=for-the-badge&logo=kofi&logoColor=white"></a>
+  <a href="https://github.com/duykhanhxx03/limusic/releases/latest"><img alt="GitHub Downloads" src="https://img.shields.io/github/downloads/duykhanhxx03/limusic/total?style=for-the-badge&label=DOWNLOADS&color=a4c400"></a>
+  <a href="https://github.com/duykhanhxx03/limusic/releases/latest"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/duykhanhxx03/limusic?display_name=release&style=for-the-badge&color=a10935"></a>
+  <img alt="License" src="https://img.shields.io/github/license/duykhanhxx03/limusic?style=for-the-badge&color=1881cc">
+  <a href="https://duykhanhxx03.github.io/limusic/"><img alt="Website" src="https://img.shields.io/badge/WEBSITE-youtube_music_++-e5486e?style=for-the-badge"></a>
   <br>
   <img alt="Linux" src="https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black">
   <img alt="Windows" src="https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logoColor=white">
@@ -21,10 +19,14 @@
   <img alt="Rust" src="https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white">
 </p>
 
-**Limusic** talks directly to YouTube's internal API and plays audio through libmpv: no bundled
-browser runtime, no backend server, no ads in the audio. It started as a desktop rebuild of the
+**YouTube Music ++** talks directly to YouTube's internal API and plays audio through libmpv: no
+bundled browser runtime, no backend server, no ads in the audio.
+
+A fork of [Limusic](https://github.com/SimoHypers/limusic) by
+[@SimoHypers](https://github.com/SimoHypers) — which itself started as a desktop rebuild of the
 playback engine behind [Metrolist](https://github.com/mostafaalagamy/Metrolist), an Android
-YouTube Music client, and grew from there.
+YouTube Music client. If this is useful to you, the original author takes coffees at
+[ko-fi.com/simohypers](https://ko-fi.com/simohypers).
 
 </div>
 
@@ -46,7 +48,11 @@ YouTube Music client, and grew from there.
 - **OS media keys** and now-playing integration (MPRIS on Linux, SMTC on Windows, plus playback buttons on the Windows taskbar preview)
 - **System tray**: close the window, keep the music; play/pause and skip from the tray, optional start-on-login
 - **Keyboard and mouse**: `Ctrl+K` searches from anywhere, `Ctrl+H` lists every shortcut, right-click menus throughout, `Ctrl` and the wheel zooms the interface
-- **Six languages**: English, Spanish, French, Turkish, Brazilian Portuguese and Indonesian, with more in progress
+- **Sleep timer**: 15m, 30m, 1h, 3h or a custom count, kept in the Rust core so it still fires with the window hidden
+- **Offline downloads**: save tracks to disk and play them with no connection, with progress and cancel
+- **10-band equalizer** with presets and a preamp, applied in the audio chain rather than the UI
+- **Audio quality badge**: the codec and real bitrate of the stream actually playing, not the nominal one
+- **Eight languages**: English, Spanish, French, Indonesian, Brazilian Portuguese, Romanian, Turkish and Vietnamese
 - **Self-updating builds** (AppImage on Linux, setup.exe on Windows, .app on macOS)
 - **Make it yours**: accent palettes, custom colors, your own fonts, corner roundness, a custom app icon, and an adaptive theme that recolors the app from the playing cover
 
@@ -56,7 +62,7 @@ YouTube Music client, and grew from there.
 
 <table>
   <tr>
-    <td><img src="website/src/assets/screen-playlist.webp" alt="A playlist in Limusic"></td>
+    <td><img src="website/src/assets/screen-playlist.webp" alt="A playlist in YouTube Music ++"></td>
     <td><img src="website/src/assets/screen-lyrics.webp" alt="Word-by-word synced lyrics"></td>
   </tr>
   <tr>
@@ -70,7 +76,7 @@ YouTube Music client, and grew from there.
 <h2 align="center">Download & Install</h2>
 
 <p align="center">
-  <a href="https://github.com/SimoHypers/limusic/releases/latest">
+  <a href="https://github.com/duykhanhxx03/limusic/releases/latest">
     <img src="https://img.shields.io/badge/GitHub_Releases-100000?style=for-the-badge&logo=github&logoColor=white" height="40">
   </a>
 </p>
@@ -80,7 +86,6 @@ YouTube Music client, and grew from there.
 | Linux | `.AppImage` | Self-updating, libmpv bundled. Needs glibc 2.39+ (Ubuntu 24.04+, Debian 13+, Fedora 40+) |
 | Linux (Ubuntu/Debian) | `.deb` | No self-update. Needs Ubuntu 24.04+ / Debian 13+; apt pulls libmpv and webkit2gtk in for you |
 | Linux (Fedora/RHEL) | `.rpm` | Needs `mpv-libs` installed (`sudo dnf install mpv-libs`). Updates through dnf, not in-app |
-| Linux (Arch) | [AUR](https://aur.archlinux.org/packages/limusic-bin) | `yay -S limusic-bin`. Community-maintained by [@xiryuudev](https://github.com/xiryuudev), updates through pacman |
 | Windows | `-setup.exe` | Self-updating |
 | Windows | `.msi` | Plain installer, no auto-update |
 | macOS (Apple Silicon) | `.dmg` | Self-updating. Unsigned, so the first launch needs `xattr -dr com.apple.quarantine /Applications/limusic.app` |
@@ -115,28 +120,20 @@ entirely in some countries. Where that's the case, LRCLIB does all the work.
 
 ## Translations
 
-Limusic is translated on [Weblate](https://hosted.weblate.org/engage/limusic/),
-who host it free for libre projects.
+English, Spanish, French, Indonesian, Brazilian Portuguese, Romanian, Turkish
+and Vietnamese ship in the app today. Italian, Russian and Ukrainian catalogs
+are in the tree but not yet wired into the picker.
 
-<a href="https://hosted.weblate.org/engage/limusic/">
-  <img src="https://hosted.weblate.org/widget/limusic/ui/multi-auto.svg" alt="Translation status">
-</a>
+Catalogs are plain JSON under `ui/src/lib/locales/`. `en.json` is the source of
+truth and the only complete one — `t()` falls back to it per key, so a partial
+catalog renders English for whatever it is missing rather than a raw key. That
+makes incomplete translations safe to submit.
 
-English, Spanish, French, Turkish, Brazilian Portuguese and Indonesian ship in
-the app today.
-The badge above shows everything else in flight.
+Switching a finished language on in the picker takes a small code change too,
+see [CONTRIBUTING.md](CONTRIBUTING.md#translations).
 
-**Translate on Weblate, not in a pull request.** Weblate keeps its own copy of
-the catalogs, so a hand-edited `fr.json` merged here puts the two out of sync
-and the next batch of real translations arrives as a merge conflict. Weblate
-also shows you the English original beside each string, flags translations that
-went stale when the English changed, checks that placeholders like `{count}`
-survived, and opens the pull request for you. Anything untranslated falls back
-to English in the app, so partial work is safe to submit.
-
-`en.json` is the exception: it changes by hand, in whichever pull request
-changes the UI. Switching a finished language on in the picker takes a small
-code change too, see [CONTRIBUTING.md](CONTRIBUTING.md#translations).
+> Upstream translates on [Weblate](https://hosted.weblate.org/engage/limusic/).
+> This fork does not, so edit the JSON here directly.
 
 ---
 
@@ -160,7 +157,7 @@ Windows and macOS instructions live in [docs/BUILD-PLATFORMS.md](docs/BUILD-PLAT
 - A pure Rust crate speaks YouTube's InnerTube API, impersonating several
   official client identities and falling back between them when one fails.
 - YouTube's stream URLs are protected by obfuscated JavaScript (the signature
-  cipher and the `n` parameter) and by BotGuard attestation. Limusic runs that
+  cipher and the `n` parameter) and by BotGuard attestation. The app runs that
   JavaScript where it expects to run, in a real webview, hidden, and never lets
   any of it touch the UI process.
 - Audio goes through libmpv: gapless transitions, an on-disk cache, and
@@ -170,18 +167,12 @@ Windows and macOS instructions live in [docs/BUILD-PLATFORMS.md](docs/BUILD-PLAT
 
 ---
 
-## Support
-
-Limusic is free and stays free. If it earned a coffee,
-[ko-fi.com/simohypers](https://ko-fi.com/simohypers) is where to leave one.
-
----
-
 ## Disclaimer
 
 This project is not affiliated with, funded, authorized, endorsed by, or in
 any way associated with YouTube, Google LLC, or any of their affiliates and
-subsidiaries.
+subsidiaries. "YouTube" and "YouTube Music" are trademarks of Google LLC; the
+name of this fork describes what it plays and claims no connection to them.
 
 All trademarks, service marks, and intellectual property rights referenced in
 this project belong to their respective owners.

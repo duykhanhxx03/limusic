@@ -132,7 +132,7 @@
 			src={thumb(auth.account.thumbnail, 64)}
 			alt=""
 			style="width:1.25rem;height:1.25rem;max-width:none"
-			class="shrink-0 rounded-full object-cover ring-1 ring-foreground/15"
+			class="shrink-0 rounded-full object-cover"
 		/>
 	{:else}
 		<HugeiconsIcon icon={UserCircleIcon} class="h-5 w-5 shrink-0 text-muted-foreground" />
@@ -185,7 +185,7 @@
 									src={thumb(account.thumbnail, 48)}
 									alt=""
 									style="width:1.25rem;height:1.25rem;max-width:none"
-									class="shrink-0 rounded-full object-cover ring-1 ring-foreground/15"
+									class="shrink-0 rounded-full object-cover"
 								/>
 							{:else}
 								<HugeiconsIcon

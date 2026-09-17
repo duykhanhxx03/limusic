@@ -99,7 +99,7 @@
 		"sign_in_hint": "Đăng nhập bằng tài khoản Google để truy cập thư viện và danh sách phát YouTube Music của bạn.",
 		"add_account": "Thêm tài khoản",
 		"remove_account": "Gỡ tài khoản",
-		"remove_account_title": "Gỡ khỏi Limusic?",
+		"remove_account_title": "Gỡ khỏi YouTube Music ++?",
 		"remove_account_desc": "{name} chỉ bị gỡ khỏi danh sách này. Tài khoản Google không bị ảnh hưởng, và bạn có thể đăng nhập lại bất cứ lúc nào.",
 		"saved_accounts_hint": "Chọn một tài khoản đã lưu để chuyển sang.",
 		"history": "Lịch sử",
@@ -292,13 +292,13 @@
 			"language_hint": "Chọn ngôn ngữ hiển thị của giao diện.",
 			"shortcuts_hint": "Mở danh sách phím tắt bằng {key}",
 			"autostart": "Khởi động cùng hệ thống",
-			"autostart_hint": "Tự động chạy Limusic khi máy khởi động.",
+			"autostart_hint": "Tự động chạy YouTube Music ++ khi máy khởi động.",
 			"close_to_tray": "Đóng xuống khay hệ thống",
-			"close_to_tray_hint": "Giữ Limusic chạy nền khi đóng cửa sổ.",
+			"close_to_tray_hint": "Giữ YouTube Music ++ chạy nền khi đóng cửa sổ.",
 			"system_titlebar": "Dùng thanh tiêu đề hệ thống",
-			"system_titlebar_hint": "Để hệ điều hành vẽ khung cửa sổ và các nút của nó. Limusic vẫn giữ thanh công cụ riêng bên dưới.",
+			"system_titlebar_hint": "Để hệ điều hành vẽ khung cửa sổ và các nút của nó. YouTube Music ++ vẫn giữ thanh công cụ riêng bên dưới.",
 			"update_banner": "Thông báo cập nhật",
-			"update_banner_hint": "Hiện biểu ngữ khi có phiên bản Limusic mới.",
+			"update_banner_hint": "Hiện biểu ngữ khi có phiên bản YouTube Music ++ mới.",
 			"proxy": "Proxy HTTP/HTTPS",
 			"proxy_hint": "Định tuyến mọi yêu cầu mạng qua một máy chủ proxy tuỳ chọn.",
 			"proxy_placeholder": "http://host:port (để trống = không dùng)",
@@ -403,7 +403,7 @@
 			"report_issue_hint": "Mở GitHub trong trình duyệt, đã điền sẵn phiên bản và hệ thống.",
 			"report_issue_button": "Báo lỗi",
 			"kofi": "Mời tôi một ly cà phê",
-			"kofi_hint": "Limusic miễn phí và sẽ luôn miễn phí. Ko-fi ở đó nếu bạn muốn góp một tay.",
+			"kofi_hint": "YouTube Music ++ miễn phí và sẽ luôn miễn phí. Ko-fi ở đó nếu bạn muốn góp một tay.",
 			"kofi_button": "Mở Ko-fi"
 		}
 	},
@@ -505,7 +505,8 @@
 		"expand_sidebar": "Mở rộng thanh bên",
 		"collapse_sidebar": "Thu gọn thanh bên",
 		"show_artwork": "Hiện ảnh bìa",
-		"show_video": "Hiện video"
+		"show_video": "Hiện video",
+		"resize_sidebar": "Kéo đổi rộng thanh bên"
 	},
 	"lyrics": {
 		"title": "Lời bài hát",

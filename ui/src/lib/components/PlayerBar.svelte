@@ -19,9 +19,11 @@
 		MusicNote01Icon,
 		ArrowUp01Icon,
 		ArrowDown01Icon,
-		DownloadCircle01Icon
+		DownloadCircle01Icon,
+		Download04Icon
 	} from '@hugeicons/core-free-icons';
 	import { fade } from 'svelte/transition';
+	import { textSwap } from '$lib/motion';
 	import { goto } from '$app/navigation';
 	import { Button } from '$lib/components/ui/button';
 	import * as api from '$lib/api';
@@ -40,7 +42,13 @@
 	import { thumb } from '$lib/thumb';
 	import ArtistLine from './ArtistLine.svelte';
 	import QualityChip from './QualityChip.svelte';
-	import { dl, requestSaved } from '$lib/downloads.svelte';
+	import {
+		dl,
+		download,
+		isDownloading,
+		remove as removeDownload,
+		requestSaved
+	} from '$lib/downloads.svelte';
 	import Marquee from './Marquee.svelte';
 	import TrackMenu from './TrackMenu.svelte';
 	import { t } from '$lib/i18n.svelte';
@@ -111,6 +119,7 @@
 	function onSeekCommit(e: Event) {
 		const v = Number((e.target as HTMLInputElement).value);
 		playback.position = v;
+		playback.positionAt = performance.now();
 		seekDrag = null;
 		api.seek(v);
 	}
@@ -139,6 +148,21 @@
 		const id = playback.now?.videoId;
 		if (id && !api.isLocalId(id)) requestSaved(id);
 	});
+	const nowDownloading = $derived(!!playback.now && isDownloading(playback.now.videoId));
+
+	/** The playing track as a SongItem, which is what the downloader takes. `NowPlaying` is the
+	 *  event payload's shape, not the queue row's, so the two field names differ. */
+	function nowAsSong(): api.SongItem {
+		const n = playback.now!;
+		return {
+			video_id: n.videoId,
+			title: n.title,
+			artists: n.artists,
+			duration: n.duration,
+			thumbnail: n.thumbnail
+		};
+	}
+
 	const nowSaved = $derived(
 		!!playback.now && !api.isLocalId(playback.now.videoId) && dl.saved.has(playback.now.videoId)
 	);
@@ -172,60 +196,55 @@
 				</div>
 			{/if}
 		{/key}
-		<div class="min-w-0">
-			<div class="flex items-center gap-1.5">
-				{#snippet title()}
-					<Marquee
-						text={playback.now?.title ?? t('player.not_playing')}
-						class="text-sm font-medium"
-					/>
-				{/snippet}
-				<!-- The button wraps the whole marquee rather than the text inside it: mid-scroll the
-				     visible half of the line is the inert trailing copy, so a button around the text
-				     itself is only clickable while the original copy is on screen. The underline goes
-				     on the spans, not the button: text-decoration doesn't reach the trailing copy,
-				     which is absolutely positioned. -->
-				{#if albumId}
-					<button
-						class="min-w-0 cursor-pointer text-left hover:[&_span]:underline"
-						onclick={() => goto(`/album/${encodeURIComponent(albumId)}`)}
-					>
+		<!-- Keyed on the track, so a change is one text swap (motion.ts) rather than the title and
+		     artist flipping in place a frame apart. -->
+		{#key playback.now?.videoId}
+			<div class="min-w-0" in:textSwap>
+				<div class="flex items-center gap-1.5">
+					{#snippet title()}
+						<Marquee
+							text={playback.now?.title ?? t('player.not_playing')}
+							class="text-sm font-medium"
+						/>
+					{/snippet}
+					<!-- The button wraps the whole marquee rather than the text inside it: mid-scroll the
+					     visible half of the line is the inert trailing copy, so a button around the text
+					     itself is only clickable while the original copy is on screen. The underline goes
+					     on the spans, not the button: text-decoration doesn't reach the trailing copy,
+					     which is absolutely positioned. -->
+					{#if albumId}
+						<button
+							class="min-w-0 cursor-pointer text-left hover:[&_span]:underline"
+							onclick={() => goto(`/album/${encodeURIComponent(albumId)}`)}
+						>
+							{@render title()}
+						</button>
+					{:else}
 						{@render title()}
-					</button>
-				{:else}
-					{@render title()}
-				{/if}
-				{#if autoplayTrack}
-					<span
-						class="shrink-0 text-muted-foreground"
-						title={t('player.autoplay_notice')}
-						in:fade={{ duration: 200 }}
-					>
-						<HugeiconsIcon icon={InfinityIcon} class="h-3.5 w-3.5" />
-					</span>
-				{/if}
-			</div>
-			<div class="flex min-w-0 items-center gap-1.5">
-				<ArtistLine
-					runs={playback.now?.artistRuns}
-					text={playback.now?.artists ?? ''}
-					marquee
-					class="block min-w-0 text-xs text-muted-foreground"
-				/>
-				<!-- Compact here: the bar is the tightest row in the app, and "Opus 160" already says
-				     it without the unit. The player view below spells it out. -->
-				<QualityChip codec={playback.now?.audioCodec} bitrate={playback.now?.audioBitrate} compact />
-				<!-- On disk. Same marker as the track rows, so "downloaded" looks like one thing
-				     wherever it appears. Local files are excluded: they were never downloaded. -->
-				{#if nowSaved}
-					<HugeiconsIcon
-						icon={DownloadCircle01Icon}
-						class="h-3.5 w-3.5 shrink-0 text-primary"
-						aria-label={t('downloads.saved')}
+					{/if}
+					{#if autoplayTrack}
+						<span
+							class="shrink-0 text-muted-foreground"
+							title={t('player.autoplay_notice')}
+							in:fade={{ duration: 200 }}
+						>
+							<HugeiconsIcon icon={InfinityIcon} class="h-3.5 w-3.5" />
+						</span>
+					{/if}
+				</div>
+				<div class="flex min-w-0 items-center gap-1.5">
+					<ArtistLine
+						runs={playback.now?.artistRuns}
+						text={playback.now?.artists ?? ''}
+						marquee
+						class="block min-w-0 text-xs text-muted-foreground"
 					/>
-				{/if}
+					<!-- Compact here: the bar is the tightest row in the app, and "Opus 160" already says
+					     it without the unit. The player view below spells it out. -->
+					<QualityChip codec={playback.now?.audioCodec} bitrate={playback.now?.audioBitrate} compact />
+				</div>
 			</div>
-		</div>
+		{/key}
 		{#if playback.now}
 			<div class="flex items-center">
 				<!-- A local file has no YouTube identity (see api.isLocalId): nothing to like, and no
@@ -233,6 +252,42 @@
 				     on a narrow window three buttons here leave the title almost no room. lg, not md:
 				     the window's minWidth is 900 (tauri.conf.json), so md never fires. -->
 				{#if !api.isLocalId(playback.now.videoId)}
+					<!-- Download this one track. Beside like and add-to-playlist because it is the same
+					     kind of thing: something you do to the track that is playing. It doubles as the
+					     "on disk" marker, so the state is where the action is rather than in two places.
+					     Hidden for a local file along with the other two — it is already on the disk. -->
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						class="hidden lg:inline-flex"
+						onclick={() =>
+							nowSaved
+								? removeDownload(playback.now!.videoId)
+								: download([nowAsSong()])}
+						disabled={nowDownloading}
+						aria-label={nowSaved
+							? t('downloads.remove')
+							: nowDownloading
+								? t('downloads.downloading')
+								: t('downloads.save')}
+						title={nowSaved
+							? t('downloads.remove')
+							: nowDownloading
+								? t('downloads.downloading')
+								: t('downloads.save')}
+					>
+						<!-- altIcon/showAlt, not a ternary: `icon` is read once at mount. -->
+						<HugeiconsIcon
+							icon={Download04Icon}
+							altIcon={DownloadCircle01Icon}
+							showAlt={nowSaved}
+							class="h-4 w-4 {nowSaved
+								? 'text-primary'
+								: nowDownloading
+									? 'animate-pulse text-muted-foreground'
+									: 'text-muted-foreground'}"
+						/>
+					</Button>
 					<Button
 						variant="ghost"
 						size="icon-sm"
@@ -408,11 +463,14 @@
 			>
 				<HugeiconsIcon icon={Queue01Icon} class="h-5 w-5" />
 			</Button>
-			<!-- The keyboard (and discoverable) way in and out of the now-playing view; clicking the
-			     bar's empty space does the same thing. -->
+			<!-- The discoverable way *into* the now-playing view; clicking the bar's empty space does
+			     the same. Hidden once the view is open: closing now lives at its top left, where the
+			     eye already is, instead of in the far corner beside the queue and lyrics buttons —
+			     which is where it used to be mistaken for one of them. -->
 			<Button
 				variant="ghost"
 				size="icon-sm"
+				class={np.open ? 'hidden' : ''}
 				onclick={() => (np.open = !np.open)}
 				aria-label={np.open ? t('player.minimize_player') : t('player.open_player')}
 				aria-expanded={np.open}

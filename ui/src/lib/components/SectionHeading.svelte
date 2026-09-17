@@ -50,7 +50,8 @@
 		<h2 class="{headingClass} min-w-0 truncate">{title}</h2>
 	{/if}
 	{@render lead?.()}
-	<div class="h-px min-w-6 flex-1 bg-gradient-to-r from-foreground/15 to-transparent"></div>
+	<!-- Spacer, not a rule: the heading's line used to be drawn here, and the design is no lines. -->
+	<div class="min-w-6 flex-1"></div>
 	{@render children?.()}
 	{#if onMore}
 		<button

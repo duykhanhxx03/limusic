@@ -103,7 +103,7 @@
 	// Unless the shelf isn't a set (`queueAll={false}`), where only the clicked song plays.
 	const play = (start: number) => {
 		if (!queueAll) return playSong(songs[start]);
-		openPlayer();
+		openPlayer(songs[start]);
 		return api.playPlaylist(songs, start, undefined, title);
 	};
 
@@ -185,7 +185,7 @@
 				{#each columns as col, c (c)}
 					<div
 						class="min-w-0 shrink-0 snap-start {SLOT.song} {c || others.length
-							? 'border-l border-foreground/12 pl-4'
+							? 'pl-4'
 							: ''} pr-4"
 					>
 						{#each col as song, r (song.video_id + ':' + r)}

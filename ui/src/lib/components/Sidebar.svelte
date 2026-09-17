@@ -22,6 +22,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { ON_REPEAT_ID, type BrowseItem } from '$lib/api';
 	import { thumb } from '$lib/thumb';
+	import SidebarResizer from './SidebarResizer.svelte';
 	import PlaylistMenu from './PlaylistMenu.svelte';
 	import {
 		auth,
@@ -98,45 +99,16 @@
 	const wide = (cls: string) => (collapsed ? '' : cls);
 </script>
 
+<!-- `relative` so the drag handle can pin itself to the right edge. Width comes from the shell's
+     `--sidebar-w` rather than a utility class, because the overlays read the same variable. -->
 <aside
-	class="flex h-full w-16 shrink-0 flex-col bg-sidebar p-3 text-sidebar-foreground {wide(
-		'lg:w-60'
-	)}"
+	class="relative flex h-full shrink-0 flex-col bg-sidebar p-3 text-sidebar-foreground"
+	style="width: var(--sidebar-w)"
 >
-	<div class="flex items-center justify-center px-2 py-2 {wide('lg:justify-between')}">
-		<span class="hidden font-heading text-lg font-bold tracking-tight {wide('lg:block')}">Limusic</span>
-		<!-- Column when collapsed: the two buttons don't fit side by side in the 64px rail. -->
-		<div class="flex items-center gap-1 {collapsed ? 'flex-col' : ''}">
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				class="hidden hover:text-primary lg:inline-flex"
-				onclick={toggleSidebar}
-				aria-label={collapsed ? t('a11y.expand_sidebar') : t('a11y.collapse_sidebar')}
-			>
-				<!-- altIcon/showAlt, not a ternary: `icon` is read once at mount. -->
-				<HugeiconsIcon
-					icon={SquareArrowLeft01Icon}
-					altIcon={SquareArrowRight01Icon}
-					showAlt={collapsed}
-					strokeWidth={2}
-					class="h-4 w-4"
-				/>
-			</Button>
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				class="hover:text-primary"
-				onclick={toggleMode}
-				aria-label={t('a11y.toggle_theme')}
-			>
-				<HugeiconsIcon icon={Sun01Icon} strokeWidth={2} class="h-4 w-4 dark:hidden" />
-				<HugeiconsIcon icon={Moon02Icon} strokeWidth={2} class="hidden h-4 w-4 dark:block" />
-			</Button>
-		</div>
-	</div>
-
-	<nav class="mt-2 flex flex-col gap-1">
+	<!-- Top to bottom: where to go, what you keep, the app's own switches. The switches used to sit
+	     alone on a row above this one — once the titlebar took over the app's name there was nothing
+	     beside them, and the rail read as a gap with two icons in it. -->
+	<nav class="flex flex-col gap-1">
 		{#each nav as n (n.href)}
 			<a
 				href={n.href}
@@ -155,42 +127,36 @@
 				{/if}
 				<HugeiconsIcon
 					icon={n.icon}
-					class="h-5 w-5 shrink-0 transition-transform duration-200 group-hover:scale-110"
+					class="h-5 w-5 shrink-0 transition-transform duration-[var(--duration-fast)] ease-[var(--ease-smooth-out)] group-hover:scale-110"
 				/>
 				<span class="hidden {wide('lg:inline')}">{n.label}</span>
 			</a>
 		{/each}
-		<button
-			onclick={() => (ui.settingsOpen = true)}
-			title={t('nav.settings')}
-			class="group flex items-center justify-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground {wide(
-				'lg:justify-start'
-			)}"
-		>
-			<HugeiconsIcon
-				icon={Settings01Icon}
-				class="h-5 w-5 shrink-0 transition-transform duration-200 group-hover:scale-110"
-			/>
-			<span class="hidden {wide('lg:inline')}">{t('nav.settings')}</span>
-		</button>
 	</nav>
 
 	<!-- Playlists. Hidden on the icon rail (needs labels; matches YTM's collapsed rail). flex-1 lets
 	     the list fill the space and scroll. Signed out the section still appears once there is
 	     something in it: On Repeat, or a playlist saved on this machine. -->
 	{#if auth.account?.signedIn || playlists.length}
-		<div class="mt-3 hidden min-h-0 flex-1 flex-col hairline-t pt-3 {wide('lg:flex')}">
-			<!-- Creating one is a YouTube write action, so it needs an account. -->
-			{#if auth.account?.signedIn}
-				<Button
-					variant="outline"
-					size="sm"
-					class="mb-2 w-full gap-2"
-					onclick={() => (dialogOpen = true)}
-				>
-					<HugeiconsIcon icon={Add01Icon} class="h-4 w-4" /> {t('nav.new_playlist')}
-				</Button>
-			{/if}
+		<div class="mt-5 hidden min-h-0 flex-1 flex-col {wide('lg:flex')}">
+			<div class="mb-1 flex h-8 items-center justify-between pl-3 pr-1">
+				<span class="text-xs font-semibold tracking-wide text-muted-foreground">
+					{t('library.playlists_tab')}
+				</span>
+				<!-- Creating one is a YouTube write action, so it needs an account. -->
+				{#if auth.account?.signedIn}
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						class="hover:text-primary"
+						onclick={() => (dialogOpen = true)}
+						title={t('nav.new_playlist')}
+						aria-label={t('nav.new_playlist')}
+					>
+						<HugeiconsIcon icon={Add01Icon} strokeWidth={2} class="h-4 w-4" />
+					</Button>
+				{/if}
+			</div>
 			<div class="min-h-0 flex-1 overflow-y-auto">
 				{#each playlists as pl, i (pl.id)}
 					<!-- The ⋯ is a sibling of the link, not a child: a <button> inside an <a> is invalid
@@ -247,7 +213,7 @@
 						<PlaylistMenu item={pl} />
 					</div>
 					{#if pinnedCount && i === pinnedCount - 1}
-						<div class="mx-3 my-1.5 h-px bg-foreground/10"></div>
+						<div class="h-3"></div>
 					{/if}
 				{:else}
 					{#if library.loading}
@@ -282,4 +248,56 @@
 		</Dialog.Root>
 	{/if}
 
+	<!-- Pinned to the bottom whether or not the playlists above are there to push it. One row when
+	     there is room for labels, a column on the 64px rail. -->
+	<div
+		class="mt-auto flex items-center gap-1 pt-3 {collapsed
+			? 'flex-col'
+			: 'flex-col lg:flex-row'}"
+	>
+		<button
+			onclick={() => (ui.settingsOpen = true)}
+			title={t('nav.settings')}
+			class="group flex items-center justify-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground {wide(
+				'lg:flex-1 lg:justify-start'
+			)}"
+		>
+			<HugeiconsIcon
+				icon={Settings01Icon}
+				class="h-5 w-5 shrink-0 transition-transform duration-[var(--duration-fast)] ease-[var(--ease-smooth-out)] group-hover:scale-110"
+			/>
+			<span class="hidden {wide('lg:inline')}">{t('nav.settings')}</span>
+		</button>
+		<Button
+			variant="ghost"
+			size="icon-sm"
+			class="hover:text-primary"
+			onclick={toggleMode}
+			title={t('a11y.toggle_theme')}
+			aria-label={t('a11y.toggle_theme')}
+		>
+			<HugeiconsIcon icon={Sun01Icon} strokeWidth={2} class="h-4 w-4 dark:hidden" />
+			<HugeiconsIcon icon={Moon02Icon} strokeWidth={2} class="hidden h-4 w-4 dark:block" />
+		</Button>
+		<!-- Hidden below lg: the rail is collapsed by the breakpoint there, so there is nothing to toggle. -->
+		<Button
+			variant="ghost"
+			size="icon-sm"
+			class="hidden hover:text-primary lg:inline-flex"
+			onclick={toggleSidebar}
+			title={collapsed ? t('a11y.expand_sidebar') : t('a11y.collapse_sidebar')}
+			aria-label={collapsed ? t('a11y.expand_sidebar') : t('a11y.collapse_sidebar')}
+		>
+			<!-- altIcon/showAlt, not a ternary: `icon` is read once at mount. -->
+			<HugeiconsIcon
+				icon={SquareArrowLeft01Icon}
+				altIcon={SquareArrowRight01Icon}
+				showAlt={collapsed}
+				strokeWidth={2}
+				class="h-4 w-4"
+			/>
+		</Button>
+	</div>
+
+	<SidebarResizer />
 </aside>

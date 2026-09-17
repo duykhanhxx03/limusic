@@ -32,13 +32,14 @@
 <aside
 	in:fly={{ x: 32, duration: 250, easing: cubicOut }}
 	out:fly={{ x: 32, duration: 150, easing: cubicOut }}
+	style={expanded ? 'left: var(--sidebar-w)' : undefined}
 	class={expanded
-		? // ponytail: left offsets mirror Sidebar's w-16/lg:w-60 (and its manual collapse), right
-			// offset mirrors QueuePanel's w-80 — keep in sync if those change.
-			`absolute inset-y-0 left-16 right-0 z-30 flex h-full flex-col glass ${ui.sidebarCollapsed ? '' : 'lg:left-60'} ${queueOpen ? 'lg:right-80' : ''}`
+		? // Expanded starts where the sidebar ends, from the shell's `--sidebar-w` — one source, so a
+			// dragged sidebar edge moves this with it. The right offset still mirrors QueuePanel's w-80.
+			`absolute inset-y-0 right-0 z-30 flex h-full flex-col glass ${queueOpen ? 'lg:right-80' : ''}`
 		: `absolute inset-y-0 right-0 z-30 flex h-full w-80 max-w-[80vw] flex-col glass ${queueOpen ? 'lg:right-80' : ''}`}
 >
-	<div class="flex items-center justify-between hairline-b px-4 py-3">
+	<div class="flex items-center justify-between px-4 py-3">
 		<h2 class="font-heading text-sm font-semibold">{t('lyrics.title')}</h2>
 		<button
 			onclick={() => (expanded = !expanded)}

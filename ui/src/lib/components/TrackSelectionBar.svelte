@@ -60,7 +60,7 @@
 			</span>
 
 			{#if selection.count}
-				<span class="mx-1 h-5 w-px shrink-0 bg-foreground/15"></span>
+				<span class="w-2 shrink-0"></span>
 				<Button variant="ghost" size="icon" disabled={blocked} onkeydown={onKey}
 					title={t('player.play_next')} aria-label={t('player.play_next')}
 					onclick={() => queue(true)}>
@@ -80,7 +80,7 @@
 				{/if}
 			{/if}
 
-			<span class="mx-1 h-5 w-px shrink-0 bg-foreground/15"></span>
+			<span class="w-2 shrink-0"></span>
 			{#if !selection.allSelected}
 				<Button variant="ghost" size="sm" disabled={!selection.selectAllCount || selection.selectingAll}
 					onkeydown={onKey}

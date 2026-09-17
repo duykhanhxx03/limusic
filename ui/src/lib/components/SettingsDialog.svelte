@@ -31,6 +31,7 @@
 	import Changelog from '$lib/components/Changelog.svelte';
 	import {
 		THEMES,
+		DEFAULT_THEME,
 		FONTS,
 		theme,
 		appearance,
@@ -61,6 +62,7 @@
 	import { getVersion } from '@tauri-apps/api/app';
 	import { t, setLocale, currentLocale, LOCALES, type LocaleId } from '$lib/i18n.svelte';
 	import { appIcon, chooseAppIcon } from '$lib/appicon.svelte';
+	import { forgetLyrics } from '$lib/prefetch.svelte';
 
 	type TabId = 'general' | 'themes' | 'playback' | 'data' | 'about';
 	const TABS = $derived<{ id: TabId; label: string; hint: string; icon: typeof Settings02Icon }[]>([
@@ -76,11 +78,13 @@
 	const GROUP = 'mb-7 last:mb-1';
 	const LABEL =
 		'mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground';
-	const CARD = 'divide-y divide-border/60 overflow-hidden rounded-xl border bg-card';
+	const CARD = 'overflow-hidden rounded-xl bg-card';
 
 	const ACCENT_THEMES = THEMES.filter((t) => t.kind === 'accent');
 	const PALETTE_THEMES = THEMES.filter((t) => t.kind === 'palette');
-	const currentTheme = $derived(THEMES.find((t) => t.id === theme.id) ?? THEMES[0]);
+	const currentTheme = $derived(
+		THEMES.find((t) => t.id === theme.id) ?? THEMES.find((t) => t.id === DEFAULT_THEME)!
+	);
 
 	// --- Themes tab ---
 	type FontKey = 'fontSans' | 'fontHeading';
@@ -271,7 +275,7 @@
 				version,
 				system
 			});
-			await api.openExternal(`https://github.com/SimoHypers/limusic/issues/new?${q}`);
+			await api.openExternal(`https://github.com/duykhanhxx03/limusic/issues/new?${q}`);
 		} catch (e) {
 			diagError = String(e);
 		}
@@ -356,6 +360,8 @@
 	async function setBoidu(on: boolean) {
 		settings.lyrics_boidu = on ? 'true' : 'false';
 		await api.setSetting('lyrics_boidu', settings.lyrics_boidu);
+		// Rust drops its lyrics cache on this setting; the webview's copy has to go with it.
+		forgetLyrics();
 	}
 
 	async function setPreventDuplicates(on: boolean) {
@@ -482,7 +488,7 @@
 							aria-current={tab === tb.id}
 							class="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors {tab ===
 							tb.id
-								? 'bg-background text-foreground ring-1 ring-foreground/15'
+								? 'bg-foreground/10 text-foreground'
 								: 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground'}"
 						>
 							<HugeiconsIcon
@@ -504,7 +510,7 @@
 			     (a long font name, a long path) widens the pane and pushes every tab off the modal. -->
 			<div class="flex min-w-0 flex-1 flex-col">
 				<!-- h-14 also keeps the dialog's close button clear of the first row. -->
-				<header class="flex h-14 shrink-0 flex-col justify-center hairline-b px-6 pr-14">
+				<header class="flex h-14 shrink-0 flex-col justify-center px-6 pr-14">
 					<h2 class="text-sm font-semibold">{currentTab.label}</h2>
 					<p class="truncate text-xs text-muted-foreground">{currentTab.hint}</p>
 				</header>
@@ -772,7 +778,7 @@
 							class="mb-7 rounded-xl bg-gradient-to-br from-primary/8 to-transparent px-4 py-4"
 						>
 							<div class="flex items-center gap-2">
-								<span class="font-heading text-lg font-bold">Limusic</span>
+								<span class="font-heading text-lg font-bold">YouTube Music ++</span>
 								{#if version}
 									<span
 										class="rounded-full bg-primary/12 px-2 py-0.5 text-[11px] font-semibold text-primary"
@@ -786,17 +792,9 @@
 							</p>
 						</div>
 
-						<section class={GROUP}>
-							<h3 class={LABEL}>{t('settings.sections.support')}</h3>
-							<div class={CARD}>
-								{@render row({
-									title: t('settings.about.kofi'),
-									desc: t('settings.about.kofi_hint'),
-									control: kofiButton,
-									tall: true
-								})}
-							</div>
-						</section>
+						<!-- The Ko-fi row is deliberately not rendered. The snippet and its strings stay
+						     put so upstream merges still apply cleanly and turning it back on is
+						     uncommenting this block, not rebuilding it. -->
 
 						<section class={GROUP}>
 							<h3 class={LABEL}>{t('settings.sections.updates')}</h3>

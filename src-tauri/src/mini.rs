@@ -42,7 +42,7 @@ pub fn open(app: &AppHandle) -> Result<(), String> {
         let _ = w.set_focus();
     } else {
         let win = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("index.html".into()))
-            .title("Limusic")
+            .title(crate::APP_NAME)
             .inner_size(W, H)
             .resizable(false)
             .decorations(false)

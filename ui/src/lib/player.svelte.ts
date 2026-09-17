@@ -1,6 +1,7 @@
 // Shared reactive app state (playback + auth), set up ONCE by the root layout. Components import
 // `playback`/`auth` and read them reactively; the Rust side drives them via Tauri events.
 // context/11 UI contract — this module only calls commands / subscribes to events.
+import { untrack } from 'svelte';
 import { browser } from '$app/environment';
 import * as api from './api';
 import { initSleep } from './sleep.svelte';
@@ -19,6 +20,7 @@ import * as pl from './personal';
 import type { Personal } from './personal';
 import { appearance } from './theme.svelte';
 import { t } from './i18n.svelte';
+import { durationSecs, warmNext } from './prefetch.svelte';
 
 export const playback = $state({
 	now: null as NowPlaying | null,
@@ -97,14 +99,40 @@ export function forgetVideoUrl(videoId: string) {
 	api.forgetVideoStream(videoId).catch(() => {});
 }
 
-/** No-op when the user has turned the auto-open off (#64): playback starts, the view stays put. */
-export const openPlayer = () => {
+/**
+ * Open the player view for something about to play. No-op for the view when the user has turned
+ * the auto-open off (#64): playback starts, the view stays put.
+ *
+ * `first`, when the caller knows which track starts, is shown *now*. Rust announces the new track
+ * only once its stream has resolved — 110–170 ms on a warm cache, seconds on a cold one — so the
+ * view used to slide up wearing the previous track's cover, title and lyrics and swap them halfway
+ * through the motion. The real `now-playing` event replaces this stand-in when it lands, and a
+ * track that fails to play leaves the name of the thing the user clicked, which is also true.
+ */
+export const openPlayer = (first?: SongItem) => {
+	if (first && playback.now?.videoId !== first.video_id) {
+		playback.now = {
+			videoId: first.video_id,
+			title: first.title,
+			artists: first.artists,
+			artistId: first.artist_id,
+			artistRuns: first.artist_runs,
+			thumbnail: first.thumbnail,
+			duration: first.duration,
+			streamClient: '',
+			rating: first.rating ?? null
+		};
+		playback.rating = first.rating ?? 'indifferent';
+		playback.position = 0;
+		playback.positionAt = performance.now();
+		playback.duration = durationSecs(first.duration) ?? 0;
+	}
 	if (appearance.openPlayerOnPlay) np.open = true;
 };
 
 /** Play one track (a search row, a song card, a shelf), and show it. */
 export function playSong(song: SongItem) {
-	openPlayer();
+	openPlayer(song);
 	return api.play(song);
 }
 
@@ -973,7 +1001,7 @@ export function playFrom(
 	pl.noteRecent(personal, source);
 	pl.touchPick(personal, source.id);
 	savePersonal();
-	openPlayer();
+	openPlayer(shuffle ? undefined : items[start ?? 0]);
 	return api.playPlaylist(items, start, sourceId, source.title, shuffle, continuation);
 }
 
@@ -1042,13 +1070,27 @@ export const ui = $state({
 	// Manual sidebar collapse, lg and up (below that the rail is already collapsed by the
 	// breakpoint). Here rather than in Sidebar because the now-playing view and the fullscreen
 	// lyrics panel are overlays that offset themselves by the sidebar's width.
-	sidebarCollapsed: browser && localStorage.getItem('sidebar_collapsed') === '1'
+	sidebarCollapsed: browser && localStorage.getItem('sidebar_collapsed') === '1',
+	/** The sidebar's open width in px, dragged by its right edge. Clamped on read as well as on
+	 *  write: localStorage is user-writable, and a width of 4000 would leave no page. */
+	sidebarWidth: browser ? clampSidebar(Number(localStorage.getItem('sidebar_width'))) : 264
 });
 
 export function openChannelPicker(required = false) {
 	ui.channelPickerRequired = required;
 	ui.channelIdentities = [];
 	ui.channelPickerOpen = true;
+}
+
+/** 12rem to 26rem. Below the floor the playlist names are unreadable; above the ceiling the feed
+ *  starts losing a card column, which is a worse trade than a truncated name. */
+export function clampSidebar(px: number): number {
+	return Number.isFinite(px) && px > 0 ? Math.min(416, Math.max(192, px)) : 264;
+}
+
+export function setSidebarWidth(px: number) {
+	ui.sidebarWidth = clampSidebar(px);
+	localStorage.setItem('sidebar_width', String(ui.sidebarWidth));
 }
 
 export function toggleSidebar() {
@@ -1239,6 +1281,17 @@ export function initApp(mini = false): () => void {
 		})
 		.catch(() => {});
 	if (mini) return teardown;
+	// Whatever comes next is fetched and decoded during this track, so the change has nothing left
+	// to wait for (prefetch.svelte.ts). Re-run on every advance and every queue edit, and when the
+	// big artwork comes on screen.
+	const stopWarming = $effect.root(() => {
+		$effect(() => {
+			const q = playback.queue;
+			const next = q.items[q.currentIndex + 1];
+			const artworkOnScreen = np.open || ui.theaterOpen;
+			untrack(() => warmNext(next, artworkOnScreen));
+		});
+	});
 	api.getSettings()
 		.then((s) => (prefs.musicVideos = s.music_videos === 'true'))
 		.catch(() => {});
@@ -1262,5 +1315,8 @@ export function initApp(mini = false): () => void {
 	// point, prunes shortcuts for music that was deleted while the app was closed.
 	scanLocal();
 	loadBlocked();
-	return teardown;
+	return () => {
+		teardown();
+		stopWarming();
+	};
 }

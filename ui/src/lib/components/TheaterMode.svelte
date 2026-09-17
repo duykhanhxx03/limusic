@@ -43,13 +43,13 @@
 		playback,
 		toggleMute,
 		toggleNowPlayingLike,
-		ui,
-		wheelVolume
+		ui
 	} from '$lib/player.svelte';
 	import { artworkAccent } from '$lib/artcolor';
 	import { hexToHsv } from '$lib/color';
 	import { appearance } from '$lib/theme.svelte';
-	import { thumb } from '$lib/thumb';
+	import { artworkLadder, thumb } from '$lib/thumb';
+	import ArtworkSwap from './ArtworkSwap.svelte';
 	import { t } from '$lib/i18n.svelte';
 	import ArtistLine from './ArtistLine.svelte';
 	import QualityChip from './QualityChip.svelte';
@@ -100,14 +100,9 @@
 	});
 
 	// Same stepped-down artwork as the now-playing view: Google's CDN doesn't serve every rewritten
-	// size for every image, and at this size a broken glyph is the whole screen.
-	let attempt = $state(0);
-	$effect(() => {
-		playback.now?.thumbnail; // re-arm on every track change
-		attempt = 0;
-	});
-	const srcs = $derived([720, 400, 120].map((px) => thumb(playback.now?.thumbnail, px)));
-	const src = $derived(srcs[attempt]);
+	// size for every image, and at this size a broken glyph is the whole screen. Largest first, sized
+	// for the display (`artworkLadder`); `ArtworkSwap` walks it and crossfades between tracks.
+	const srcs = $derived(artworkLadder(playback.now?.thumbnail));
 
 	// The cover's own colour, lighting the room. Memoized in artcolor, and read here directly rather
 	// than through the "adapt colors to artwork" setting: that setting repaints the whole app, this
@@ -273,11 +268,12 @@
 <!-- Above the whole app including the titlebar (the chrome tops out at z-20): fullscreen means
      fullscreen. Below the dialogs and menus (z-50 and up) and the toast/update banners (z-100),
      which have to stay reachable from in here: Ctrl+K opened the palette behind this view. -->
-<!-- svelte-ignore a11y_no_static_element_interactions -- wheel is the volume gesture, move only wakes the chrome -->
+<!-- No wheel-to-volume on this view: it covered the whole screen, lyrics included, so reading back
+     through the lyrics turned the music down. -->
+<!-- svelte-ignore a11y_no_static_element_interactions -- move only wakes the chrome -->
 <section
 	in:fade={{ duration: 400, easing: quintOut }}
 	out:fade={{ duration: 350, easing: quintOut }}
-	onwheel={wheelVolume}
 	onpointermove={wake}
 	class="theater fixed inset-0 z-40 flex flex-col overflow-hidden bg-background text-foreground {idle
 		? 'cursor-none'
@@ -315,7 +311,7 @@
 	<!-- === Top strip. Where the queue came from on the left, the way out on the right. Fades with
 	     the pointer; Esc works whether it is on screen or not. === -->
 	<header
-		class="relative z-10 flex shrink-0 items-center justify-between px-8 py-5 transition-opacity duration-500 xl:px-14 {idle
+		class="relative z-10 flex shrink-0 items-center justify-between px-8 py-5 transition-opacity duration-[var(--duration-very-slow)] xl:px-14 {idle
 			? 'opacity-0'
 			: 'opacity-100'}"
 	>
@@ -359,30 +355,19 @@
 					class="pointer-events-none absolute -inset-[12%] -z-10 opacity-70"
 					style="background-image:{glow}"
 				></div>
-				{#key playback.now?.videoId}
-					<div in:scale={{ start: 0.94, duration: 420, easing: cubicOut }} class="relative">
-						{#if src && attempt < srcs.length}
-							<img
-								{src}
-								alt=""
-								onerror={() => attempt++}
-								style={srcs[2] ? `background-image:url(${srcs[2]})` : undefined}
-								class="aspect-square w-full rounded-2xl bg-cover object-cover ring-1 ring-white/10"
-							/>
-						{:else}
+				<!-- The box stays and the picture crossfades inside it. It used to be re-created per track
+				     and scale in from 0.94, a second, bigger motion on top of the cover changing. -->
+				<div class="relative">
+					<ArtworkSwap {srcs} class="rounded-2xl">
+						{#snippet fallback()}
 							<div
-								class="flex aspect-square w-full items-center justify-center rounded-2xl bg-muted text-muted-foreground/40 ring-1 ring-white/10"
+								class="flex h-full w-full items-center justify-center bg-muted text-muted-foreground/40"
 							>
 								<HugeiconsIcon icon={MusicNote01Icon} class="h-20 w-20" />
 							</div>
-						{/if}
-						<!-- A hairline of light along the top edge: the one thing that stops a flat square
-						     from looking pasted on. Inset ring, so it costs a border and not a shadow. -->
-						<div
-							class="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-inset ring-white/10"
-						></div>
-					</div>
-				{/key}
+						{/snippet}
+					</ArtworkSwap>
+				</div>
 
 				<!-- Volume, on the art rather than in the layout: a slider sitting on its own under the
 				     transport was a second horizontal bar competing with the scrubber. Collapsed to
@@ -415,7 +400,7 @@
 					     width is not zero, so without it the slider never actually collapses. -->
 					<input
 						type="range"
-						class="range on-art min-w-0 transition-[width,opacity,margin] duration-150 {volOpen
+						class="range on-art min-w-0 transition-[width,opacity,margin] duration-[var(--duration-quick)] {volOpen
 							? 'ml-1.5 mr-1 w-24 opacity-100'
 							: 'w-0 opacity-0'}"
 						style="--pct:{playback.volume}%"
@@ -503,6 +488,7 @@
 					onchange={(e) => {
 						const v = Number(e.currentTarget.value);
 						playback.position = v;
+						playback.positionAt = performance.now();
 						seekDrag = null;
 						api.seek(v);
 					}}

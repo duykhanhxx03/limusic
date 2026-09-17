@@ -5,7 +5,9 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import { appIconPath, setAppIcon } from './api';
 import fallback from '$lib/assets/favicon.svg';
 
-export const appIcon = $state({ src: fallback });
+/** `src` is always drawable; `custom` says whether it is the user's file or the bundled mark.
+ *  The titlebar draws the theme-aware <Logo> unless there is a custom icon to honour. */
+export const appIcon = $state({ src: fallback, custom: false });
 
 /**
  * Re-read the icon from Rust. The cache-buster matters: replacing the icon keeps the same path,
@@ -14,6 +16,7 @@ export const appIcon = $state({ src: fallback });
 export async function loadAppIcon(): Promise<void> {
 	const path = await appIconPath();
 	appIcon.src = path ? `${convertFileSrc(path)}?v=${Date.now()}` : fallback;
+	appIcon.custom = !!path;
 }
 
 export async function chooseAppIcon(path: string | null): Promise<void> {

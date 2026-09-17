@@ -30,6 +30,8 @@
 		removeSongFromLibrary,
 		songLibraryRemoval
 	} from '$lib/player.svelte';
+	import { rowWindow } from '$lib/rows';
+	import { rowScroller } from '$lib/rows.svelte';
 	import { t } from '$lib/i18n.svelte';
 
 	// The same tab, pointed at a different browse id: Library ▸ Songs by default, or the tracks the
@@ -58,13 +60,17 @@
 	let loadingMore = $state(false);
 	let moreError = $state(false);
 
-	// A library runs to thousands of songs and WebKitGTK does not enjoy thousands of rows, so render
-	// a page at a time (same pager as the Local tab). Play all and Shuffle take every song either
-	// way, loaded or not.
-	// ponytail: a slice, not the windowing in `rows.ts` — that wants its own scroller and this tab
-	// scrolls with the page. Swap it in if a big library drags on the way down.
-	const PAGE = 100;
-	let shown = $state(PAGE);
+	// Windowed, not sliced. This used to render a growing page of rows — 100, then 200, then 300 —
+	// which meant a five-thousand-song library eventually held thousands of live `TrackRow`
+	// components, each with its own menu and deriveds. `content-visibility` spares their layout and
+	// their paint but not the node, the style or the component, and the scroll went to pieces
+	// somewhere past a thousand.
+	//
+	// Now only the rows around the viewport exist and the rest are two padded boxes (`rows.ts`) —
+	// the same thing the playlist page does. The blocker the old comment here named ("that wants
+	// its own scroller and this tab scrolls with the page") is gone: `attachWithin` walks up to the
+	// page's `<main>` instead of needing a scroller of its own.
+	const sc = rowScroller();
 
 	// No debounce, unlike the playlist page's box: the walk a query kicks off is the same walk
 	// whatever you typed, so delaying it only delays the answer, and one pass over a raw array of
@@ -72,10 +78,6 @@
 	let query = $state('');
 	const filtering = $derived(!!query.trim());
 	const shownSongs = $derived(filterTracks(songs, query));
-	$effect(() => {
-		query; // a narrower list starts from the first page again
-		shown = PAGE;
-	});
 
 	const nowId = $derived(playback.now?.videoId);
 	// No total: this browse carries no header, so the only number there is is "how many pages have
@@ -185,16 +187,16 @@
 		})();
 	});
 
-	function grow() {
-		shown += PAGE;
-		// Grown past what has arrived: pull the next page in behind it.
-		if (shown > songs.length) loadMore();
-	}
+	// Only the rows around the viewport are rendered; the rest are two padded boxes (`rows.ts`).
+	const win = $derived(
+		rowWindow(sc.scrollTop - sc.offsetPx, sc.viewportPx, shownSongs.length, sc.rowPx)
+	);
 
 	// One page per approach to the bottom: the observer only fires as the sentinel enters view, and
-	// the rows that land push it back out.
+	// the rows that land push it back out. It fetches now rather than also growing a DOM cap —
+	// with the window there is no cap to grow, so reaching the bottom means exactly one thing.
 	function sentinel(node: HTMLElement) {
-		const io = new IntersectionObserver(([e]) => e.isIntersecting && grow(), {
+		const io = new IntersectionObserver(([e]) => e.isIntersecting && loadMore(), {
 			rootMargin: '600px 0px'
 		});
 		io.observe(node);
@@ -220,7 +222,7 @@
 
 	function play(start: number | null, shuffle = false) {
 		if (!songs.length) return;
-		openPlayer();
+		openPlayer(shuffle ? undefined : songs[start ?? 0]);
 		api.playPlaylist(songs, start, undefined, SOURCE, shuffle, token);
 	}
 </script>
@@ -286,21 +288,32 @@
 	</div>
 
 	{#if shownSongs.length}
-		<div class="content-in">
-			<!-- Keyed on the id *and* the position: nothing stops the same song sitting in a library
+		<!-- `attachWithin`, not `attach`: the scrolling box is the route's <main>, not anything this
+		     component owns. -->
+		<div class="content-in" {@attach sc.attachWithin}>
+			<!-- data-rows: where the scroller measures row 0 from, since the header above scrolls
+			     away with the list. data-row: where it measures a row's real height from.
+			     Keyed on the id *and* the position: nothing stops the same song sitting in a library
 			     twice, and a repeated key is a crash. -->
-			{#each shownSongs.slice(0, limit ?? shown) as song, i (song.video_id + i)}
-				<TrackRow
-					{song}
-					index={i}
-					active={song.video_id === nowId}
-					inLibraryList={!uploads}
-					onplay={() => play(songs.indexOf(song))}
-					onAdd={() => openAddToPlaylist(song)}
-					onRemove={removable(song) ? () => remove(song) : undefined}
-					removeLabel={t('library.remove_from_library')}
-				/>
-			{/each}
+			<div
+				data-rows
+				style={limit ? undefined : `padding-top:${win.padTop}px;padding-bottom:${win.padBottom}px`}
+			>
+				{#each limit ? shownSongs.slice(0, limit) : shownSongs.slice(win.start, win.end) as song, i (song.video_id + (limit ? i : win.start + i))}
+					<div data-row>
+						<TrackRow
+							{song}
+							index={limit ? i : win.start + i}
+							active={song.video_id === nowId}
+							inLibraryList={!uploads}
+							onplay={() => play(songs.indexOf(song))}
+							onAdd={() => openAddToPlaylist(song)}
+							onRemove={removable(song) ? () => remove(song) : undefined}
+							removeLabel={t('library.remove_from_library')}
+						/>
+					</div>
+				{/each}
+			</div>
 		</div>
 	{:else if filtering}
 		<p class="text-sm text-muted-foreground">
@@ -327,7 +340,7 @@
 				{loadingMore ? t('common.loading') : t('common.try_again')}
 			</Button>
 		</div>
-	{:else if shown < shownSongs.length || token}
+	{:else if token}
 		<div aria-busy={loadingMore}>
 			<div {@attach sentinel}></div>
 			{#if loadingMore}

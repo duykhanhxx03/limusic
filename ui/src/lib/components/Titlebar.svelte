@@ -31,6 +31,7 @@
 	import AccountMenu from './AccountMenu.svelte';
 	import SearchSuggest from './SearchSuggest.svelte';
 	import { appIcon } from '$lib/appicon.svelte';
+	import Logo from './Logo.svelte';
 	import { openMiniPlayer, playback, ui } from '$lib/player.svelte';
 	import { win } from '$lib/win.svelte';
 	import { t } from '$lib/i18n.svelte';
@@ -63,30 +64,27 @@
      at this z — it must outrank the panels below (LyricsPanel/QueuePanel, z-30). Theater mode is
      the exception: it sits at z-40 so dialogs (z-50) can open over it, so the bar has to duck
      under it instead of the other way round. -->
+<!-- Three columns: the clusters on the outside, the search strip in the middle. The outer two are
+     `minmax(max-content, 1fr)`, so while there is room they are equal and the strip sits centred on
+     the *window* — the thing the eye goes to, and the right cluster is three times the width of the
+     left, so centring it in the flow would park it off to one side. When there is not room, a
+     cluster keeps its full width and the strip gives way instead of passing under it.
+
+     It used to be an absolutely positioned layer with a fixed guard either side (19rem, 26rem at
+     `lg`) sized to the right cluster. The cluster outgrew it when the sleep timer joined — 326px
+     against a 304px guard — and at a 900px window the account button sat on the history button. A
+     column cannot be outgrown. -->
 <header
 	data-tauri-drag-region
-	class="relative {ui.theaterOpen ? 'z-0' : 'z-50'} flex h-12 shrink-0 select-none items-center justify-between bg-card"
+	class="relative {ui.theaterOpen
+		? 'z-0'
+		: 'z-50'} grid h-12 shrink-0 select-none grid-cols-[minmax(max-content,1fr)_minmax(0,32rem)_minmax(max-content,1fr)] items-center bg-card"
 >
-	<!-- Centred on the *window*, not on the gap between the two clusters: this is the thing the eye
-	     goes to, and the right cluster is three times the width of the left, so centring it in the
-	     flow would park it visibly off to one side.
-
-	     The horizontal guard is the width of the widest cluster — the right one, which grows at `lg`
-	     where the account name appears — so the field shrinks as the window narrows instead of
-	     sliding under the window controls. At the 900px minimum window that still leaves it ~290px.
-
-	     pointer-events-none on the layer, auto on the group: the layer spans the whole bar, and
-	     without that the dead space either side of the field would stop being a drag region. -->
-	<div
-		class="pointer-events-none absolute inset-x-0 flex h-full items-center justify-center px-[19rem] lg:px-[26rem]"
-	>
+	<div data-tauri-drag-region class="col-start-2 row-start-1 flex h-full min-w-0 items-center px-2">
 		<!-- data-tauri-drag-region so the gaps between the three controls still drag the window. Bare,
 		     not `deep`: `deep` would make every descendant a drag handle, and the suggestion panel
 		     hanging below this group would then pull the window out from under the pointer. -->
-		<div
-			data-tauri-drag-region
-			class="pointer-events-auto flex w-full max-w-lg items-center gap-2"
-		>
+		<div data-tauri-drag-region class="flex w-full min-w-0 items-center gap-2">
 			<!-- Home. The sidebar has one as well, and deliberately: this is the one that stays in the
 			     same place however deep into a playlist you are. -->
 			<a
@@ -143,10 +141,33 @@
 	     starts clear of them. 70px is the standard reservation for the three buttons. -->
 	<div
 		data-tauri-drag-region
-		class="flex h-full items-center {win.chrome === 'overlay' ? 'pl-[70px]' : ''}"
+		class="col-start-1 row-start-1 flex h-full items-center justify-self-start {win.chrome ===
+		'overlay'
+			? 'pl-[70px]'
+			: ''}"
 	>
-		<!-- pointer-events-none: the logo is decoration; clicks on it should drag the window. -->
-		<img src={appIcon.src} alt="" class="pointer-events-none ml-3 mr-1 h-4 w-4" />
+		<!-- pointer-events-none: the mark and the name are decoration, so a click on either drags the
+		     window like the rest of the bar.
+
+		     The name shows from `lg` up only: below it that width is the search field's. `lg` is also
+		     where the sidebar wordmark appears, so the app is never named twice at one width and
+		     unnamed at another. -->
+		<span class="pointer-events-none ml-3 mr-2 flex items-center gap-2">
+			{#if appIcon.custom}
+				<!-- A picked icon is an arbitrary image, so it goes in as one. -->
+				<img src={appIcon.src} alt="" class="size-5" />
+			{:else}
+				<!-- Default: the inline mark, which inherits the bar's text colour and so flips with the
+				     theme. The bundled window/tray icon stays the filled red one — that sits on a panel
+				     whose colour is the desktop's business, not ours. -->
+				<Logo class="size-5" />
+			{/if}
+			<span
+				class="hidden whitespace-nowrap font-heading text-[13px] font-bold tracking-tight lg:block"
+			>
+				YouTube Music ++
+			</span>
+		</span>
 		<!-- Bigger and heavier than the icons on the right: these are navigation, and at their
 		     weight the arrow read as decoration and got missed. -->
 		<button
@@ -169,11 +190,14 @@
 		</button>
 	</div>
 
-	<div data-tauri-drag-region class="flex h-full items-center">
+	<div
+		data-tauri-drag-region
+		class="col-start-3 row-start-1 flex h-full items-center justify-self-end"
+	>
 		<!-- Account first, then the app-level buttons, then the window controls. The drag region lives
 		     on <header> only, so these children are ordinary buttons — don't add the attribute here. -->
 		<AccountMenu />
-		<div class="mx-1.5 h-4 w-px bg-foreground/15"></div>
+		<div class="w-3"></div>
 
 		<!-- Stop the music after a while. Beside the app-level buttons rather than in the player bar:
 		     it is a property of the session, not of the track that happens to be playing. -->
@@ -216,7 +240,7 @@
 		</button>
 
 		{#if win.chrome === 'off'}
-			<div class="mx-1.5 h-4 w-px bg-foreground/15"></div>
+			<div class="w-3"></div>
 
 			<button
 				class="flex h-full w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground"

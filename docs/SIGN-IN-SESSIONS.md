@@ -53,7 +53,7 @@ cookies live in the OS webview profile data *next to* the app data dir, not in t
 - **macOS (WKWebView):** inside `~/Library/Application Support/com.limusic.desktop/` WebKit data
 
 This is why a re-login is one click with no password/paste, and why deleting `limusic.sqlite`
-alone does not sign the webview out of Google. Limusic never reads this store as state:
+alone does not sign the webview out of Google. The app never reads this store as state:
 `session.rs` copies the youtube-domain cookies out of it into a `Cookie` header and stores that
 copy in SQLite.
 

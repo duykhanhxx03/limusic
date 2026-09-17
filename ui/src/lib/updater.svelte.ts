@@ -9,7 +9,7 @@ import { t } from './i18n.svelte';
 import { canSelfUpdate, getSettings, openExternal, releaseNotes } from './api';
 import { getVersion } from '@tauri-apps/api/app';
 
-const RELEASES_URL = 'https://github.com/SimoHypers/limusic/releases/latest';
+const RELEASES_URL = 'https://github.com/duykhanhxx03/limusic/releases/latest';
 
 /** How often the quiet check repeats while the app stays open. */
 export const QUIET_INTERVAL_MS = 6 * 60 * 60 * 1000;

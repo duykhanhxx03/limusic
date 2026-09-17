@@ -64,7 +64,7 @@
 	</button>
 
 	{#if open}
-		<div class="plate absolute right-0 top-full z-50 mt-1 w-56 overflow-hidden rounded-xl py-1">
+		<div class="glass absolute right-0 top-full z-50 mt-1 w-56 overflow-hidden rounded-xl py-1">
 			<p class="px-3 py-1.5 text-[11px] font-semibold uppercase text-muted-foreground">
 				{t('sleep.title')}
 			</p>
@@ -104,7 +104,7 @@
 			</form>
 
 			{#if sleep.remaining !== null}
-				<div class="mx-3 my-1 h-px bg-foreground/10"></div>
+				<div class="h-2"></div>
 				<button
 					class="w-full px-3 py-1.5 text-left text-sm text-destructive transition-colors hover:bg-accent/10"
 					onclick={() => {

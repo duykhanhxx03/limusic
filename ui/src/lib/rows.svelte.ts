@@ -42,7 +42,23 @@ export function rowScroller() {
 		get offsetPx() {
 			return offsetPx;
 		},
-		attach: (node: HTMLElement) => {
+		attach: (node: HTMLElement) => wire(node),
+		/**
+		 * Attach from *inside* the scrolling box instead of on it: walks up to the nearest
+		 * scrollable ancestor and wires that.
+		 *
+		 * For a list that does not own its scroller. `LibrarySongs` is dropped into a route whose
+		 * `<main>` does the scrolling (layout.svelte), and plumbing the container down through the
+		 * page to the component would put the window's correctness in the caller's hands — every
+		 * caller's, separately.
+		 */
+		attachWithin: (node: HTMLElement) => {
+			const box = scrollParent(node);
+			return box ? wire(box) : undefined;
+		}
+	};
+
+	function wire(node: HTMLElement) {
 			// Chromium anchors the scroll position to a node in view and corrects scrollTop when the
 			// content above it changes height. A windowed list changes exactly that on every scroll
 			// (rows above the viewport become padding), and any pixel of drift between the padding
@@ -79,11 +95,21 @@ export function rowScroller() {
 			// The container's own box changes on a window resize, never on a scroll, so this is cheap.
 			const ro = new ResizeObserver(read);
 			ro.observe(node);
-			return () => {
-				cancelAnimationFrame(frame);
-				node.removeEventListener('scroll', read);
-				ro.disconnect();
-			};
-		}
-	};
+		return () => {
+			cancelAnimationFrame(frame);
+			node.removeEventListener('scroll', read);
+			ro.disconnect();
+		};
+	}
+}
+
+/** The nearest ancestor that actually scrolls vertically, or `null`. */
+function scrollParent(node: HTMLElement): HTMLElement | null {
+	for (let el = node.parentElement; el; el = el.parentElement) {
+		const oy = getComputedStyle(el).overflowY;
+		// `scrollHeight > clientHeight` is deliberately not required: the list is usually empty when
+		// this runs, so the box does not overflow yet and the check would walk straight past it.
+		if (oy === 'auto' || oy === 'scroll') return el;
+	}
+	return null;
 }

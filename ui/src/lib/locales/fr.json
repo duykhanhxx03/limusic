@@ -79,7 +79,7 @@
 		"history": "Historique",
 		"add_account": "Ajouter un compte",
 		"remove_account": "Supprimer un compte",
-		"remove_account_title": "Supprimer de Limusic ?",
+		"remove_account_title": "Supprimer de YouTube Music ++ ?",
 		"remove_account_desc": "{name} est simplement supprimé de cette liste. Le compte Google lui-même n'est pas affecté, et vous pouvez vous reconnecter avec ce compte quand vous le souhaitez.",
 		"saved_accounts_hint": "Sélectionnez un compte enregistré pour y basculer."
 	},
@@ -245,18 +245,18 @@
 			"language_hint": "Sélectionnez la langue d'affichage de l'interface.",
 			"shortcuts_hint": "Ouvrez les raccourcis clavier avec {key}",
 			"autostart": "Lancement au démarrage",
-			"autostart_hint": "Démarrage automatique de Limusic quand votre système démarre.",
+			"autostart_hint": "Démarrage automatique de YouTube Music ++ quand votre système démarre.",
 			"close_to_tray": "Réduire dans la barre système",
-			"close_to_tray_hint": "Gardez Limusic en arrière-plan lorsque vous fermez la fenêtre.",
+			"close_to_tray_hint": "Gardez YouTube Music ++ en arrière-plan lorsque vous fermez la fenêtre.",
 			"update_banner": "Notifications de mise à jour",
-			"update_banner_hint": "Afficher une bannière quand une nouvelle version de Limusic est disponible.",
+			"update_banner_hint": "Afficher une bannière quand une nouvelle version de YouTube Music ++ est disponible.",
 			"proxy": "HTTP/HTTPS Proxy",
 			"proxy_hint": "Router toutes les requêtes réseau via un serveur proxy personnalisé.",
 			"proxy_placeholder": "http://host:port (Vide = rien)",
 			"stream_clients": "Clients de streaming",
 			"stream_clients_hint": "Désactivez un client pour l’ignorer lors de la résolution des flux. Ce paramètre peut être remplacé par la variable d’environnement {var}.",
 			"system_titlebar": "Utiliser la barre de titre du système",
-			"system_titlebar_hint": "Laissez votre bureau afficher le cadre de la fenêtre et ses boutons. Limusic affiche sa propre barre d'outils en dessous."
+			"system_titlebar_hint": "Laissez votre bureau afficher le cadre de la fenêtre et ses boutons. YouTube Music ++ affiche sa propre barre d'outils en dessous."
 		},
 		"themes": {
 			"accent_themes": "Thèmes Accent",
@@ -356,7 +356,7 @@
 			"update_check_failed": "Échec de la vérification des mises à jour : {error}",
 			"update_packaged": "Cette version a été installée à l'aide d'un gestionnaire de paquets, mettez-la à jour de la même manière.",
 			"kofi": "Offre-moi un café",
-			"kofi_hint": "Limusic est gratuit et le restera. Ko-fi est là si vous souhaitez apporter votre contribution.",
+			"kofi_hint": "YouTube Music ++ est gratuit et le restera. Ko-fi est là si vous souhaitez apporter votre contribution.",
 			"kofi_button": "Ouvrir Ko-fi"
 		}
 	},

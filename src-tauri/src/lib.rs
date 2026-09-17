@@ -24,6 +24,11 @@ mod tray;
 mod videoproxy;
 mod webview;
 
+/// The product name as people read it: window and tray labels, the media session, the
+/// diagnostics header. Deliberately not `productName` in tauri.conf.json — that one names the
+/// binary, the bundle paths and the install directory, and the release workflows glob `limusic_*`.
+pub const APP_NAME: &str = "YouTube Music ++";
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -69,16 +74,19 @@ fn spawn_heap_trimmer() {
 /// keeps whole previous documents alive; this is a SvelteKit SPA doing client-side routing, so it
 /// never gets a back/forward navigation to restore and that memory is pure waste.
 ///
-/// **Subsystems.** Audio is libmpv's job and the UI has no `<audio>`, `AudioContext`,
-/// `getUserMedia` or WebGL anywhere in it (only 2D canvas, in `theme.svelte.ts`), yet every web
-/// process boots the media and 3D stacks regardless: GStreamer, libLLVM and Mesa's gallium are all
-/// mapped into it. Measured A/B in `cargo tauri dev`, same build otherwise, home feed loaded:
-/// **259 MiB → 247 MiB** PSS at T+180s (236 → 223 at T+60s).
+/// **Subsystems.** Audio is libmpv's job and the UI has no `<audio>`, `AudioContext` or
+/// `getUserMedia` anywhere in it, yet every web process boots the media and 3D stacks regardless:
+/// GStreamer, libLLVM and Mesa's gallium are all mapped into it. Measured A/B in `cargo tauri dev`,
+/// same build otherwise, home feed loaded: **259 MiB → 247 MiB** PSS at T+180s (236 → 223 at
+/// T+60s).
 ///
-/// `media` is the one exception, and only the main window passes `true`: the player view draws a
-/// `<video>` for music videos (plan 031). That is a plain `<video src>`, so `mediasource`,
-/// `media_stream`, `media_capabilities`, `encrypted_media`, `webaudio`, `webrtc` and `webgl` all
-/// stay off. The mini player has no video surface, so it keeps the whole media stack off.
+/// `media` is the exception, and only the main window passes `true`. The player view draws a
+/// `<video>` for music videos (plan 031), and the word-synced lyrics are drawn with WebGL
+/// (`LyricsCanvas.svelte`): DOM text moved by fractions of a pixel is re-rasterised on the pixel
+/// grid every frame, which is the shimmer, while a texture moved on the GPU is not. So the main
+/// window gets `media` and `webgl`; `mediasource`, `media_stream`, `media_capabilities`,
+/// `encrypted_media`, `webaudio` and `webrtc` stay off. The mini player has neither a video
+/// surface nor the WebGL lyrics, so it keeps all of it off.
 ///
 /// Applies to one webview, because WebKit settings are per-view: the main window and the mini
 /// player each cost their own web process, so each has to be told. The hidden cipher/PoToken
@@ -105,13 +113,13 @@ fn tune_webview(win: &tauri::WebviewWindow, media: bool) {
             settings.set_enable_encrypted_media(false);
             settings.set_enable_webaudio(false);
             settings.set_enable_webrtc(false);
-            settings.set_enable_webgl(false);
+            settings.set_enable_webgl(media);
             settings.set_enable_html5_database(false); // WebSQL. localStorage is a separate switch.
         }
     });
     match res {
         Ok(()) => {
-            tracing::info!(label, media, "webkit: DocumentBrowser cache, page cache + webgl off")
+            tracing::info!(label, media, "webkit: DocumentBrowser cache, page cache off")
         }
         Err(e) => tracing::warn!(label, error = %e, "webkit tuning failed (continuing)"),
     }
@@ -158,6 +166,41 @@ fn init_logging(dir: &std::path::Path) {
         .with(tracing_subscriber::fmt::layer().with_filter(filter()))
         .with(file_layer)
         .init();
+
+    install_panic_logger();
+}
+
+/// Write panics into the log file instead of only to stderr.
+///
+/// An installed app has nowhere to read stderr: there is no terminal on Linux or macOS unless
+/// someone launched it from one, and on Windows there is no console at all. So a panic — the one
+/// event a bug report most needs — was the one event that left no trace, which is exactly what
+/// happened to a reported crash on unplugging headphones: the log ended mid-session with nothing
+/// after it.
+///
+/// Chained, not replaced: the default hook still prints to stderr for anyone who *is* watching one.
+fn install_panic_logger() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // `payload_as_str` is not stable yet, so both of the shapes a panic message actually takes
+        // are matched by hand.
+        let msg = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_owned())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "<non-string panic payload>".to_owned());
+        let where_ = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "<unknown location>".to_owned());
+        // The thread matters more here than usual: this app panics in worker threads far more
+        // easily than on main (mpv events, MPRIS, the download queue), and "which thread" is the
+        // first thing that narrows it down.
+        let thread = std::thread::current().name().unwrap_or("<unnamed>").to_owned();
+        tracing::error!(thread = %thread, at = %where_, "PANIC: {msg}");
+        previous(info);
+    }));
 }
 
 /// Raise the open-file soft limit to the hard limit, capped.
@@ -209,28 +252,33 @@ pub fn run() {
         if std::env::var_os("__NV_DISABLE_EXPLICIT_SYNC").is_none() {
             std::env::set_var("__NV_DISABLE_EXPLICIT_SYNC", "1");
         }
-        // On XWayland the proprietary driver cannot back the DMABUF renderer at all: "Failed to
-        // create GBM buffer of size WxH: Invalid argument", zero frames, the window never paints.
-        // The AppImage always lands there, because linuxdeploy-plugin-gtk's AppRun hook exports
-        // GDK_BACKEND=x11 and Tauri's bundler ships that hook; GDK_BACKEND is set nowhere in this
-        // repo. `WEBKIT_DMABUF_RENDERER_FORCE_SHM=1` keeps the renderer, and the GPU, while
-        // bypassing GBM. It costs about half the CPU of software rendering: 10% vs 18% on one
-        // composited animation in `ui/perf/renderprobe.py`. A/B under `GDK_BACKEND=x11` on
-        // 2026-08-31 (GTX 1060, driver 580.173.02, WebKitGTK 2.52.5): without it, a black window
-        // and two GBM failures; with it, the app paints and keeps repainting across a track change.
+        // The DMA-BUF renderer is WebKitGTK's only GPU path, and WebKit switches it off by itself
+        // when NVIDIA's proprietary driver is loaded (it probes /dev/nvidiactl, as below). With
+        // nothing to fall back to, the hardware-acceleration policy drops to never and every
+        // frame is painted and composited on the CPU. `WEBKIT_FORCE_DMABUF_RENDERER=1` turns it
+        // back on. Measured 2026-09-17 (GTX 1650, driver 595.84, WebKitGTK 2.52.6, headless mutter
+        // 50 at 1920x1080@60), 20 s of the theater lyric sweep:
         //
-        // Native Wayland needs none of this and does not get it. The full DMABUF path is the
-        // cheapest of the three (5% on that animation, 17% vs 23% scrolling 400 layered cards) and
-        // it is stable: the "window frozen, music still playing" freeze this gate used to work
-        // around was fd exhaustion, fixed by `raise_fd_limit` above. GPU compositing costs about
-        // 90 MiB of web-process RSS, which is the whole price.
+        //   native Wayland, nothing set    p95 frame 52 ms, 67 frames over 50 ms, web 37% CPU
+        //   native Wayland, FORCE_DMABUF   p95 18 ms, none over 50 ms
+        //   XWayland, FORCE_SHM only       p95 54 ms, 66 over 50 ms  (what this block used to set)
+        //   XWayland, FORCE_DMABUF + SHM   p95 20 ms, none over 50 ms
         //
-        // /dev/nvidiactl is the proprietary driver's control node, present whenever it is loaded
-        // and absent under nouveau, which does not have this bug. The variable is only defaulted,
-        // and skipped if either WEBKIT_ knob is already set by hand, so retesting stays possible.
+        // FORCE_SHM alone was a no-op: it only picks how the renderer's buffers travel, and the
+        // renderer was off. It is still needed on XWayland, where the driver cannot allocate GBM
+        // buffers ("Failed to create GBM buffer of size WxH: Invalid argument", a black window).
+        // The AppImage always lands there: linuxdeploy-plugin-gtk's AppRun hook exports
+        // GDK_BACKEND=x11, and so does the VS Code snap's integrated terminal. Native Wayland
+        // keeps GBM, which paced the same and was the cheapest path in the 2026-08-31 A/B.
         //
-        // ponytail: delete this the day the AppImage stops forcing X11, which would put those
-        // users on native Wayland and the full path, or the day the driver learns GBM on XWayland.
+        // The price is a crash on the way out: with the renderer forced, the web processes
+        // segfault in libnvidia-eglcore while the app exits (tray Quit and Restart, reproduced
+        // every time), and Ubuntu shows a crash dialog for it. `kill_web_processes` in the run
+        // loop takes them down first. Closing one webview mid-session (the mini player) and a
+        // plain SIGTERM of the app both exit clean.
+        //
+        // /dev/nvidiactl is absent under nouveau, which WebKit does not disable the renderer for.
+        // Nothing is set if any of the three knobs is already set by hand, so A/B stays possible.
         //
         // GDK picks its backend from GDK_BACKEND when set, else Wayland when WAYLAND_DISPLAY is,
         // else X11.
@@ -238,12 +286,15 @@ pub fn run() {
             Ok(b) => b.split(',').next() == Some("x11"),
             Err(_) => std::env::var_os("WAYLAND_DISPLAY").is_none(),
         };
-        if on_x11
-            && std::path::Path::new("/dev/nvidiactl").exists()
+        if std::path::Path::new("/dev/nvidiactl").exists()
             && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none()
+            && std::env::var_os("WEBKIT_FORCE_DMABUF_RENDERER").is_none()
             && std::env::var_os("WEBKIT_DMABUF_RENDERER_FORCE_SHM").is_none()
         {
-            std::env::set_var("WEBKIT_DMABUF_RENDERER_FORCE_SHM", "1");
+            std::env::set_var("WEBKIT_FORCE_DMABUF_RENDERER", "1");
+            if on_x11 {
+                std::env::set_var("WEBKIT_DMABUF_RENDERER_FORCE_SHM", "1");
+            }
         }
     }
 
@@ -673,10 +724,14 @@ pub fn run() {
                             .try_state::<Arc<AppState>>()
                             .map(|s| close_hides(s.db.get_setting("close_to_tray").as_deref()))
                             .unwrap_or(true);
+                        api.prevent_close();
                         if hide {
-                            api.prevent_close();
                             let _ = window.hide();
                             tray::set_main_visible(window.app_handle(), false);
+                        } else {
+                            // Quit through the exit request rather than by letting the window go,
+                            // so `kill_web_processes` still finds every webview alive.
+                            window.app_handle().exit(0);
                         }
                     }
                     // Nothing in the widget closes it, but a WM shortcut still can. Turn that into
@@ -693,6 +748,13 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|handle, event| {
+            // Every way out passes here first: tray Quit and Restart, the updater's relaunch, ✕
+            // with close-to-tray off. Restart cannot be prevented, so nothing is deferred: the
+            // runtime runs `with_webview` inline on this (main) thread and the kill lands now.
+            #[cfg(target_os = "linux")]
+            if let tauri::RunEvent::ExitRequested { .. } = &event {
+                kill_web_processes(handle);
+            }
             // The hidden cipher/PoToken webviews are windows too, so closing the main window no
             // longer auto-exits the app. Quit when the main window is destroyed.
             if let tauri::RunEvent::WindowEvent {
@@ -706,6 +768,23 @@ pub fn run() {
                 }
             }
         });
+}
+
+/// With the DMA-BUF renderer forced on NVIDIA (see `run()`), web processes still running when the
+/// app exits segfault in the driver and leave a crash report behind. SIGKILL them first: a killed
+/// process is not a crash. Only in that configuration, so nobody else loses a web process's last
+/// moments for nothing.
+#[cfg(target_os = "linux")]
+fn kill_web_processes(app: &tauri::AppHandle) {
+    if std::env::var("WEBKIT_FORCE_DMABUF_RENDERER").map_or(true, |v| v.is_empty() || v == "0") {
+        return;
+    }
+    for (_, window) in app.webview_windows() {
+        let _ = window.with_webview(|wv| {
+            use webkit2gtk::WebViewExt;
+            wv.inner().terminate_web_process();
+        });
+    }
 }
 
 /// ✕ hides to tray unless the user explicitly set close_to_tray=false (unset → default on).

@@ -894,7 +894,7 @@
 								class="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-50"
 							/>
 							{#if confirmingDelete}
-								<div class="flex items-center gap-2 rounded-lg border border-destructive/40 px-2 py-1">
+								<div class="flex items-center gap-2 rounded-lg bg-destructive/10 px-2 py-1">
 									<span class="text-xs text-muted-foreground">{t('library.delete_playlist_confirm')}</span>
 									<Button variant="destructive" size="sm" onclick={deleteThisPlaylist}>{t('common.delete')}</Button>
 									<Button variant="ghost" size="sm" onclick={() => (confirmingDelete = false)}>

@@ -70,7 +70,10 @@ const ON_DARK = 'oklch(0.985 0 0)';
 const ON_LIGHT = 'oklch(0.205 0 0)';
 
 /** Reactive current selection, so the picker reflects it. */
-export const theme = $state<{ id: ThemeId }>({ id: 'rose' });
+/** What a fresh install gets, and what an unknown stored id falls back to. */
+export const DEFAULT_THEME: ThemeId = 'lime';
+
+export const theme = $state<{ id: ThemeId }>({ id: DEFAULT_THEME });
 export const custom = $state<Custom>({
 	accent: null,
 	hue: null,
@@ -168,7 +171,7 @@ function setAccentVars(color: string): void {
 }
 
 function apply(): void {
-	const t = THEMES.find((x) => x.id === theme.id) ?? THEMES[0];
+	const t = THEMES.find((x) => x.id === theme.id) ?? THEMES.find((x) => x.id === DEFAULT_THEME)!;
 	const root = document.documentElement;
 	// Reset every mechanism first, so switching between an accent and a palette (or clearing a
 	// custom override) never leaves the previous choice's inline vars or class behind.
@@ -196,7 +199,7 @@ function apply(): void {
 }
 
 export function applyTheme(id: ThemeId): void {
-	theme.id = THEMES.some((t) => t.id === id) ? id : THEMES[0].id;
+	theme.id = THEMES.some((t) => t.id === id) ? id : DEFAULT_THEME;
 	apply();
 	localStorage.setItem(KEY, theme.id);
 }
@@ -410,10 +413,10 @@ export function prewarmArtworkAccent(url: string | undefined | null): void {
 	if (url) warmAccent(url);
 }
 
-/** Apply the stored theme + customization on startup (defaults to rose, no overrides). */
+/** Apply the stored theme + customization on startup (defaults to lime, no overrides). */
 export function initTheme(): void {
 	const stored = localStorage.getItem(KEY) as ThemeId | null;
-	theme.id = stored && THEMES.some((t) => t.id === stored) ? stored : 'rose';
+	theme.id = stored && THEMES.some((t) => t.id === stored) ? stored : DEFAULT_THEME;
 	try {
 		const saved = JSON.parse(localStorage.getItem(CUSTOM_KEY) ?? '{}');
 		// Only keys we know about, only the shape we expect: a hand-edited or older localStorage

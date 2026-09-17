@@ -11,7 +11,7 @@
 # Both variables now live in `src-tauri/src/lib.rs` `run()`, gated on the driver actually being
 # NVIDIA, so dev, rpm and AppImage builds behave identically and anyone whose driver differs keeps
 # GPU compositing. GDK_BACKEND is set nowhere: native Wayland is the only backend where the DMABUF
-# renderer works on NVIDIA at all.
+# renderer can use GBM buffers on NVIDIA; XWayland has to copy frames through shared memory.
 #
 # To check which renderer a run actually used, read the app's own diagnostics (Settings ▸ About) or
 # the startup log. Do NOT read /proc/<pid>/environ: it is the environment the process was *execed*

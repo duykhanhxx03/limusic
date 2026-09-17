@@ -92,6 +92,7 @@
 	function onSeekCommit(e: Event) {
 		const v = Number((e.target as HTMLInputElement).value);
 		playback.position = v;
+		playback.positionAt = performance.now();
 		seekDrag = null;
 		api.seek(v);
 	}
@@ -105,7 +106,7 @@
      (the compositor can't round an undecorated window for us — same trick as the main window). -->
 <div
 	data-tauri-drag-region="deep"
-	class="group relative flex h-screen w-screen select-none overflow-hidden rounded-2xl border border-foreground/15 bg-card text-foreground"
+	class="group relative flex h-screen w-screen select-none overflow-hidden rounded-2xl bg-card text-foreground"
 >
 	<!-- Cover art under the left half, masked so it dissolves into the card instead of ending on a
 	     seam. Keyed so a track change cross-fades. -->
@@ -158,7 +159,7 @@
 				     width is not zero, so without it the slider never actually collapses. -->
 				<input
 					type="range"
-					class="range on-art min-w-0 transition-[width,opacity] duration-150 {volOpen
+					class="range on-art min-w-0 transition-[width,opacity] duration-[var(--duration-quick)] {volOpen
 						? 'w-20 opacity-100'
 						: 'w-0 opacity-0'}"
 					style="--pct:{playback.volume}%"

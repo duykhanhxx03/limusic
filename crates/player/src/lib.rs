@@ -88,6 +88,12 @@ impl Player {
         let mpv = Mpv::new()?;
         mpv.set_property("vid", "no")?; // audio only
         mpv.set_property("gapless-audio", "yes")?;
+        // If no audio device can be opened, play into nothing rather than failing the file.
+        // Default is `no`, which turns "the device went away" — unplugging headphones, a Bluetooth
+        // set dropping, a USB DAC pulled — into a failed track: the queue treats it as a dead URL
+        // and moves on, so you come back to find it has walked through the rest of the album in
+        // silence. With this, playback continues and plugging back in picks it up.
+        mpv.set_property("audio-fallback-to-null", "yes")?;
         mpv.set_property("cache", "yes")?;
         mpv.set_property("cache-on-disk", "yes")?;
         mpv.set_property("demuxer-cache-dir", cache_dir)?;

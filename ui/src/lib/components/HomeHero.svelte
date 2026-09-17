@@ -65,10 +65,15 @@
 					src={thumb(auth.account.thumbnail, 128)}
 					alt=""
 					style="width:2.75rem;height:2.75rem;max-width:none"
-					class="shrink-0 rounded-full object-cover ring-2 ring-foreground/15"
+					class="shrink-0 rounded-full object-cover"
 				/>
 			{/if}
-			<h1 class="truncate font-heading text-4xl font-bold tracking-tight">
+			<!-- `leading-[1.35]`, not the `text-4xl` default of 1.11. `truncate` brings
+			     `overflow:hidden`, so anything the line box does not cover is cut — and at 1.11 a
+			     descender plus a stacked diacritic does not fit. Latin greetings never showed it
+			     ("Good evening" has no descender below a tone mark); Vietnamese does, which is where
+			     "Chúc ngủ ngon" lost the tails of its g's. -->
+			<h1 class="truncate font-heading text-4xl font-bold leading-[1.35] tracking-tight">
 				{daypart}{auth.account?.name ? `, ${auth.account.name.split(' ')[0]}` : ''}
 			</h1>
 		</div>

@@ -139,7 +139,7 @@
 					<!-- transition-[opacity,transform], not transition-all: opacity and translate are the
 					     only things that change, and both composite. -->
 					<button
-						class="absolute flex translate-y-1 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground opacity-0 transition-[opacity,transform] duration-200 ease-out group-hover:translate-y-0 group-hover:opacity-100 focus-visible:opacity-100 {compact
+						class="absolute flex translate-y-1 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground opacity-0 transition-[opacity,transform] duration-[var(--duration-fast)] ease-out group-hover:translate-y-0 group-hover:opacity-100 focus-visible:opacity-100 {compact
 							? 'bottom-1.5 right-1.5 h-7 w-7'
 							: 'bottom-2 right-2 h-9 w-9'}"
 						class:animate-pulse={playing}

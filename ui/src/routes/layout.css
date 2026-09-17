@@ -41,16 +41,18 @@
 	--card-foreground: oklch(0.145 0.008 var(--hue));
 	--popover: oklch(1 0 0);
 	--popover-foreground: oklch(0.145 0.008 var(--hue));
-	--primary: oklch(0.514 0.222 16.935);
-	--primary-foreground: oklch(0.969 0.015 12.422);
+	/* Lime, the default theme (theme.svelte.ts DEFAULT_THEME), so nothing painted before the theme
+	   script runs shows another accent. The accent presets write these four inline anyway. */
+	--primary: oklch(0.77 0.2 131);
+	--primary-foreground: oklch(0.205 0 0);
 	--secondary: oklch(0.925 0.004 var(--hue));
 	--secondary-foreground: oklch(0.21 0.006 var(--hue));
 	/* A well *inside* a white surface, so it has to clear the page as well as the card: 1.270
 	   against white and 1.136 against the page. */
 	--muted: oklch(0.92 0.006 var(--hue));
 	--muted-foreground: oklch(0.542 0.034 var(--hue));
-	--accent: oklch(0.514 0.222 16.935);
-	--accent-foreground: oklch(0.969 0.015 12.422);
+	--accent: oklch(0.77 0.2 131);
+	--accent-foreground: oklch(0.205 0 0);
 	--destructive: oklch(0.577 0.245 27.325);
 	--border: oklch(0.922 0.005 var(--hue));
 	--input: oklch(0.9 0.008 var(--hue));
@@ -102,14 +104,14 @@
 	--card-foreground: oklch(0.985 0 0);
 	--popover: oklch(0.212 0.019 var(--hue));
 	--popover-foreground: oklch(0.985 0 0);
-	--primary: oklch(0.455 0.188 13.697);
-	--primary-foreground: oklch(0.969 0.015 12.422);
+	--primary: oklch(0.77 0.2 131);
+	--primary-foreground: oklch(0.205 0 0);
 	--secondary: oklch(0.274 0.006 var(--hue));
 	--secondary-foreground: oklch(0.985 0 0);
 	--muted: oklch(0.263 0.024 var(--hue));
 	--muted-foreground: oklch(0.711 0.019 var(--hue));
-	--accent: oklch(0.455 0.188 13.697);
-	--accent-foreground: oklch(0.969 0.015 12.422);
+	--accent: oklch(0.77 0.2 131);
+	--accent-foreground: oklch(0.205 0 0);
 	--destructive: oklch(0.704 0.191 22.216);
 	--border: oklch(1 0 0 / 10%);
 	/* 15% over --card measured 1.57:1, which read as no field at all on a dark surface. */
@@ -601,10 +603,12 @@ html.art-tint.dark {
 	   contrast is high enough to tint with — and as nothing at all on text. */
 	--glass-opacity: 96%;
 	--glass-opacity-strong: 98%; /* dialogs and menus — the densest text in the app */
-	/* The one outline left in the app. A floating overlay lands on arbitrary content — a black
-	   cover, a white one — and a tonal step only separates it from one of them, so this is what
-	   holds its edge on the other. Nothing docked or in-flow gets one. */
-	--glass-rim: oklch(0.145 0.008 var(--hue) / 12%);
+	/* A floating overlay lands on arbitrary content — a black cover, a white one — and a tonal step
+	   only separates it from one of them. This used to be a 1px rim; it is a soft drop shadow now,
+	   which holds the edge on both without drawing a line around the panel (no borders is the
+	   design). Small and static when open, so none of the repaint cost a big blurred shadow over a
+	   moving backdrop has (TheaterMode's header). */
+	--glass-shadow: 0 12px 32px -14px oklch(0.145 0.008 var(--hue) / 28%);
 }
 
 .dark {
@@ -612,7 +616,7 @@ html.art-tint.dark {
 	   better there, so it can afford to show a little more. */
 	--glass-opacity: 95%;
 	--glass-opacity-strong: 97%;
-	--glass-rim: oklch(1 0 0 / 10%);
+	--glass-shadow: 0 14px 40px -14px oklch(0 0 0 / 65%);
 }
 
 /* A floating overlay — dialog, menu, popover, the queue and lyrics panels, the toasts.
@@ -627,19 +631,19 @@ html.art-tint.dark {
    three separate times from the performance side (MediaCard's hover plate, the home sticky header,
    TheaterMode); this is the same call from the rendering side.
 
-   So the glass is a fill that is *nearly* opaque plus a rim. The few percent of translucency is
+   So the glass is a fill that is *nearly* opaque plus a soft shadow. The few percent of translucency is
    what keeps it feeling layered — the backdrop reads as a tint rather than as text competing with
    the panel's own, which is the failure mode of transparent-but-not-blurred. */
 @utility glass {
 	background-color: color-mix(in oklab, var(--popover) var(--glass-opacity), transparent);
-	box-shadow: inset 0 0 0 1px var(--glass-rim);
+	box-shadow: var(--glass-shadow);
 }
 
 /* The same surface for the densest text — a settings dialog, a long menu — where those last few
    percent of fill are worth more than the hint of what is behind. */
 @utility glass-strong {
 	background-color: color-mix(in oklab, var(--popover) var(--glass-opacity-strong), transparent);
-	box-shadow: inset 0 0 0 1px var(--glass-rim);
+	box-shadow: var(--glass-shadow);
 }
 
 /* `glass` with no translucency at all, for the surfaces that sit directly on artwork — the
@@ -648,26 +652,11 @@ html.art-tint.dark {
    and these have to stay legible against whatever the cover happens to be. */
 @utility plate {
 	background-color: var(--popover);
-	box-shadow: inset 0 0 0 1px var(--glass-rim);
 }
 
-/* An edge that has to stay an edge — a dialog header, a settings-row separator, the rule between
-   what you arranged on home and what the app chose — where removing it would let two lists run
-   together. There are about a dozen of these left, down from the ~200 borders the app had.
-
-   20% of --foreground, which is 1.57:1 on a white card and 1.86:1 on a dark one, against the
-   1.26:1 / 1.33:1 that --border managed. Still deliberately below the 3:1 WCAG asks of a *control*
-   boundary: none of these identify a control, they group content, and a separator at 3:1 is a rule
-   that competes with the text on either side of it. The point of deriving it from --foreground
-   rather than from --border is that it holds that ratio on every palette — tokyonight's own border
-   token measured 1.08:1 against its sidebar. */
-@utility hairline-b {
-	box-shadow: inset 0 -1px 0 0 color-mix(in oklab, var(--foreground) 20%, transparent);
-}
-
-@utility hairline-t {
-	box-shadow: inset 0 1px 0 0 color-mix(in oklab, var(--foreground) 20%, transparent);
-}
+/* No hairline utilities any more. The last dozen rules (dialog headers, settings rows, the queue's
+   section heading, the sidebar's sections) went on 2026-09-17: spacing and tone group those as
+   well, and the design is surfaces without outlines. Reach for a gap before a line. */
 
 @theme inline {
 	--font-sans: var(--font-sans);
@@ -801,6 +790,7 @@ html.art-tint.dark {
 	--ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1); /* the default: open/close, slide, resize */
 	--ease-in-out: ease-in-out; /* icon swap, text swap, content reveal */
 	--ease-out: ease-out;       /* tooltip open/close */
+	--ease-linear: linear;      /* continuous motion: progress, shimmer, spinner */
 	--ease-bounce: cubic-bezier(0.34, 1.36, 0.64, 1); /* badge/heart pop — entrances only */
 
 	--scale-large: 0.96;        /* modal open/close */
@@ -825,6 +815,19 @@ html.art-tint.dark {
    `auto` keyword swaps in the measured size after a card's first paint, so the scrollbar stays put.
    Paint containment clips at the card's own box, which the group-hover shadow stays inside: it
    reaches ~27px below the cover and there are 52px of title, subtitle and padding under it. */
+/* The sidebar's width, in one place. The rail sets its own width from it and the two full-height
+   overlays (now-playing, lyrics) start where it ends, so a dragged edge moves all three together.
+   Collapsed is a fixed rail; below `lg` it is a fixed rail whatever the stored width says, because
+   a 15rem sidebar on a 900px window leaves nothing for the page. */
+.app-shell {
+	--sidebar-w: 4rem;
+}
+@media (min-width: 64rem) {
+	.app-shell[data-sidebar='open'] {
+		--sidebar-w: var(--sidebar-open, 15rem);
+	}
+}
+
 .card-grid {
 	display: grid;
 	grid-template-columns: repeat(auto-fill, 10rem);

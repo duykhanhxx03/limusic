@@ -169,8 +169,17 @@
 	>
 		<ResizeBorders />
 		<Titlebar />
-		<!-- relative: the queue and lyrics panels are absolute overlays inside it (see QueuePanel). -->
-		<div class="relative flex min-h-0 flex-1">
+		<!-- relative: the queue and lyrics panels are absolute overlays inside it (see QueuePanel).
+		     `--sidebar-w` is the one place the sidebar's width is decided. The rail reads it, and so
+		     do the two overlays that have to start exactly where it ends — before this they each
+		     hard-coded `left-16 lg:left-60`, which a draggable edge would have silently desynced.
+		     The responsive rule lives in CSS (layout.css): below `lg` the rail is 4rem whatever the
+		     stored width says, because at that size a 15rem sidebar leaves no page. -->
+		<div
+			class="app-shell relative flex min-h-0 flex-1"
+			data-sidebar={ui.sidebarCollapsed ? 'collapsed' : 'open'}
+			style="--sidebar-open:{ui.sidebarWidth}px"
+		>
 			<Sidebar />
 			<!-- dragScroll: dragging a card up to home's Shortcuts grid has to be possible from anywhere in
 			     the feed, so aiming at the top edge scrolls this container while the drag is in flight. -->

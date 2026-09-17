@@ -79,7 +79,7 @@
 		"history": "Riwayat",
 		"add_account": "Tambah akun",
 		"remove_account": "Hapus akun",
-		"remove_account_title": "Hapus dari Limusic?",
+		"remove_account_title": "Hapus dari YouTube Music ++?",
 		"remove_account_desc": "{name} hanya dihapus dari list ini. Akun Google-nya sendiri tidak terpengaruhi, dan kamu bisa masuk dengan itu kapanpun kamu mau.",
 		"saved_accounts_hint": "Pilih Akun tersimpan untuk pindah ke akun tersebut."
 	},
@@ -245,18 +245,18 @@
 			"language_hint": "Pilih bahasa tampilan antarmuka.",
 			"shortcuts_hint": "Buka pintasan papan ketik dengan {key}",
 			"autostart": "Jalankan saat komputer menyala",
-			"autostart_hint": "Mulai Limusic secara otomatis saat sistem Anda booting.",
+			"autostart_hint": "Mulai YouTube Music ++ secara otomatis saat sistem Anda booting.",
 			"close_to_tray": "Tutup ke baki sistem (system tray)",
-			"close_to_tray_hint": "Biarkan Limusic tetap berjalan di latar belakang saat menutup jendela.",
+			"close_to_tray_hint": "Biarkan YouTube Music ++ tetap berjalan di latar belakang saat menutup jendela.",
 			"update_banner": "Notifikasi pembaruan",
-			"update_banner_hint": "Tampilkan banner saat versi baru Limusic tersedia.",
+			"update_banner_hint": "Tampilkan banner saat versi baru YouTube Music ++ tersedia.",
 			"proxy": "Proksi HTTP/HTTPS",
 			"proxy_hint": "Arahkan semua permintaan jaringan melalui server proksi kustom.",
 			"proxy_placeholder": "http://host:port (kosong = tidak ada)",
 			"stream_clients": "Klien streaming",
 			"stream_clients_hint": "Matikan klien untuk melewatinya saat memuat stream. Diabaikan jika variabel lingkungan {var} diatur.",
 			"system_titlebar": "Gunakan bilah judul sistem",
-			"system_titlebar_hint": "Biarkan desktop Anda menampilkan bingkai jendela beserta tombol-tombolnya. Limusic tetap menggunakan bilah alatnya sendiri di bawahnya."
+			"system_titlebar_hint": "Biarkan desktop Anda menampilkan bingkai jendela beserta tombol-tombolnya. YouTube Music ++ tetap menggunakan bilah alatnya sendiri di bawahnya."
 		},
 		"themes": {
 			"accent_themes": "Tema Aksen",
@@ -356,7 +356,7 @@
 			"update_check_failed": "Cek update gagal: {error}",
 			"update_packaged": "Versi ini dipasang menggunakan manajer paket, perbarui dengan cara yang sama.",
 			"kofi": "Belikan saya kopi",
-			"kofi_hint": "Limusic gratis dan akan selalu gratis. Tersedia Ko-fi jika Anda ingin memberikan dukungan.",
+			"kofi_hint": "YouTube Music ++ gratis dan akan selalu gratis. Tersedia Ko-fi jika Anda ingin memberikan dukungan.",
 			"kofi_button": "Buka Ko-fi"
 		}
 	},
