@@ -170,11 +170,16 @@ RUN_MAC="$(wait_for_run "macOS release binaries" "$BEFORE_MAC" || true)"
 echo "    linux run ${RUN_LINUX:-?}, windows run ${RUN_WIN:-?}, macos run ${RUN_MAC:-?}"
 
 echo "==> Building the rpm locally while CI runs…"
-if ! cargo tauri build --bundles rpm; then
+# The UI is built here, explicitly, and beforeBuildCommand emptied, exactly as the CI workflows do.
+# Left to tauri, `pnpm build` runs from the repo root, which has no package.json, and pnpm picked
+# website/ over ui/: the v0.10.0 rpm build compiled the marketing site and bundled whatever stale
+# ui/build happened to be on disk.
+if ! (cd ui && pnpm build) \
+  || ! cargo tauri build --bundles rpm --config '{"build":{"beforeBuildCommand":""}}'; then
   echo >&2
   echo "ERROR: the rpm build failed, but $TAG is already published and CI is building the rest." >&2
   echo "       Fix it, then attach the rpm by hand:" >&2
-  echo "         cargo tauri build --bundles rpm" >&2
+  echo "         (cd ui && pnpm build) && cargo tauri build --bundles rpm --config '{\"build\":{\"beforeBuildCommand\":\"\"}}'" >&2
   echo "         gh release upload $TAG target/release/bundle/rpm/limusic-$VERSION-*.rpm --clobber --repo $REPO" >&2
   exit 1
 fi
