@@ -51,7 +51,7 @@ YouTube Music client. If this is useful to you, the original author takes coffee
 - **Keyboard and mouse**: `Ctrl+K` searches from anywhere, `Ctrl+H` lists every shortcut, right-click menus throughout, `Ctrl` and the wheel zooms the interface
 - **Sleep timer**: 15m, 30m, 1h, 3h or a custom count, kept in the Rust core so it still fires with the window hidden
 - **Offline downloads**: save tracks to disk and play them with no connection, with progress and cancel
-- **10-band equalizer** with presets and a preamp, applied in the audio chain rather than the UI
+- **10-band equalizer** you draw on, with 22 presets, a preamp, and **AutoEq headphone corrections**: search about 8,800 measured headphones and apply the one you own. Applied in the audio chain rather than the UI
 - **Audio quality badge**: the codec and real bitrate of the stream actually playing, not the nominal one
 - **Eight languages**: English, Spanish, French, Indonesian, Brazilian Portuguese, Romanian, Turkish and Vietnamese
 - **Self-updating builds** (AppImage on Linux, setup.exe on Windows, .app on macOS)
@@ -64,12 +64,16 @@ YouTube Music client. If this is useful to you, the original author takes coffee
 
 <table>
   <tr>
-    <td><img src="website/src/assets/screen-playlist.webp" alt="A playlist in YouTube Music ++"></td>
-    <td><img src="website/src/assets/screen-lyrics.webp" alt="Word-by-word synced lyrics"></td>
+    <td><img src="website/src/assets/screen-home.webp" alt="Home, filtered to the Relax mood"></td>
+    <td><img src="website/src/assets/screen-lyrics.webp" alt="Now Playing with word-by-word synced lyrics"></td>
   </tr>
   <tr>
-    <td><img src="website/src/assets/screen-album.webp" alt="An album page, colors adapted to the cover"></td>
+    <td><img src="website/src/assets/screen-playlist.webp" alt="A playlist page"></td>
+    <td><img src="website/src/assets/screen-album.webp" alt="An album page"></td>
+  </tr>
+  <tr>
     <td><img src="website/src/assets/screen-video.webp" alt="A music video playing with lyrics alongside"></td>
+    <td><img src="website/src/assets/screen-theater.webp" alt="Theater mode over a music video"></td>
   </tr>
 </table>
 
