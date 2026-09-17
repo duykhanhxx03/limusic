@@ -41,8 +41,9 @@ YouTube Music client. If this is useful to you, the original author takes coffee
 - **History**: everything you have played, in YouTube Music's own day buckets
 - **Gapless playback** with loudness normalization, powered by libmpv
 - **Queue** with radio/automix continuation, drag to reorder, restored across restarts
-- **Synced lyrics**: side panel with auto-scroll and click-to-jump, word by word where the source has the timings, with translations under each line
-- **Music videos**: optional, the video plays where the artwork sits, with the same gapless audio behind it
+- **Synced lyrics, Apple Music style**: word by word where the source has the timings, with a soft sweep, depth of field and lines that glide into place, drawn on the GPU so they never shimmer. In the player view, in theater mode or in a side panel, with click-to-jump and translations under each line
+- **Smooth track changes**: the next track's cover and lyrics are fetched while the current one plays, so a skip crossfades instead of loading
+- **Music videos**: optional, the video plays where the artwork sits, with the same gapless audio behind it; video thumbnails use YouTube's HD renditions instead of the blurry default
 - **Mini Player and theater mode**: shrink to a strip that keeps playing, or go fullscreen with cover and lyrics side by side
 - **Local Music**: play your own files, with all metadata still intact
 - **OS media keys** and now-playing integration (MPRIS on Linux, SMTC on Windows, plus playback buttons on the Windows taskbar preview)
@@ -54,7 +55,8 @@ YouTube Music client. If this is useful to you, the original author takes coffee
 - **Audio quality badge**: the codec and real bitrate of the stream actually playing, not the nominal one
 - **Eight languages**: English, Spanish, French, Indonesian, Brazilian Portuguese, Romanian, Turkish and Vietnamese
 - **Self-updating builds** (AppImage on Linux, setup.exe on Windows, .app on macOS)
-- **Make it yours**: accent palettes, custom colors, your own fonts, corner roundness, a custom app icon, and an adaptive theme that recolors the app from the playing cover
+- **Make it yours**: accent palettes (Lime out of the box), custom colors, your own fonts, corner roundness, a custom app icon, and an adaptive theme that recolors the app from the playing cover
+- **Clean surfaces**: next to no borders or divider lines; panels, menus and dialogs separate by tone, spacing and a soft shadow
 
 ---
 
@@ -91,13 +93,28 @@ YouTube Music client. If this is useful to you, the original author takes coffee
 | macOS (Apple Silicon) | `.dmg` | Self-updating. Unsigned, so the first launch needs `xattr -dr com.apple.quarantine /Applications/limusic.app` |
 | macOS (Intel) | none | Build from source, see [docs/BUILD-PLATFORMS.md](docs/BUILD-PLATFORMS.md) |
 
+> **Linux with an NVIDIA GPU:** WebKitGTK switches its GPU renderer off by itself on NVIDIA's
+> proprietary driver, which left every animation drawn on the CPU. The app turns it back on at
+> startup, on Wayland and X11 alike, and nothing needs configuring. To A/B it, set any of
+> `WEBKIT_DISABLE_DMABUF_RENDERER`, `WEBKIT_FORCE_DMABUF_RENDERER` or
+> `WEBKIT_DMABUF_RENDERER_FORCE_SHM` yourself and the app leaves the choice to you.
+
 ---
 
 ## Lyrics
 
-Open the panel with the microphone button in the player bar, next to the queue
-button. It takes the same side of the window as the queue, so opening one closes
-the other.
+Open them with the microphone button in the player bar. By default they are a
+tab in the player view, beside the queue, and the button beside it enlarges them
+to the whole view; turn off **Settings -> Appearance -> Queue and lyrics in the
+player view** to get a side panel instead. Theater mode shows them next to the
+cover, larger.
+
+Word-synced lyrics are drawn with WebGL ([PixiJS](https://pixijs.com)) rather
+than as page text. WebKitGTK repaints text on the pixel grid on every frame of a
+sub-pixel move, so a line gliding up, a word lifting as it is sung or a line
+growing into focus all visibly trembled; here each word is drawn once into a
+texture and moved by the GPU, like Apple Music's own layers. The mini player,
+and any machine without a usable GPU, keep the plain-text renderer.
 
 Lyrics come from [Boidu](https://boidu.dev) first, then
 [LRCLIB](https://lrclib.net), then YouTube Music's own timed lyrics, then
@@ -109,7 +126,7 @@ are cached locally, so replaying a track is instant.
 Boidu is the only source with per-word timings, which is what lets a line
 highlight word by word as it's sung. It goes first for that reason, which also
 means it is asked about every track you play. Turn it off in **Settings ->
-Playback -> Word-by-word lyrics** and the other sources still provide
+Playback -> Synchronized lyrics (Boidu/LRCLIB)** and the other sources still provide
 line-by-line lyrics. Netease additionally supplies translations, shown under
 each line where it has them.
 
@@ -139,6 +156,18 @@ see [CONTRIBUTING.md](CONTRIBUTING.md#translations).
 
 ## Building from Source
 
+You need Rust (stable), Node with pnpm, and the Tauri CLI
+(`cargo install tauri-cli --version "^2"`).
+
+Ubuntu / Debian:
+
+```bash
+sudo apt install libmpv-dev libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+  libssl-dev libdbus-1-dev libayatana-appindicator3-dev
+cd ui && pnpm install && cd ..
+cargo tauri build --bundles deb
+```
+
 Fedora:
 
 ```bash
@@ -148,6 +177,7 @@ cd ui && pnpm install && cd ..
 cargo tauri build
 ```
 
+For development, `cargo tauri dev` runs the app against the Vite dev server with hot reload.
 Windows and macOS instructions live in [docs/BUILD-PLATFORMS.md](docs/BUILD-PLATFORMS.md).
 
 ---
@@ -164,6 +194,9 @@ Windows and macOS instructions live in [docs/BUILD-PLATFORMS.md](docs/BUILD-PLAT
   loudness normalization from YouTube's own metadata.
 - The UI is a SvelteKit SPA that only ever talks to the Rust core. It never
   contacts YouTube itself.
+- Lyrics keep time with a small clock that smooths mpv's position reports
+  (they arrive late, never early), and the word-synced view is a WebGL stage
+  driven by that clock rather than by the DOM.
 
 ---
 
