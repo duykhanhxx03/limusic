@@ -9,6 +9,8 @@
 		InformationCircleIcon
 	} from '@hugeicons/core-free-icons';
 	import { browser } from '$app/environment';
+	import { page } from '$app/state';
+	import { afterNavigate, beforeNavigate } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { fly } from 'svelte/transition';
@@ -42,6 +44,7 @@
 	import VideoSurface from '$lib/components/VideoSurface.svelte';
 	import CommandPalette from '$lib/components/CommandPalette.svelte';
 	import KeyboardShortcuts from '$lib/components/KeyboardShortcuts.svelte';
+	import HomeFeed from '$lib/components/HomeFeed.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { auth, initApp, np, playback, ui } from '$lib/player.svelte';
 	import { win, initWin } from '$lib/win.svelte';
@@ -100,6 +103,35 @@
 
 	// Apply the saved accent color before the first paint (ssr=false → nothing renders until now).
 	if (browser) initTheme();
+
+	// Home is kept alive. Rendered as an ordinary route it was torn down on every trip away and
+	// rebuilt on the way back: the mood chip reset to All, the pages loaded further down were gone,
+	// the scroll position went to the top, and the rebuild itself was the ~200 ms hitch measured on
+	// every arrival at `/`. It mounts on the first visit and after that is only hidden.
+	const onHome = $derived(page.url.pathname === '/');
+	let homeMounted = $state(page.url.pathname === '/');
+	$effect(() => {
+		if (onHome) homeMounted = true;
+	});
+	// <main> is the scroller every page shares, so home's place in it is kept here. A route that
+	// unmounts starts the next page at the top by collapsing the content; a hidden home collapses
+	// nothing, so the page after it is put at the top explicitly.
+	let mainEl = $state<HTMLElement | null>(null);
+	let homeScroll = 0;
+	beforeNavigate(({ from }) => {
+		if (from?.url?.pathname === '/' && mainEl) homeScroll = mainEl.scrollTop;
+	});
+	afterNavigate(({ from, to }) => {
+		// `from` exists with a null `url` on some navigations (the first one after hydration), and a
+		// throw in here aborts SvelteKit's client navigation into a full page load — which would
+		// unmount the very home this is trying to keep.
+		const fromPath = from?.url?.pathname;
+		if (!mainEl || !fromPath) return;
+		const leaving = fromPath === '/';
+		const arriving = to?.url?.pathname === '/';
+		if (arriving && !leaving) mainEl.scrollTop = homeScroll;
+		else if (leaving && !arriving) mainEl.scrollTop = 0;
+	});
 	// The custom app icon (#173) is a file on disk, so the titlebar has to ask Rust for it.
 	if (browser) loadAppIcon();
 
@@ -183,9 +215,16 @@
 			<Sidebar />
 			<!-- dragScroll: dragging a card up to home's Shortcuts grid has to be possible from anywhere in
 			     the feed, so aiming at the top edge scrolls this container while the drag is in flight. -->
-			<main class="min-w-0 flex-1 overflow-y-auto" {@attach dragScroll}>
+			<main bind:this={mainEl} class="min-w-0 flex-1 overflow-y-auto" {@attach dragScroll}>
 				<!-- Remount the current page on sign-in/out so it refetches with the new account. -->
 				{#key auth.epoch}
+					<!-- `contents` while home is the page, so its layout is exactly what the route drew;
+					     `hidden` otherwise, which keeps it mounted and costs no layout or paint. -->
+					{#if homeMounted}
+						<div class={onHome ? 'contents' : 'hidden'}>
+							<HomeFeed />
+						</div>
+					{/if}
 					{@render children()}
 				{/key}
 			</main>
