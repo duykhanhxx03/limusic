@@ -1,6 +1,7 @@
 //! Limusic Tauri app. Wires transport + player + db + orchestrator behind the command boundary.
 
 mod appicon;
+mod autoeq;
 mod blocked;
 mod browser;
 mod cipher;
@@ -647,6 +648,9 @@ pub fn run() {
             commands::equalizer_bands,
             commands::set_equalizer,
             commands::equalizer,
+            commands::autoeq_refresh,
+            commands::autoeq_search,
+            commands::autoeq_curve,
             commands::set_sleep_timer,
             commands::clear_sleep_timer,
             commands::sleep_timer,

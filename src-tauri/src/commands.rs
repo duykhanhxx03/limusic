@@ -299,6 +299,9 @@ pub fn equalizer_bands() -> Vec<u32> {
 /// Apply the equalizer. `gains` is one dB value per band; an empty vec, or `enabled: false`, turns
 /// it off — which is not the same as all zeros, since zeros would still build the filters.
 ///
+/// `profile` is the AutoEq correction the curve came from, if it did. It is stored only so the
+/// dialog can name it again; the gains are what gets applied.
+///
 /// Persisted here rather than in the UI so it survives a restart and is applied before the first
 /// track starts, the same way audio quality is.
 #[tauri::command]
@@ -307,14 +310,32 @@ pub fn set_equalizer(
     enabled: bool,
     preamp_db: f64,
     gains_db: Vec<f64>,
+    profile: Option<EqProfile>,
 ) -> Result<(), String> {
     let eq = build_equalizer(enabled, preamp_db, &gains_db);
     state.player.set_equalizer(eq).map_err(|e| e.to_string())?;
     // Stored as a compact JSON row next to the other settings, so a corrupt value degrades to
     // "equalizer off" rather than to a panic on the next launch.
-    let stored = serde_json::json!({ "enabled": enabled, "preamp": preamp_db, "gains": gains_db });
+    let stored = serde_json::json!({
+        "enabled": enabled,
+        "preamp": preamp_db,
+        "gains": gains_db,
+        "profile": profile,
+    });
     state.db.set_setting("equalizer", &stored.to_string());
     Ok(())
+}
+
+/// The AutoEq correction a curve was loaded from: which headphone, and the curve as loaded, so the
+/// dialog can tell whether the sliders have since moved away from it.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EqProfile {
+    pub path: String,
+    pub name: String,
+    pub source: String,
+    pub rig: Option<String>,
+    pub preamp: f64,
+    pub gains: Vec<f64>,
 }
 
 /// What the UI should draw on open: the stored setting, or a flat, disabled one.
@@ -329,9 +350,19 @@ pub fn equalizer(state: St<'_>) -> serde_json::Value {
                 "enabled": false,
                 "preamp": 0.0,
                 "gains": vec![0.0; player::EQ_BANDS.len()],
+                "profile": null,
             })
         })
 }
+
+/// The deepest preamp the equalizer takes, and the highest. Cut only: a boost ahead of ten more
+/// boosts is how an EQ clips. The floor is below the bands' −12 because AutoEq's corrections
+/// ask for more than that (−12.1 dB is in the published set), and a preamp clamped short of what
+/// a correction was computed with leaves it clipping by the difference.
+pub const EQ_PREAMP_MIN: f64 = -15.0;
+pub const EQ_PREAMP_MAX: f64 = 0.0;
+/// ±dB per band, the range AutoEq computes its fixed-band corrections within.
+pub const EQ_GAIN_RANGE: f64 = 12.0;
 
 /// Shared by the command and the startup restore.
 pub fn build_equalizer(
@@ -342,13 +373,41 @@ pub fn build_equalizer(
     if !enabled {
         return None;
     }
+    // Clamped rather than trusted: the UI's controls stop at these limits, but the setting is a
+    // JSON row on disk and a wild value here is a filter mpv rejects, which drops the whole chain.
+    // Rounded to a tenth of a dB, the precision AutoEq publishes and more than an ear resolves, so
+    // a dragged curve doesn't hand mpv a filter string full of float noise.
+    let tenth = |v: f64| (v * 10.0).round() / 10.0;
     let mut gains = [0.0f64; player::EQ_BANDS.len()];
     for (slot, g) in gains.iter_mut().zip(gains_db) {
-        // Clamped rather than trusted: the UI's sliders stop at ±12, but the setting is a JSON row
-        // on disk and a wild value here is a filter mpv rejects, which drops the whole chain.
-        *slot = g.clamp(-12.0, 12.0);
+        *slot = tenth(g.clamp(-EQ_GAIN_RANGE, EQ_GAIN_RANGE));
     }
-    Some(player::Equalizer { preamp_db: preamp_db.clamp(-12.0, 12.0), gains_db: gains })
+    Some(player::Equalizer {
+        preamp_db: tenth(preamp_db.clamp(EQ_PREAMP_MIN, EQ_PREAMP_MAX)),
+        gains_db: gains,
+    })
+}
+
+// --- AutoEq -------------------------------------------------------------------------------------
+
+/// Fetch or revalidate the headphone index if it is missing or a week old. Returns how many
+/// headphones it holds. Cheap when fresh: no request at all.
+#[tauri::command]
+pub async fn autoeq_refresh(state: St<'_>) -> Result<i64, String> {
+    crate::autoeq::refresh(state.inner()).await
+}
+
+/// Headphones whose name contains every word of `query`. Local only; an empty result before the
+/// first `autoeq_refresh` has finished just means there is no index yet.
+#[tauri::command]
+pub fn autoeq_search(state: St<'_>, query: String) -> Vec<crate::autoeq::Entry> {
+    state.db.search_autoeq(&query, crate::autoeq::SEARCH_LIMIT)
+}
+
+/// The correction for one headphone from the index: ten gains and a preamp, fetched once.
+#[tauri::command]
+pub async fn autoeq_curve(state: St<'_>, path: String) -> Result<crate::autoeq::Curve, String> {
+    crate::autoeq::curve(state.inner(), &path).await
 }
 
 // --- sleep timer --------------------------------------------------------------------------------
@@ -1664,6 +1723,18 @@ pub fn theater_fullscreen(window: tauri::WebviewWindow, on: bool) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_equalizer_is_clamped_and_rounded_before_mpv_sees_it() {
+        assert_eq!(build_equalizer(false, -3.0, &[1.0; 10]), None);
+        // An AutoEq preamp below the bands' range survives; a boost doesn't, and neither do a
+        // band past ±12 or float noise from a dragged curve.
+        let eq = build_equalizer(true, -12.54, &[6.9, 13.0, -0.30000000000000004, -20.0]).unwrap();
+        assert_eq!(eq.preamp_db, -12.5);
+        assert_eq!(&eq.gains_db[..5], &[6.9, 12.0, -0.3, -12.0, 0.0]);
+        assert_eq!(build_equalizer(true, 3.0, &[]).unwrap().preamp_db, 0.0);
+        assert_eq!(build_equalizer(true, -40.0, &[]).unwrap().preamp_db, EQ_PREAMP_MIN);
+    }
 
     #[test]
     fn on_repeat_rows_shed_the_queue_slot_they_were_played_from() {

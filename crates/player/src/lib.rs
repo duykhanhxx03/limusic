@@ -288,6 +288,9 @@ impl Player {
 /// different tool and a much larger UI.
 pub const EQ_BANDS: [u32; 10] = [31, 62, 125, 250, 500, 1_000, 2_000, 4_000, 8_000, 16_000];
 
+/// Every band's Q. See the note in `af_chain`.
+pub const EQ_Q: f64 = 1.41;
+
 /// Ten band gains in dB, plus an overall trim.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Equalizer {
@@ -321,11 +324,13 @@ fn af_chain(state: &AfState) -> String {
             if g == 0.0 {
                 continue;
             }
-            // `t=q:w=1.0` is a bit over one octave of bandwidth — wide enough that ten bands cover
-            // the spectrum without gaps, narrow enough that neighbours do not fight each other.
+            // Q √2 (one octave between the -3 dB points), the width AutoEq computes its
+            // fixed-band corrections for (autoeq.rs in the app). Those are ten gains that assume
+            // this exact filter shape; at the wider Q 1.0 used before, neighbouring bands overlap
+            // more and the same gains overshoot the correction.
             // One lavfi per band rather than one graph with commas in it: `af` splits on commas
             // too, and the existing chain already joins that way.
-            chain.push(format!("lavfi=[equalizer=f={f}:t=q:w=1.0:g={g}]"));
+            chain.push(format!("lavfi=[equalizer=f={f}:t=q:w={EQ_Q}:g={g}]"));
         }
     }
     if semitones != 0 {
@@ -493,7 +498,7 @@ mod tests {
         let c = chain(None, 0, Some(eq));
         assert_eq!(
             c,
-            "lavfi=[equalizer=f=31:t=q:w=1.0:g=6],lavfi=[equalizer=f=16000:t=q:w=1.0:g=-3]"
+            "lavfi=[equalizer=f=31:t=q:w=1.41:g=6],lavfi=[equalizer=f=16000:t=q:w=1.41:g=-3]"
         );
     }
 
@@ -566,6 +571,21 @@ mod tests {
         let after = af(); // mpv hands the chain back in its own escaped form, hence `contains`
         assert!(after.contains("volume=-4dB"), "retune after a rejection failed: {after}");
         assert!(!after.contains("rubberband"), "stored pitch survived the rollback: {after}");
+
+        // 4. An AutoEq correction: fractional gains, a preamp below the bands' −12 dB, Q 1.41.
+        // mpv has to take every band of it, or the headphone picker applies a chain that fails.
+        let hd600 = Equalizer {
+            preamp_db: -12.5,
+            gains_db: [6.9, 3.3, -1.1, -1.6, 0.6, -0.8, 0.1, -1.0, 3.9, -6.5],
+        };
+        p.set_equalizer(Some(hd600)).unwrap();
+        let live = af();
+        assert!(live.contains("volume=-16.5dB"), "preamp not folded into the gain: {live}");
+        assert_eq!(live.matches("equalizer").count(), 10, "a band was dropped: {live}");
+        assert!(live.contains("f=31:t=q:w=1.41:g=6.9"), "31 Hz band wrong: {live}");
+        assert!(live.contains("f=16000:t=q:w=1.41:g=-6.5"), "16 kHz band wrong: {live}");
+        p.set_equalizer(None).unwrap();
+        assert!(!af().contains("equalizer"), "turning it off left filters: {}", af());
     }
 
     #[test]

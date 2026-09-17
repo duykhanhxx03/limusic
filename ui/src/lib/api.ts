@@ -425,6 +425,18 @@ export interface EqualizerState {
 	preamp: number;
 	/** One dB value per band of `equalizerBands()`, in the same order. */
 	gains: number[];
+	/** The AutoEq correction the curve was loaded from, if it was. */
+	profile?: EqProfile | null;
+}
+
+/** A headphone correction as it was applied: which one, and the curve it set. */
+export interface EqProfile {
+	path: string;
+	name: string;
+	source: string;
+	rig: string | null;
+	preamp: number;
+	gains: number[];
 }
 
 /** The band centre frequencies, from the same constant the filters are built from. */
@@ -434,8 +446,36 @@ export const equalizerBands = () => invoke<number[]>('equalizer_bands');
 export const equalizer = () => invoke<EqualizerState>('equalizer');
 
 /** Apply and persist. `enabled: false` removes the filters rather than flattening them. */
-export const setEqualizer = (enabled: boolean, preampDb: number, gainsDb: number[]) =>
-	invoke<void>('set_equalizer', { enabled, preampDb, gainsDb });
+export const setEqualizer = (
+	enabled: boolean,
+	preampDb: number,
+	gainsDb: number[],
+	profile: EqProfile | null = null
+) => invoke<void>('set_equalizer', { enabled, preampDb, gainsDb, profile });
+
+/** One headphone measurement in the AutoEq index. */
+export interface AutoEqEntry {
+	/** Relative to AutoEq's `results/`; the key for `autoEqCurve`. */
+	path: string;
+	name: string;
+	/** Who measured it. */
+	source: string;
+	/** The measurement rig, when the source used several. */
+	rig: string | null;
+	/** Already on disk, so choosing it works offline. */
+	cached: boolean;
+}
+
+/** Fetch or revalidate the headphone index when it is missing or a week old. Resolves to how many
+ *  headphones it holds; free when it is fresh. */
+export const autoEqRefresh = () => invoke<number>('autoeq_refresh');
+
+/** Headphones matching every word of `query`, from the local index. */
+export const autoEqSearch = (query: string) => invoke<AutoEqEntry[]>('autoeq_search', { query });
+
+/** The ten-band correction for one headphone, fetched once and then kept. */
+export const autoEqCurve = (path: string) =>
+	invoke<{ preamp: number; gains: number[] }>('autoeq_curve', { path });
 
 // --- sleep timer --------------------------------------------------------------------------------
 //

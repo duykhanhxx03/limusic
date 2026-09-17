@@ -174,6 +174,26 @@ impl Db {
                 visitor_data           TEXT,
                 added_at               INTEGER NOT NULL
             );
+            -- AutoEq (autoeq.rs). The headphone index is about 8,800 rows and is replaced whole,
+            -- so it has no history to keep; `autoeq_meta` is its one row of freshness. A curve
+            -- is ten gains that never change for a path, so it is kept for good once fetched.
+            CREATE TABLE IF NOT EXISTS autoeq_entry (
+                path   TEXT PRIMARY KEY,
+                name   TEXT NOT NULL,
+                source TEXT NOT NULL,
+                rig    TEXT
+            ) WITHOUT ROWID;
+            CREATE INDEX IF NOT EXISTS autoeq_entry_name ON autoeq_entry(name);
+            CREATE TABLE IF NOT EXISTS autoeq_meta (
+                id         INTEGER PRIMARY KEY CHECK (id = 0),
+                etag       TEXT,
+                fetched_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS autoeq_curve (
+                path   TEXT PRIMARY KEY,
+                preamp REAL NOT NULL,
+                gains  TEXT NOT NULL
+            ) WITHOUT ROWID;
             "#,
         )?;
         // Migrate pre-Phase-4 DBs that predate the loudness_db column. Errors ("duplicate column")
@@ -701,6 +721,133 @@ impl Db {
     pub fn clear_lyrics_cache(&self) {
         let conn = self.0.lock().unwrap();
         let _ = conn.execute("DELETE FROM lyrics_cache", []);
+    }
+
+    // --- AutoEq ----------------------------------------------------------------------------
+
+    /// How many headphones are indexed, and the ETag and time of the fetch they came from.
+    pub fn autoeq_index_state(&self) -> (i64, Option<String>, Option<i64>) {
+        let conn = self.0.lock().unwrap();
+        let count =
+            conn.query_row("SELECT COUNT(*) FROM autoeq_entry", [], |r| r.get(0)).unwrap_or(0);
+        let (etag, fetched_at) = conn
+            .query_row("SELECT etag, fetched_at FROM autoeq_meta WHERE id = 0", [], |r| {
+                Ok((r.get(0)?, Some(r.get(1)?)))
+            })
+            .unwrap_or((None, None));
+        (count, etag, fetched_at)
+    }
+
+    /// Swap in a freshly fetched index. One transaction, so a search running meanwhile sees the
+    /// old list or the new one and never an empty table between them.
+    pub fn replace_autoeq_index(
+        &self,
+        entries: &[crate::autoeq::IndexEntry],
+        etag: Option<&str>,
+        now: i64,
+    ) -> rusqlite::Result<()> {
+        let mut conn = self.0.lock().unwrap();
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM autoeq_entry", [])?;
+        {
+            let mut insert = tx.prepare(
+                "INSERT OR REPLACE INTO autoeq_entry(path, name, source, rig) VALUES(?1, ?2, ?3, ?4)",
+            )?;
+            for e in entries {
+                insert.execute(rusqlite::params![e.path, e.name, e.source, e.rig])?;
+            }
+        }
+        tx.execute(
+            "INSERT INTO autoeq_meta(id, etag, fetched_at) VALUES(0, ?1, ?2)
+             ON CONFLICT(id) DO UPDATE SET etag = excluded.etag, fetched_at = excluded.fetched_at",
+            rusqlite::params![etag, now],
+        )?;
+        tx.commit()
+    }
+
+    /// The index was checked and has not changed (a 304): only the clock moves.
+    pub fn touch_autoeq_index(&self, now: i64) {
+        let conn = self.0.lock().unwrap();
+        let _ = conn.execute("UPDATE autoeq_meta SET fetched_at = ?1 WHERE id = 0", [now]);
+    }
+
+    /// Headphones whose name contains every word of `query`, names that start with it first.
+    /// `cached` says the curve is already on disk, so choosing it works offline.
+    pub fn search_autoeq(&self, query: &str, limit: usize) -> Vec<crate::autoeq::Entry> {
+        let words: Vec<String> = query
+            .split_whitespace()
+            .map(|w| {
+                // LIKE's own wildcards, typed by someone searching for "A_B" or "50%", are
+                // literal characters here.
+                let escaped = w.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+                format!("%{escaped}%")
+            })
+            .collect();
+        let mut sql = String::from(
+            "SELECT e.path, e.name, e.source, e.rig, c.path IS NOT NULL
+             FROM autoeq_entry e LEFT JOIN autoeq_curve c ON c.path = e.path WHERE 1",
+        );
+        for i in 0..words.len() {
+            sql.push_str(&format!(" AND e.name LIKE ?{} ESCAPE '\\'", i + 1));
+        }
+        // Ranked by the first word: "senn 600" should put Sennheiser's own models above a
+        // collaboration that merely mentions them.
+        let first = query.split_whitespace().next().unwrap_or("");
+        let prefix = format!("{}%", first.replace('%', "").replace('_', ""));
+        // Within one headphone, the measurements AutoEq itself ranks highest come first
+        // (oratory1990, then crinacle, Innerfidelity, Rtings, per its results README): the same
+        // model measured by eight sources otherwise lists alphabetically, which put a hobbyist rig
+        // above the reference ones.
+        sql.push_str(&format!(
+            " ORDER BY e.name LIKE ?{} DESC, e.name COLLATE NOCASE,
+               CASE e.source WHEN 'oratory1990' THEN 0 WHEN 'crinacle' THEN 1
+                 WHEN 'Innerfidelity' THEN 2 WHEN 'Rtings' THEN 3 ELSE 4 END,
+               e.source COLLATE NOCASE LIMIT {limit}",
+            words.len() + 1
+        ));
+        let conn = self.0.lock().unwrap();
+        let Ok(mut stmt) = conn.prepare(&sql) else { return Vec::new() };
+        let mut params: Vec<&dyn rusqlite::ToSql> =
+            words.iter().map(|w| w as &dyn rusqlite::ToSql).collect();
+        params.push(&prefix);
+        stmt.query_map(params.as_slice(), |r| {
+            Ok(crate::autoeq::Entry {
+                path: r.get(0)?,
+                name: r.get(1)?,
+                source: r.get(2)?,
+                rig: r.get(3)?,
+                cached: r.get(4)?,
+            })
+        })
+        .map(|rows| rows.flatten().collect())
+        .unwrap_or_default()
+    }
+
+    /// Whether `path` is a headphone from the index, which is the only thing a curve may be
+    /// fetched for: the path is spliced into a URL.
+    pub fn autoeq_entry_exists(&self, path: &str) -> bool {
+        let conn = self.0.lock().unwrap();
+        conn.query_row("SELECT 1 FROM autoeq_entry WHERE path = ?1", [path], |_| Ok(())).is_ok()
+    }
+
+    pub fn autoeq_curve(&self, path: &str) -> Option<crate::autoeq::Curve> {
+        let conn = self.0.lock().unwrap();
+        let (preamp, gains): (f64, String) = conn
+            .query_row("SELECT preamp, gains FROM autoeq_curve WHERE path = ?1", [path], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .ok()?;
+        let gains: Vec<f64> = gains.split(',').filter_map(|g| g.parse().ok()).collect();
+        Some(crate::autoeq::Curve { preamp, gains })
+    }
+
+    pub fn put_autoeq_curve(&self, path: &str, curve: &crate::autoeq::Curve) {
+        let gains = curve.gains.iter().map(f64::to_string).collect::<Vec<_>>().join(",");
+        let conn = self.0.lock().unwrap();
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO autoeq_curve(path, preamp, gains) VALUES(?1, ?2, ?3)",
+            rusqlite::params![path, curve.preamp, gains],
+        );
     }
 
     // --- lyrics cache -----------------------------------------------------------------------
