@@ -126,16 +126,33 @@
 	let row = $state<HTMLDivElement | null>(null);
 	let canLeft = $state(false);
 	let canRight = $state(false);
+	/** The indicator's thumb: its length and where it sits, both as a fraction of the track. */
+	let thumbSize = $state(1);
+	let thumbAt = $state(0);
 
 	function update() {
 		if (!row) return;
-		canLeft = row.scrollLeft > 4;
-		canRight = row.scrollLeft + row.clientWidth < row.scrollWidth - 4;
+		const { scrollLeft, clientWidth, scrollWidth } = row;
+		canLeft = scrollLeft > 4;
+		canRight = scrollLeft + clientWidth < scrollWidth - 4;
+		const max = scrollWidth - clientWidth;
+		thumbSize = scrollWidth > 0 ? Math.min(1, Math.max(0.2, clientWidth / scrollWidth)) : 1;
+		thumbAt = max > 0 ? Math.min(1, scrollLeft / max) : 0;
 	}
 
-	const measureOnEnter = (el: HTMLElement) => {
+	// Measured as soon as the row has a layout, not when the pointer arrives: a shelf skipped by
+	// content-visibility has none at mount (scrollWidth reads 0), and measuring on hover made the
+	// edge fade and the arrow pop in together under the pointer, which read as the row jumping.
+	// A ResizeObserver fires when the skip ends and the row gets its size. Pointer enter stays as the
+	// backstop for an engine that doesn't report that.
+	const measure = (el: HTMLElement) => {
+		const ro = new ResizeObserver(update);
+		ro.observe(el);
 		el.addEventListener('pointerenter', update);
-		return () => el.removeEventListener('pointerenter', update);
+		return () => {
+			ro.disconnect();
+			el.removeEventListener('pointerenter', update);
+		};
 	};
 
 	function page(dir: 1 | -1) {
@@ -162,19 +179,29 @@
 	{#if title || onMore}
 		<SectionHeading title={title ?? ''} icon={ICONS[mode]} {onMore} {headingClass} />
 	{/if}
-	<!-- Measure on pointer enter, because a shelf skipped by content-visibility has no layout at
-	     mount: scrollWidth reads 0 and the arrows never appear. They only show on hover, so measuring
-	     as the pointer arrives is both correct and later than the mount-time forced layout.
-	     An attachment rather than onpointerenter: the handler doesn't make this div interactive. -->
-	<div class="group/shelf relative" {@attach measureOnEnter}>
+	<div class="group/shelf relative">
+		<!-- No native scrollbar. It was a full-width 8px bar under every shelf, with a thumb nearly as
+		     long as the row (a shelf is barely wider than the window), and it lit up under the pointer.
+		     The indicator below takes its place without taking space: pb-4 is the old pb-2 plus the
+		     8px the bar used, so a shelf is exactly as tall as before and nothing under it moves.
+		     will-change: a hovered card fades its play button and menu in, and WebKit composites an
+		     element while its opacity animates. It can't tell what that layer will overlap, so every
+		     card after it in the row went onto a layer of its own for the length of the fade and came
+		     back re-rasterized: measured on 2026-09-17, the next cards blurred and shifted slightly on
+		     every hover. With the row a layer from the start there is nothing left to promote: the same
+		     measurement changes no pixel outside the hovered card, and the resting row is
+		     pixel-identical. opacity rather than transform, which would trap the `fixed` ⋯ menu.
+		     An attachment rather than onpointerenter: the handler doesn't make this row interactive. -->
 		<div
-			class="flex snap-x overflow-x-auto pb-2 {mode === 'song'
+			class="flex snap-x overflow-x-auto pb-4 [scrollbar-width:none] [will-change:opacity] [&::-webkit-scrollbar]:hidden {mode ===
+			'song'
 				? 'gap-0'
 				: community
 					? 'gap-3'
 					: 'gap-2'}"
 			bind:this={row}
 			onscroll={update}
+			{@attach measure}
 		>
 			{#if mode === 'song'}
 				{#each others as item (item.id)}
@@ -231,11 +258,34 @@
 		</div>
 		<!-- Fades, not just arrows: a card sliced by the edge should read as "the row continues", which
 		     is also what makes the arrow legible sitting on top of artwork. Both are pointer-transparent
-		     so they never eat a click meant for the card underneath. -->
-		{#if canLeft}
+		     so they never eat a click meant for the card underneath. Always mounted and faded by
+		     opacity, so reaching either end of the row eases them out instead of cutting them. -->
+		<div
+			class="pointer-events-none absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-background to-transparent transition-opacity duration-[var(--duration-fast)] {canLeft
+				? 'opacity-100'
+				: 'opacity-0'}"
+		></div>
+		<div
+			class="pointer-events-none absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-background to-transparent transition-opacity duration-[var(--duration-fast)] {canRight
+				? 'opacity-100'
+				: 'opacity-0'}"
+		></div>
+		<!-- Where in the row you are: a short track under its middle, only while the pointer is over the
+		     shelf. Decoration, not a control; the arrows and the wheel do the scrolling. -->
+		{#if canLeft || canRight}
 			<div
-				class="pointer-events-none absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-background to-transparent"
-			></div>
+				aria-hidden="true"
+				class="pointer-events-none absolute bottom-1 left-1/2 h-1 w-16 -translate-x-1/2 overflow-hidden rounded-full bg-foreground/10 opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover/shelf:opacity-100"
+			>
+				<div
+					class="h-full rounded-full bg-foreground/45"
+					style="width: {thumbSize * 100}%; transform: translateX({thumbSize < 1
+						? (thumbAt * (1 - thumbSize) * 100) / thumbSize
+						: 0}%)"
+				></div>
+			</div>
+		{/if}
+		{#if canLeft}
 			<button
 				aria-label={t('a11y.scroll_left')}
 				onclick={() => page(-1)}
@@ -245,9 +295,6 @@
 			</button>
 		{/if}
 		{#if canRight}
-			<div
-				class="pointer-events-none absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-background to-transparent"
-			></div>
 			<button
 				aria-label={t('a11y.scroll_right')}
 				onclick={() => page(1)}
