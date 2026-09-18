@@ -2852,7 +2852,7 @@ dependencies = [
 
 [[package]]
 name = "innertube"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "base64 0.22.1",
  "hex",
@@ -3221,7 +3221,7 @@ dependencies = [
 
 [[package]]
 name = "limusic-app"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4172,7 +4172,7 @@ checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 
 [[package]]
 name = "player"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "libc",
  "libmpv2",
