@@ -5,7 +5,53 @@
 	// "About the artist": the lead artist's page, fetched once per artist per session. Out here, not
 	// in the instance, so closing and reopening the column does not fetch it again. A failure leaves
 	// the card out rather than showing an error for something nobody asked for.
-	const artists = new Map<string, Promise<ArtistPage | null>>();
+	//
+	// Only what the card shows is kept. A whole artist page carries its top songs and every shelf,
+	// around 50 KB, and on radio a new artist comes up every few tracks, so holding the pages grew
+	// the heap by about 1 MB an hour for a card that reads seven fields of them. The map is capped
+	// too, dropping the artist asked for least recently. A failed fetch is forgotten rather than
+	// kept as "no card", so the next track by that artist asks again.
+	type ArtistCard = Pick<
+		ArtistPage,
+		| 'name'
+		| 'thumbnail'
+		| 'description'
+		| 'subscribers'
+		| 'monthlyListeners'
+		| 'channelId'
+		| 'subscribed'
+	>;
+	const artists = new Map<string, Promise<ArtistCard | null>>();
+	const ARTIST_LIMIT = 50;
+
+	function artistCard(id: string): Promise<ArtistCard | null> {
+		let hit = artists.get(id);
+		if (hit) {
+			// Taken out and put back, so the map's order stays least recently asked for first.
+			artists.delete(id);
+		} else {
+			const p: Promise<ArtistCard | null> = api.getArtist(id).then(
+				(a) => ({
+					name: a.name,
+					thumbnail: a.thumbnail,
+					description: a.description,
+					subscribers: a.subscribers,
+					monthlyListeners: a.monthlyListeners,
+					channelId: a.channelId,
+					subscribed: a.subscribed
+				}),
+				() => {
+					// Only this attempt's entry: it may have been dropped, and a newer one put in.
+					if (artists.get(id) === p) artists.delete(id);
+					return null;
+				}
+			);
+			hit = p;
+		}
+		artists.set(id, hit);
+		if (artists.size > ARTIST_LIMIT) artists.delete(artists.keys().next().value!);
+		return hit;
+	}
 </script>
 
 <script lang="ts">
@@ -22,6 +68,7 @@
 	} from '@hugeicons/core-free-icons';
 	import { thumb } from '$lib/thumb';
 	import { imgReveal } from '$lib/imgreveal';
+	import { preloadImage } from '$lib/prefetch.svelte';
 	import {
 		auth,
 		np,
@@ -42,17 +89,32 @@
 	// The next track in the queue, for the "Next in queue" card.
 	const next = $derived(playback.queue.items[playback.queue.currentIndex + 1]);
 
-	let artist = $state<ArtistPage | null>(null);
+	// The next track's cover at the size this column shows it, loaded and decoded during the track
+	// before. The shared prefetch warms the big artwork only while the player view or theater is
+	// open, and this column is what is on screen the rest of the time: without this, each change
+	// left a grey square here for 150–400 ms (up to ~880 ms) while a 720px cover came in. Not held
+	// back while the player view is open, since the column stays mounted behind it to be ready when
+	// the view closes. Local files are skipped, as the shared prefetch skips them: their covers are
+	// on disk, and can be full-size images not worth keeping decoded in advance. A string, so a
+	// queue edit that leaves the next cover as it was does not run the effect again.
+	const nextCover = $derived(
+		view === 'playing' && next && !api.isLocalId(next.video_id)
+			? thumb(next.thumbnail, 720)
+			: undefined
+	);
+	$effect(() => {
+		if (nextCover) void preloadImage(nextCover);
+	});
+
+	// Raw, not deep: the card is only ever replaced, and holding the cached object itself means
+	// Follow's write below lands in the cache, so the next track by the same artist shows the new
+	// state. Through a deep-state proxy that write stayed in the proxy and the cache kept the old one.
+	let artist = $state.raw<ArtistCard | null>(null);
 	$effect(() => {
 		const id = view === 'playing' ? now?.artistId : undefined;
 		artist = null;
 		if (!id) return;
-		let hit = artists.get(id);
-		if (!hit) {
-			hit = api.getArtist(id).catch(() => null);
-			artists.set(id, hit);
-		}
-		hit.then((a) => {
+		artistCard(id).then((a) => {
 			if (now?.artistId === id) artist = a;
 		});
 	});

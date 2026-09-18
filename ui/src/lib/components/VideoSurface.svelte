@@ -57,21 +57,35 @@
 	 *  picture at completely the wrong place and then fight itself on the steady-state cooldown. */
 	const SYNC_SEEKS = 3;
 	const SYNC_WAIT = 4000;
-	/** How long the picture keeps running once nobody can use it: the window is hidden (opening the
-	 *  mini player hides the main window, src-tauri/src/mini.rs), or the music is paused with the
-	 *  player view shut. Coming back from either is the same expensive mid-track seek that reopening
-	 *  the view used to be, so it is worth holding through a short absence rather than stopping on
-	 *  the spot. Past the grace the element goes `dormant`: paused *and* released, src off, because
-	 *  a parked pipeline is not free. Measured on Fedora/NVIDIA with a restored music-video track
-	 *  nobody had even played: 385 MiB of GPU memory and 154 MiB of PSS, held for the session.
-	 *  It starts dormant for that reason, so a restored queue costs nothing until someone presses
-	 *  play or opens the view.
+	/** How long the element keeps its stream once nobody can see the picture: the window is hidden
+	 *  (opening the mini player hides the main window, src-tauri/src/mini.rs), or the player view is
+	 *  shut. Coming back from either is an expensive mid-track seek, so it is worth holding through
+	 *  a short absence rather than stopping on the spot. Past the grace the element goes `dormant`:
+	 *  paused *and* released, src off, because a parked pipeline is not free. Measured on
+	 *  Fedora/NVIDIA with a restored music-video track nobody had even played: 385 MiB of GPU memory
+	 *  and 154 MiB of PSS, held for the session.
+	 *  It starts dormant for that reason, and only the view claiming the element wakes it, so a
+	 *  restored queue, or a whole session played with the view shut, costs nothing beyond the URL
+	 *  warm-up the store already does.
 	 *  ponytail: one flat timer for both triggers. Raise it if coming back still resyncs, lower it
 	 *  if idle memory matters more than that resync. */
 	const IDLE_GRACE = 60000;
+	/** The view being shut gets an earlier first stage: past REST_GRACE the picture is `resting`,
+	 *  paused but still attached. Playing with the view shut used to keep the picture running so a
+	 *  reopen had nothing to re-sync, and what that cost was a full video decode into the 0x0
+	 *  parking box for as long as the music played. The attached pipeline only costs memory, which
+	 *  IDLE_GRACE already bounds. So a quick close and reopen still comes back with nothing to
+	 *  re-sync, a longer one pays one seek on a stream that is already open and indexed, and only
+	 *  past IDLE_GRACE does it pay the full converge from byte 0. Either of those runs behind the
+	 *  artwork (see `showVideo`), so what they cost is time, not a wrong picture.
+	 *  A hidden window with the view open does not rest: that is the mini player round trip, which
+	 *  is expected back well inside IDLE_GRACE and should come back to a picture still in step. */
+	const REST_GRACE = 15000;
 	let idleTimer: ReturnType<typeof setTimeout> | undefined;
+	let restTimer: ReturnType<typeof setTimeout> | undefined;
 	let hidden = $state(false);
 	let dormant = $state(true);
+	let resting = $state(false);
 	let synced = false;
 	let syncSeeks = 0;
 	let syncStart = 0;
@@ -98,23 +112,27 @@
 		video.url = null;
 		fetchedId = null;
 		synced = false;
+		video.ready = false;
 		syncSeeks = 0;
 		syncStart = 0;
 		lastSeek = 0; // a new track may sync at once, whatever the last one was doing
-		// `dormant` is deliberately *not* reset here: it means "this window is hidden and past the
-		// grace", which a track change does not undo. Clearing it would start the next video track
-		// decoding into a window nobody is looking at. Coming back into view is what clears it, and
-		// that path already re-runs the whole converge phase.
+		// `dormant` and `resting` are deliberately *not* reset here: they mean "nobody can see the
+		// picture and the grace is over", which a track change does not undo. Clearing them would
+		// start the next video track decoding into a window or a parking box nobody is looking at.
+		// Coming back into view is what clears them, and that path already re-runs the whole
+		// converge phase.
 	});
 
 	$effect(() => {
 		const id = playback.now?.videoId;
 		// video.want is a dependency so turning video on mid-track starts the fetch; fetchedId is
 		// what stops turning it off and on again from refetching what we already have.
-		// `dormant` means nobody can see the picture and the music is not moving, so resolving a
-		// URL here would only feed a pipeline we are deliberately not holding. It is state, so
-		// waking re-runs this and the fetch happens then.
-		if (!id || !canVideo() || !video.want || dormant || fetchedId === id) return;
+		// `dormant` means the grace is over and the stream released, so resolving a URL here would
+		// only feed a pipeline we are deliberately not holding. The view being shut is the same for
+		// a track that starts while it is: attaching its stream would build a pipeline for nobody,
+		// and the grace exists for the track the view was showing, not for the ones after it. Both
+		// are state, so waking or reopening re-runs this and the fetch happens then.
+		if (!id || !canVideo() || !video.want || dormant || !video.shown || fetchedId === id) return;
 		fetchedId = id;
 		let cancelled = false;
 		// Usually already resolved (the store warms it when the track starts, and keeps it across
@@ -162,18 +180,21 @@
 		return false;
 	}
 
-	/** Start the picture, if the music is going and this window has not gone dormant. Not before the
-	 *  converge phase has finished: playing during it means showing real motion from the wrong
-	 *  moment of the video, which reads as broken in a way a still frame does not. */
+	/** Start the picture, if the music is going and the picture has neither rested nor gone dormant.
+	 *  Not before the converge phase has finished: playing during it means showing real motion from
+	 *  the wrong moment of the video, which reads as broken in a way a still frame does not. */
 	function resumeVideo() {
-		if (el && synced && !playback.paused && !dormant) el.play().catch(() => {});
+		if (el && synced && !playback.paused && !dormant && !resting) el.play().catch(() => {});
 	}
 
 	function syncVideo() {
 		// readyState 0 has no clock to compare against, and mid-seek the comparison is meaningless.
 		// Anything above that is fair game: re-buffering sits at 2 for long stretches and the
 		// picture keeps moving perfectly well there.
-		if (!el || !hasVideo() || el.seeking || el.readyState < 1) return;
+		// A resting picture is paused on purpose while mpv plays on, so the drift only grows, and
+		// every seek it provoked would fetch and decode for nobody. Waking re-runs the converge
+		// phase from wherever it sits.
+		if (!el || resting || !hasVideo() || el.seeking || el.readyState < 1) return;
 		const drift = mpvNow() - el.currentTime;
 		if (!synced) {
 			if (!syncStart) syncStart = performance.now();
@@ -187,6 +208,9 @@
 			// rather than resuming a picture that is nowhere near the music.
 			if (Math.abs(drift) <= TRIM_TO || syncSeeks >= SYNC_SEEKS) {
 				synced = true;
+				// Only now does the view swap the artwork for the picture (see `showVideo`), so the
+				// first frame anyone sees is this one, not the opening frame or a stale one.
+				video.ready = true;
 				// Hold the steady-state cooldown only if the picture is somewhere the trim can
 				// actually work from. Giving up still seconds out has to be allowed to seek at
 				// once, not sit out six more.
@@ -257,10 +281,11 @@
 		}
 		// `dormant`, not `document.hidden`: a hidden window keeps the picture for IDLE_GRACE, so a
 		// mini-player round trip comes back with nothing to re-sync. Past that it stops, and
-		// unpausing from the mini player must not start a dormant window decoding again.
+		// unpausing from the mini player must not start a dormant window decoding again. `resting`
+		// is the same for the view being shut, from REST_GRACE on.
 		// `synced` is a plain let, so this effect does not re-run when it flips; `syncVideo` and
 		// the idle rule call `resumeVideo` themselves at those moments.
-		if (paused || dormant || !synced) el.pause();
+		if (paused || dormant || resting || !synced) el.pause();
 		else resumeVideo();
 	});
 
@@ -275,13 +300,16 @@
 		return () => document.removeEventListener('visibilitychange', onVisibility);
 	});
 
-	// Nobody watching and nothing moving: the window still decodes video unless we stop it, so
-	// eventually we do. Nothing here touches mpv, so the audio carries on either way.
+	// Nobody watching: the window still decodes video unless we stop it, so eventually we do.
+	// Nothing here touches mpv, so the audio carries on either way.
 	$effect(() => {
-		// `!playback.now` is the cold start: `paused` reads false until the backend's restore lands
-		// (player.svelte.ts), and waking on that would preroll a stream for a queue nobody has
-		// touched, which is the whole thing this rule exists to stop.
-		const idle = hidden || ((playback.paused || !playback.now) && !video.shown);
+		// Whether the music is moving does not come into it. The view is the only place the
+		// picture can be seen, so the view claiming the element is the only thing that wakes it:
+		// playing with the view shut used to wake it too, and decoded every music-video track of
+		// the session into the parking box, whether or not the view had ever been opened. This also
+		// covers the cold start, where `paused` reads false before the backend's restore lands
+		// (player.svelte.ts): the view is not mounted at all without `playback.now`.
+		const idle = hidden || !video.shown;
 		clearTimeout(idleTimer);
 		if (idle) {
 			// Not on the spot: see IDLE_GRACE.
@@ -295,12 +323,22 @@
 		}
 		// Inside the grace, so the picture never stopped and never lost step. That is the whole
 		// point of the grace: there is nothing to do.
-		if (!dormant) return;
-		// It sat out the grace and was released, so it has no stream at all and is seconds out by
-		// definition. Run the whole converge phase again rather than sitting out the cooldown and
-		// then trimming, and keep the picture still until it lands.
+		if (!dormant && !resting) return;
+		// It rested, or sat out the whole grace and was released, so it is seconds out by
+		// definition and, released, has no stream at all. Run the whole converge phase again
+		// rather than sitting out the cooldown and then trimming, and keep the picture still until
+		// it lands. From rest that is one seek on the stream it kept.
+		// `ready` goes with `synced`, which puts the artwork back up until the picture lands. It is
+		// cleared here rather than when the picture rests or is released: the view can stay open
+		// with the picture parked (the enlarged lyrics drop the artwork column), and clearing it
+		// there would bring the artwork wash back on its own a while later. Nothing puts the
+		// element back on screen from rest or dormancy without coming through here, and this runs
+		// in the same flush as whatever brought it back (the view's claim, or the window showing),
+		// before anything paints.
 		dormant = false;
+		resting = false;
 		synced = false;
+		video.ready = false;
 		syncSeeks = 0;
 		syncStart = 0;
 		lastSeek = 0;
@@ -308,6 +346,19 @@
 		// The picture restarts from inside resumeVideo, which is also where the "only if mpv is
 		// still going" check now lives.
 		syncVideo();
+	});
+
+	// The first stage of the rule above, for the view alone: see REST_GRACE. Its own effect so each
+	// timer only starts over on its own inputs: this one must not restart when the window hides, nor
+	// the release timer when this one fires. Nothing to do once dormant, which has already stopped
+	// the picture.
+	$effect(() => {
+		clearTimeout(restTimer);
+		if (video.shown || resting || dormant) return;
+		restTimer = setTimeout(() => {
+			resting = true;
+			el?.pause();
+		}, REST_GRACE);
 	});
 
 	// The element is built by hand, not by an {#if}, because it has to move between DOM parents and
@@ -356,7 +407,9 @@
 	$effect(() => {
 		if (!el) return;
 		// Hidden rather than unmounted when the view shows artwork instead: rebuilding it refetched
-		// from byte 0 and re-seeked, which is the black frame in #107.
+		// from byte 0 and re-seeked, which is the black frame in #107. That includes the converge
+		// phase (see `showVideo`), which loads and seeks here under the artwork just as it used to
+		// in the parking box: none of it needs the picture to be visible.
 		//
 		// No shadow, unlike the artwork: WebKitGTK re-blurs a resting box-shadow over the whole tile
 		// on every repaint, and a video repaints 24 times a second at this size. It dragged the whole
@@ -369,9 +422,10 @@
 
 <!-- Where the picture waits while nothing is showing it: in the document, so the spec's
      "removed from a Document" steps never pause it, but zero-sized and unpaintable.
-     This is one muted decode, and it runs only while the music is actually playing: paused with
-     the view shut, or hidden, it is released after IDLE_GRACE. Playing with the view shut still
-     costs it, and that is what buys a reopen with nothing to re-sync. -->
+     Nothing plays in here for long: once the view has let go of the picture it is paused after
+     REST_GRACE and released after IDLE_GRACE, whether or not the music is playing, and a track
+     that starts while it waits here is not loaded until the view comes back for it. The view
+     shows the artwork until the picture has caught up again. -->
 <div
 	bind:this={parking}
 	aria-hidden="true"

@@ -954,22 +954,22 @@ html.art-tint.dark {
 	contain-intrinsic-size: auto 13.5rem;
 }
 
-/* A track title too wide for the player scrolls itself instead of stopping at an ellipsis.
-   --marquee-dx is one text width plus the gap, measured in Marquee.svelte, which also sets the
-   duration to keep the speed constant. One direction, looping: the second copy lands where the
-   first started, so translating back to 0 is not a visible jump. */
+/* A track title too wide for the player scrolls past, now and then, instead of only ever
+   stopping at an ellipsis. --marquee-dx is one text width plus the gap, measured in
+   Marquee.svelte, which also sets the duration to keep the speed constant. One direction: the
+   second copy lands where the first started, so the end of the pass is not a visible jump. */
 @keyframes marquee {
 	to { transform: translateX(calc(var(--marquee-dx) * -1)); }
 }
-/* Three passes, not `infinite`: an overflowing title kept a transform animation running for the
-   whole session, so the compositor never reached an idle frame and every other repaint in the app
-   was re-incurred at refresh rate. Three passes is enough to read a long title; hovering still
-   holds it still, and `{#key text}` in Marquee.svelte restarts it on every track change. */
-.marquee { animation: marquee linear 3; }
-/* Hovering holds it still: the artist line's names are links, and hitting a moving target is not.
-   Triggered from the clipping box, not the scrolling track: the trailing copy is inert, so it is
-   not hit-testable and hovering it would never reach the track itself. */
-.marquee-box:hover .marquee { animation-play-state: paused; }
+/* One pass, and Marquee.svelte decides when: a couple of seconds after a new line appears (once
+   per line per session, never while the music is paused), and again when the pointer rests on it.
+   The element only exists for the pass, so when it ends nothing is left on a layer. Every frame
+   of a running transform animation composites the whole window, and the three passes this used
+   to run on every track change kept it at refresh rate for over a minute on a long title. No
+   will-change: the running animation already gives the track its own layer, and only for as long
+   as it runs. Holding it still (paused music, a pointer on a moving line) is the component's
+   inline animation-play-state, since only it knows which pass is which. */
+.marquee { animation: marquee linear; }
 
 /* A cover holds at zero until it decodes, so it fades onto its `bg-muted` box instead of
    snapping in (imgreveal.ts sets and clears the attribute). The element owns the transition, so

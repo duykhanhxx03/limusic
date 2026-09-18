@@ -18,7 +18,7 @@
 	import HomeLayoutDialog from '$lib/components/HomeLayoutDialog.svelte';
 	import TrackRowSkeleton from '$lib/components/TrackRowSkeleton.svelte';
 	import * as api from '$lib/api';
-	import type { BrowseItem, HomeChip, HomePage, HomeSection } from '$lib/api';
+	import type { Account, BrowseItem, HomeChip, HomePage, HomeSection } from '$lib/api';
 	import {
 		auth,
 		library,
@@ -106,7 +106,8 @@
 	// feed, so it survives the revalidating `home = fresh` that drops back to page one, and a revisit
 	// reads it from the cache instead of walking continuations again.
 	let forgotten = $state<HomeSection | null>(null);
-	let seeking = $state(false); // walking continuations to find it — the slot shows a skeleton
+	// Walking continuations for a shelf this feed has carried before — the slot shows a skeleton.
+	let seeking = $state(false);
 	const feed = $derived(home?.sections.filter((s) => !isForgotten(s)) ?? []);
 	/**
 	 * Which chip the *rendered* feed belongs to, as opposed to `selected`, which is the chip the
@@ -186,12 +187,65 @@
 		if (titles.length) noteHomeSections(titles);
 	});
 
+	// Whether each feed has carried Forgotten favourites, and how many walks in a row have since come
+	// back without it. YouTube builds the shelf for some accounts only, and a feed without it cost a
+	// walk of up to six pages on every launch, under a skeleton that held the slot for two or three
+	// seconds and then folded away. The two are kept apart because one miss means little for a feed
+	// that has had the shelf: YouTube reorders home between calls, so a walk can simply not reach it.
+	// Kept per channel, since that is what the feed is per. `last` is whose feed was recorded last,
+	// for a launch whose feed lands before the account has been read. localStorage, like `personal`:
+	// nothing outside this webview reads it.
+	const SIGHTINGS = 'limusic:forgotten-seen';
+	/** `at` is when the latest miss was recorded, or the sighting that cleared them. */
+	type Sighting = { seen?: boolean; misses?: number; at: number };
+	type Sightings = { last?: string; by: Record<string, Sighting> };
+	/** How long a feed searched without the shelf is taken at its word before the walk looks again,
+	 *  so an account YouTube starts giving the shelf to gets it back without scrolling for it. */
+	const RECHECK_MS = 24 * 60 * 60_000;
+	/** Whose feed this is: a channel, not the Google login, since each brand channel has its own. */
+	const owner = (a: Account) => (a.signedIn ? (a.channelId ?? a.handle ?? null) : 'guest');
+	/** A sign-in or out remounts this (the layout keys the page on the epoch); see `sighted`. */
+	const epoch = auth.epoch;
+
+	function sightings(): Sightings {
+		try {
+			const s = JSON.parse(localStorage.getItem(SIGHTINGS) ?? 'null');
+			if (s && typeof s.by === 'object' && s.by) return s;
+		} catch {
+			// Unreadable: forget it. The worst that costs is one walk without a skeleton.
+		}
+		return { by: {} };
+	}
+
+	/** Record that this feed carried the shelf, or that a whole walk came back without it. */
+	function sighted(has: boolean) {
+		// Not once the account has changed: this instance is on its way out, and what it found
+		// belongs to the feed of the account before.
+		if (epoch !== auth.epoch || !auth.account) return;
+		const who = owner(auth.account);
+		if (who == null) return;
+		const s = sightings();
+		const was = s.by[who];
+		// Every page that carries the shelf reports it again; only a change is worth a write.
+		if (has && was?.seen && !was.misses && s.last === who) return;
+		s.by[who] = has
+			? { seen: true, misses: 0, at: Date.now() }
+			: { seen: !!was?.seen, misses: (was?.misses ?? 0) + 1, at: Date.now() };
+		s.last = who;
+		try {
+			localStorage.setItem(SIGHTINGS, JSON.stringify(s));
+		} catch {
+			// Quota or a locked store: the next launch walks the feed again, as every launch once did.
+		}
+	}
+
 	/** Latch the shelf whenever a page turns out to carry it. Called after every `home` change. */
 	function noteForgotten() {
 		const found = home?.sections.find(isForgotten);
 		if (found) {
 			forgotten = found;
 			putCached(FORGOTTEN_KEY, found);
+			if (!selected) sighted(true); // home's own feed only: a mood feed's shelves are the chip's
 		}
 		return !!found;
 	}
@@ -222,14 +276,38 @@
 	 */
 	async function seekForgotten(params: string | null) {
 		if (params) return; // a mood feed is the chip's, and its shelves aren't home's
-		seeking = true;
+		const s = sightings();
+		const who = auth.account ? owner(auth.account) : s.last;
+		const last = who == null ? undefined : s.by[who];
+		const misses = last?.misses ?? 0;
+		// A feed recently walked without finding the shelf isn't walked for it again: it would only
+		// come back empty. Scrolling still finds the shelf wherever it turns up (`noteForgotten`).
+		// One miss is enough for a feed that has never had it, but a feed that has keeps its walk
+		// until a second miss in a row, since one walk can miss a shelf YouTube moved further down.
+		const lacks = !!last && misses >= (last.seen ? 2 : 1) && Date.now() - last.at < RECHECK_MS;
+		const want = () => !lacks && wantForgotten();
+		// The skeleton only for a feed that carried the shelf the last time it was looked for. Held
+		// open for one that never has, or that has just come back without it, it would likely stand
+		// over nothing and then collapse.
+		seeking = want() && !!last?.seen && !misses;
 		try {
+			let walked = 0;
 			for (let i = 0; i < 6; i++) {
 				if (moreError || loadingMore) return;
-				if (!wantForgotten() && !missingRanked()) return;
-				if (selected !== params || !home?.continuation) return;
+				if (!want() && !missingRanked()) return;
+				if (selected !== params) return;
+				if (!home?.continuation) break; // the end of the feed, so all of it has been looked at
+				const had = home.sections.length;
 				await loadMore(); // latches the forgotten shelf itself if the page carries it
+				// A page that added nothing (empty, unparsed, stale or failed) is no evidence about the
+				// rest of the feed, even though loadMore treats an empty one as the end of it.
+				if ((home?.sections.length ?? 0) <= had) return;
+				walked++;
 			}
+			// Six pages, or the whole feed, and no shelf: remember that, so the next launch can skip
+			// the walk. Not a feed of one page, which had nothing to walk and so costs nothing to
+			// look at again.
+			if (walked && want() && !moreError && selected === params) sighted(false);
 		} finally {
 			seeking = false;
 		}

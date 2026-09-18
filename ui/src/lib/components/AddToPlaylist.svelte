@@ -8,6 +8,7 @@
 		auth,
 		toast,
 		bumpLibraryTrackCount,
+		lastPlaylistAdd,
 		notePlaylistAdd,
 		noteSavedIn
 	} from '$lib/player.svelte';
@@ -64,6 +65,8 @@
 		const epoch = auth.epoch;
 		ui.addPending = true;
 		const added: typeof songs = [];
+		// The new row's setVideoId for each of `added`, index for index.
+		const rowIds: (string | undefined)[] = [];
 		const confirmed: typeof songs = [];
 		let failure: string | null = null;
 		try {
@@ -74,7 +77,11 @@
 			for (const song of songs) {
 				if (epoch !== auth.epoch) break;
 				try {
-					if (await api.addToPlaylist(pl.id, song.video_id)) added.push(song);
+					const res = await api.addToPlaylist(pl.id, song.video_id);
+					if (res.added) {
+						added.push(song);
+						rowIds.push(res.set_video_id);
+					}
 					confirmed.push(song);
 				} catch (e) {
 					failure = String(e);
@@ -93,6 +100,13 @@
 			if (added.length) {
 				bumpLibraryTrackCount(pl.id, added.length);
 				notePlaylistAdd(pl.id, added);
+				// `notePlaylistAdd` strips the setVideoId a song arrives with, which belongs to the
+				// list it came from. The ones YouTube just answered belong to this playlist, so they
+				// go back on: an open page of it can offer "Remove" on the new rows straight away.
+				lastPlaylistAdd.songs = lastPlaylistAdd.songs.map((s, i) => ({
+					...s,
+					set_video_id: rowIds[i]
+				}));
 			}
 			if (failure !== null) {
 				toast.error(t('selection.playlist_partial', {

@@ -12,15 +12,27 @@ import { playback, prefs } from './player.svelte';
 export const video = $state({
 	want: true,
 	/** Whether the player view is holding the element, i.e. someone can actually see the picture.
-	 *  VideoSurface releases the stream when nobody can and the music is not moving. */
+	 *  Only this wakes VideoSurface's picture: once it goes false the picture is paused shortly
+	 *  after and its stream released a minute later, whether or not the music is playing. See
+	 *  `showVideo` for what coming back to it looks like. */
 	shown: false,
+	/** Whether the picture has caught up with the music, i.e. is worth putting on screen. Owned by
+	 *  VideoSurface's sync: it goes false on a track change and whenever the picture wakes from
+	 *  resting or dormancy, and true once the converge phase lands. */
+	ready: false,
 	/** The loopback proxy URL for the current track, or null. Owned by VideoSurface's fetch. */
 	url: null as string | null
 });
 
 export const canVideo = () => prefs.musicVideos && !!playback.now?.isVideo;
 export const hasVideo = () => canVideo() && !!video.url;
-export const showVideo = () => hasVideo() && video.want;
+/** Whether the view shows the video rather than the artwork. `ready` is part of it because the
+ *  picture is only loaded while the view is open: a track that started with the view shut, or a
+ *  picture parked for longer than a short grace, has to converge after the view comes back, and
+ *  that takes a second or more on WebKitGTK. Showing it meanwhile was a black box, then the
+ *  video's opening frame, then the right one. The artwork stays up instead, with the converge
+ *  running invisibly behind it. */
+export const showVideo = () => hasVideo() && video.want && video.ready;
 
 // The live element and where it waits when nothing is showing it. Plain module lets: this is DOM
 // identity, nothing renders off it.

@@ -8,6 +8,7 @@
 	//
 	// While it runs the button is a *cancel*: that is what the square inside the ring means, and
 	// leaving no way to stop a fifty-track download is not an option.
+	import { untrack } from 'svelte';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import { Download04Icon, Tick02Icon } from '@hugeicons/core-free-icons';
 	import type { SongItem } from '$lib/api';
@@ -34,9 +35,13 @@
 	const ids = $derived(items.map((i) => i.video_id).filter(Boolean));
 
 	// Ask Rust which of these are already on disk. Runs when the list changes, which covers arriving
-	// on the page and a continuation page landing.
+	// on the page and a continuation page landing — and only then. `noteSaved` reads `dl.saved`, so
+	// tracked, this re-ran on every answer from anywhere in the app, its own included: each answer
+	// reassigned the set, which asked about the unsaved tracks again, for as long as the page was
+	// open.
 	$effect(() => {
-		if (ids.length) noteSaved(ids);
+		const list = ids;
+		if (list.length) untrack(() => noteSaved(list));
 	});
 
 	const savedCount = $derived(ids.filter((id) => dl.saved.has(id)).length);

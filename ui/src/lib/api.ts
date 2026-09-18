@@ -772,9 +772,20 @@ export const unblockArtist = (key: string) => invoke<BlockedArtist[]>('unblock_a
 /** Like, dislike, or clear the rating. YouTube's three states are mutually exclusive, so a dislike
  *  un-likes in the same call. */
 export const rate = (videoId: string, rating: Rating) => invoke<void>('rate', { videoId, rating });
-/** `false` = the playlist already had this track, so YouTube added nothing. */
+/** What an add did. `added: false` = the playlist already had this track, so YouTube added
+ *  nothing. `set_video_id` is the new row's handle for a later remove, when YouTube's answer
+ *  carried one; without it the page has to refetch the playlist to find the row. */
+export interface PlaylistAdd {
+	added: boolean;
+	set_video_id?: string;
+}
 export const addToPlaylist = (playlistId: string, videoId: string) =>
-	invoke<boolean>('add_to_playlist', { playlistId, videoId });
+	invoke<PlaylistAdd | boolean>('add_to_playlist', { playlistId, videoId }).then(
+		// A bare boolean is a backend built before the add answered with its row. The dev server
+		// hot-reloads this file into an app still running that binary, and read as an object a
+		// `true` would count every add as a duplicate.
+		(r): PlaylistAdd => (typeof r === 'boolean' ? { added: r } : r)
+	);
 export const removeFromPlaylist = (playlistId: string, videoId: string, setVideoId: string) =>
 	invoke<void>('remove_from_playlist', { playlistId, videoId, setVideoId });
 export const createPlaylist = (title: string) => invoke<string>('create_playlist', { title });

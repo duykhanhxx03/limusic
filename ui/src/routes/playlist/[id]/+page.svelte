@@ -393,6 +393,18 @@
 		sortOpen = true;
 	}
 
+	// Whether `rows` are `page` with more after it: the same rows in the same slots, and then some.
+	// Matched on set_video_id as well as the track, since that is the playlist's id for one row: a
+	// track removed and added back is a different row, even in the same place.
+	function continues(rows: SongItem[], page: SongItem[]): boolean {
+		return (
+			rows.length > page.length &&
+			page.every(
+				(t, i) => t.video_id === rows[i].video_id && t.set_video_id === rows[i].set_video_id
+			)
+		);
+	}
+
 	async function load(pid: string) {
 		// A sort YouTube keeps is read back off the response below; this store only holds the ones
 		// it cannot (see `rememberSort`), so an entry here means "ask for exactly this".
@@ -434,10 +446,33 @@
 			// Superseded by navigation, or by a sort picked off the cached rows while this was in
 			// the air — either way `fetchSorted` owns the page now, so drop this response.
 			if (pid !== id || sort !== askedSort || desc !== askedDesc) return;
-			pl = fresh;
+			// This is page 1 only. Put in place of the cached rows, it throws away every page
+			// scrolled in since, and scrolling, a filter or a sort then fetches them all again. So
+			// when page 1 is still exactly where those rows start, they stay, with the continuation
+			// that follows them, and only the header is taken fresh. A page 1 with no continuation
+			// is the whole playlist, so that one always replaces them.
+			//
+			// Page 1 only vouches for its own rows, though. An add or a remove further down (from
+			// the picker on another page, from this page, from another device) leaves it as it was,
+			// but not YouTube's "N songs • X hours" above it, so the header has to match too. An add
+			// or a remove made on this page leaves `pl.subtitle` at YouTube's old words (the count
+			// swap is the derived `subtitle`), so a list changed here is replaced as well.
+			const kept =
+				pl &&
+				fresh.continuation &&
+				fresh.subtitle === pl.subtitle &&
+				continues(pl.items, fresh.items)
+					? pl
+					: null;
+			pl = kept ? { ...fresh, items: kept.items, continuation: kept.continuation } : fresh;
 			if (!saved) sort = fresh.sortMenu?.selected ?? 'default';
-			bgImage = pickCover(fresh.items);
-			putCached(key, fresh);
+			// Kept rows keep the backdrop picked from them, rather than swapping it for another.
+			if (!kept) bgImage = pickCover(fresh.items);
+			// Kept rows are not written back. Every write restarts the entry's five minutes, so rows
+			// past page 1 stamped afresh on each revisit would never age out, and a change the checks
+			// above cannot see (a reorder down the list) would stay for as long as the visits kept
+			// coming. The entry already holds these rows; only its header is older.
+			if (!kept) putCached(key, pl);
 		} catch (e) {
 			if (pid !== id) return;
 			if (!hit) error = String(e);
@@ -462,14 +497,24 @@
 		if (lastPlaylistAdd.epoch === seenAddEpoch) return;
 		seenAddEpoch = lastPlaylistAdd.epoch;
 		if (!pl || lastPlaylistAdd.playlistId !== id) return;
-		pl = { ...pl, items: [...pl.items, ...lastPlaylistAdd.songs] };
+		// An add lands at the end of the playlist, and with pages still to come that end is not on
+		// screen yet. The last page brings the row in, in its place and with its set_video_id.
+		// Appended now, it would sit after the rows loaded so far, out of order, and then turn up a
+		// second time when that page arrives, as the same row: one Remove would take out both.
+		if (pl.continuation) return;
+		const songs = lastPlaylistAdd.songs;
+		pl = { ...pl, items: [...pl.items, ...songs] };
 		cacheCurrent();
-		fillSetVideoIds();
+		// The add answers with each new row's set_video_id, so the refetch below is only for a
+		// response that ever comes back without one.
+		if (songs.some((s) => !s.set_video_id)) fillSetVideoIds();
 	});
 
-	// Optimistic rows lack set_video_id, so "Remove from playlist" is hidden on them. Refetch and
-	// patch the real ids into place (merge, not replace — keeps loadMore pages and any row YouTube
-	// hasn't reflected yet). Retries because the add is eventually-consistent on YouTube's side.
+	// The fallback for an optimistic row that arrived without its set_video_id, which hides
+	// "Remove from playlist" on it. Refetch and patch the real ids into place (merge, not
+	// replace — keeps loadMore pages and any row YouTube hasn't reflected yet). Retries because the
+	// add is eventually-consistent on YouTube's side. Only page 1 is asked for, so a row that lands
+	// past the first 100 is never found here.
 	async function fillSetVideoIds() {
 		if (isLiked) return;
 		const pid = id;
@@ -575,11 +620,17 @@
 		const pid = id;
 		adding = song.video_id;
 		try {
-			const added = await api.addToPlaylist(pid, song.video_id);
+			const res = await api.addToPlaylist(pid, song.video_id);
 			noteSavedIn(pid, [song.video_id]);
-			if (added) {
+			if (res.added) {
 				bumpLibraryTrackCount(pid, 1);
 				notePlaylistAdd(pid, [song]); // lands at the end of the list above, like any add
+				// Stripped by `notePlaylistAdd` along with the suggestion's own; this one is the new
+				// row's, so it can be removed again without a refetch finding it first.
+				lastPlaylistAdd.songs = lastPlaylistAdd.songs.map((s) => ({
+					...s,
+					set_video_id: res.set_video_id
+				}));
 			}
 			if (pid !== id) return;
 			suggested = suggested.filter((t) => t.video_id !== song.video_id);

@@ -17,11 +17,11 @@
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import PlaylistMenu from './PlaylistMenu.svelte';
 	import * as api from '$lib/api';
-	import type { ArtistPage, BrowseItem } from '$lib/api';
+	import type { Account, ArtistPage, BrowseItem } from '$lib/api';
 	import { thumb } from '$lib/thumb';
 	import { getCached, putCached } from '$lib/pagecache';
 	import { topArtistIds } from '$lib/personal';
-	import { personal, toast } from '$lib/player.svelte';
+	import { auth, personal, toast } from '$lib/player.svelte';
 	import { t } from '$lib/i18n.svelte';
 
 	// ponytail: one browse call per artist, because the subscriber count and the subscribe state
@@ -29,26 +29,87 @@
 	// fired once per mount. Cut the count before reaching for a batch endpoint that doesn't exist.
 	const COUNT = 6; // one poster + five rows
 	const MIN = 3; // fewer familiar artists than this and the section isn't worth a slot
-	const SLACK = 2; // extra ids fetched, to backfill the ones whose page comes back unparseable
+	const SLACK = 2; // spare ids, fetched only for the ones whose page comes back unparseable
 
 	/**
+	 * What the section draws of an artist, and all that is remembered of one between launches.
+	 *
 	 * The play count is carried on the row rather than looked up from `personal` at render time,
-	 * because the two ids are not the same one: we browse by the id the play counter recorded, and
-	 * the page comes back carrying the *subscribe button's* channel (an artist's official channel,
-	 * which is often a different `UC…`). Keying the count off `channelId` therefore read 0 for
-	 * everyone except the artists whose page failed to parse and fell back to the browse id.
+	 * because the two ids are not the same one: we browse by the id the play counter recorded
+	 * (`id`), and the page comes back carrying the *subscribe button's* channel (an artist's
+	 * official channel, which is often a different `UC…`). Keying the count off `channelId`
+	 * therefore read 0 for everyone except the artists whose page failed to parse and fell back to
+	 * the browse id.
 	 */
-	type Familiar = ArtistPage & { plays: number };
+	type Card = Pick<ArtistPage, 'channelId' | 'name' | 'thumbnail' | 'subscribers' | 'subscribed'> & {
+		id: string;
+	};
+	/** A row on screen. `page` is missing while the row is still the one remembered from last time. */
+	type Familiar = Card & { plays: number; page?: ArtistPage };
 
-	let artists = $state<Familiar[]>([]);
-	let loading = $state(true);
-	/** Subscribe state per channel, optimistic — seeded from each artist page as it lands. */
-	let subs = $state<Record<string, boolean>>({});
-	let subBusy = $state<string | null>(null);
-	/** 0 = sized thumb, 1 = the original URL, 2 = give up and draw the icon. Same ladder as MediaCard. */
-	let attempt = $state<Record<string, number>>({});
+	// The rows as they were last drawn, so a launch paints the section at once instead of holding a
+	// skeleton for the half second or more the artist pages take. The fresh pages replace them when
+	// they land. Kept per channel because each row's subscribe state is; the rest is the same for
+	// everyone on this machine. `last` is whose rows were stored last: on a cold start this mounts
+	// before the account has been read, and that account is nearly always the one from last time.
+	// localStorage, like `personal`: nothing outside this webview reads it.
+	const STORE = 'limusic:familiar';
+	type Stored = { last?: string; by: Record<string, Card[]> };
+	/** Whose rows these are: a channel, not the Google login, since each brand channel subscribes
+	 *  on its own. */
+	const owner = (a: Account) => (a.signedIn ? (a.channelId ?? a.handle ?? null) : 'guest');
+	/** Only rows of the shape `remember` writes: localStorage is user-writable. */
+	const isCard = (r: Card | null): r is Card =>
+		typeof r?.id === 'string' &&
+		typeof r.channelId === 'string' &&
+		typeof r.name === 'string' &&
+		(r.thumbnail == null || typeof r.thumbnail === 'string');
 
 	const ids = topArtistIds(personal, COUNT + SLACK);
+	const playsOf = (id: string) => personal.artists[id]?.count ?? 0;
+	/** A sign-in or out remounts this (the layout keys the page on the epoch); see `remember`. */
+	const epoch = auth.epoch;
+
+	function readStore(): Stored {
+		try {
+			const s = JSON.parse(localStorage.getItem(STORE) ?? 'null');
+			if (s && typeof s.by === 'object' && s.by) return s;
+		} catch {
+			// Unreadable: start again. The pages are about to be fetched anyway.
+		}
+		return { by: {} };
+	}
+
+	/** The remembered rows for today's top ids, in today's order, with today's play counts. */
+	function recall(): Familiar[] {
+		const s = readStore();
+		const who = auth.account ? owner(auth.account) : s.last;
+		const rows = who != null && Array.isArray(s.by[who]) ? s.by[who].filter(isCard) : [];
+		const byId = new Map(rows.map((r) => [r.id, r]));
+		return ids
+			.flatMap((id) => {
+				const r = byId.get(id);
+				return r ? [{ ...r, subscribed: !!r.subscribed, plays: playsOf(id) }] : [];
+			})
+			.slice(0, COUNT);
+	}
+
+	const remembered = recall();
+	// Raw: the list is only ever replaced whole, and a fetched row carries its full artist page,
+	// which there is no reason to wrap in proxies.
+	let artists = $state.raw<Familiar[]>(remembered);
+	/** Nothing worth drawing yet. Remembered rows count, so a launch normally starts with this false. */
+	let loading = $state(remembered.length < MIN);
+	/** Subscribe state per channel, optimistic — seeded from the remembered rows, then the pages. */
+	let subs = $state<Record<string, boolean>>(
+		Object.fromEntries(remembered.map((r) => [r.channelId, r.subscribed]))
+	);
+	let subBusy = $state<string | null>(null);
+	/** Channels subscribed or unsubscribed since mount. A page fetched before the click carries the
+	 *  state from before it, so landing must not undo it. */
+	const toggled = new Set<string>();
+	/** 0 = sized thumb, 1 = the original URL, 2 = give up and draw the icon. Same ladder as MediaCard. */
+	let attempt = $state<Record<string, number>>({});
 
 	const top = $derived(artists[0]);
 	const rest = $derived(artists.slice(1));
@@ -62,9 +123,9 @@
 	const busiest = $derived(Math.max(1, top?.plays ?? 1));
 	const share = (a: Familiar) => Math.max(14, Math.round((a.plays / busiest) * 100));
 
-	const src = (a: ArtistPage) => ((attempt[a.channelId] ?? 0) === 0 ? thumb(a.thumbnail, 400) : a.thumbnail);
-	const hasArt = (a: ArtistPage) => !!a.thumbnail && (attempt[a.channelId] ?? 0) < 2;
-	const imgFailed = (a: ArtistPage) => {
+	const src = (a: Card) => ((attempt[a.channelId] ?? 0) === 0 ? thumb(a.thumbnail, 400) : a.thumbnail);
+	const hasArt = (a: Card) => !!a.thumbnail && (attempt[a.channelId] ?? 0) < 2;
+	const imgFailed = (a: Card) => {
 		const n = attempt[a.channelId] ?? 0;
 		attempt = { ...attempt, [a.channelId]: n === 0 && thumb(a.thumbnail, 400) !== a.thumbnail ? 1 : 2 };
 	};
@@ -82,32 +143,75 @@
 		}
 	}
 
+	/** One ranked artist as a row, or null when its page failed or never parsed. */
+	async function fetchFamiliar(id: string): Promise<Familiar | null> {
+		const page = await fetchArtist(id);
+		// A page with no name never parsed (no header, so no art and no subscriber count either); it
+		// would sit in the list as "Unknown Artist" over a placeholder icon. Drop it and let a spare
+		// id take the slot.
+		if (!page?.name) return null;
+		const { channelId, name, thumbnail, subscribers, subscribed } = page;
+		return { id, channelId, name, thumbnail, subscribers, subscribed, plays: playsOf(id), page };
+	}
+
+	/** Store the rows on show, with their subscribe state as it stands, for the next launch to paint. */
+	function remember() {
+		// Not once the account has changed: this instance is on its way out, and the account the
+		// rows would be filed under is not the one they were fetched for.
+		if (epoch !== auth.epoch || !auth.account) return;
+		const who = owner(auth.account);
+		if (who == null) return;
+		const s = readStore();
+		s.by[who] = artists.map(({ id, channelId, name, thumbnail, subscribers }) => ({
+			id,
+			channelId,
+			name,
+			thumbnail,
+			subscribers,
+			subscribed: !!subs[channelId]
+		}));
+		s.last = who;
+		try {
+			localStorage.setItem(STORE, JSON.stringify(s));
+		} catch {
+			// Quota or a locked store: the next launch shows the skeleton, as every launch once did.
+		}
+	}
+
 	onMount(async () => {
 		if (ids.length < MIN) {
 			loading = false;
 			return;
 		}
-		// A page with no name never parsed (no header, so no art and no subscriber count either); it
-		// would sit in the list as "Unknown Artist" over a placeholder icon. Drop it and let the
-		// slack ids take the slot.
-		const pages = (
-			await Promise.all(
-				ids.map(async (id) => {
-					const page = await fetchArtist(id);
-					return page?.name ? { ...page, plays: personal.artists[id]?.count ?? 0 } : null;
-				})
-			)
-		)
-			.filter((p): p is Familiar => !!p)
-			.slice(0, COUNT);
+		// The six on show first, all at once, and a spare only for each of those that comes back
+		// unusable. The spares used to go out with the rest: eight browses on every launch, for two
+		// pages that were almost never needed. Every spare ranks below all six, so appending the ones
+		// that land keeps the list in play-count order.
+		const pages: Familiar[] = [];
+		let next = 0;
+		while (pages.length < COUNT && next < ids.length) {
+			const batch = ids.slice(next, next + COUNT - pages.length);
+			next += batch.length;
+			for (const row of await Promise.all(batch.map(fetchFamiliar))) if (row) pages.push(row);
+		}
+		// Not one page came back, which is most likely no network. The remembered rows are still the
+		// best answer there is, so they stay on screen and in the store.
+		if (!pages.length) {
+			loading = false;
+			return;
+		}
 		// Set once, in play-count order: filling the list artist by artist would reflow the feed
-		// under the reader as each request lands.
+		// under the reader as each request lands. Usually these are the channels already on screen
+		// from last time, so the swap only refreshes them in place.
 		artists = pages;
-		subs = Object.fromEntries(pages.map((p) => [p.channelId, p.subscribed]));
+		subs = Object.fromEntries(
+			pages.map((p) => [p.channelId, toggled.has(p.channelId) ? subs[p.channelId] : p.subscribed])
+		);
 		loading = false;
+		remember();
 	});
 
-	const asItem = (a: ArtistPage): BrowseItem => ({
+	const asItem = (a: Card): BrowseItem => ({
 		kind: 'artist',
 		id: a.channelId,
 		title: a.name ?? t('common.artist_singular'),
@@ -115,17 +219,23 @@
 		thumbnail: a.thumbnail
 	});
 
-	const open = (a: ArtistPage) => goto(`/artist/${encodeURIComponent(a.channelId)}`);
+	const open = (a: Card) => goto(`/artist/${encodeURIComponent(a.channelId)}`);
 	const rank = (i: number) => String(i + 1).padStart(2, '0');
 
-	async function toggleSub(a: ArtistPage) {
+	async function toggleSub(a: Familiar) {
 		if (subBusy) return;
 		const next = !subs[a.channelId];
 		subBusy = a.channelId;
+		toggled.add(a.channelId);
 		subs = { ...subs, [a.channelId]: next };
 		try {
 			await api.subscribe(a.channelId, next);
-			putCached(`artist:${a.channelId}`, { ...a, subscribed: next }); // keep the cache truthful
+			// Keep the cache truthful. A remembered row has no page of its own to write, so it patches
+			// whatever page is already cached for the channel; with none cached, there is nothing stale.
+			const key = `artist:${a.channelId}`;
+			const page = a.page ?? getCached<ArtistPage>(key);
+			if (page) putCached(key, { ...page, subscribed: next });
+			remember();
 			toast.success(next ? t('artist.subscribed') : t('artist.subscribe'));
 		} catch (e) {
 			subs = { ...subs, [a.channelId]: !next };
@@ -136,7 +246,7 @@
 	}
 </script>
 
-{#snippet subButton(a: ArtistPage, onDark: boolean)}
+{#snippet subButton(a: Familiar, onDark: boolean)}
 	<button
 		class="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors {onDark
 			? 'bg-black/55 hover:bg-black/70'
@@ -158,7 +268,7 @@
 	</button>
 {/snippet}
 
-{#snippet avatar(a: ArtistPage, iconClass: string)}
+{#snippet avatar(a: Card, iconClass: string)}
 	{#if hasArt(a)}
 		<img
 			src={src(a)}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/svelte';
 	import { imgReveal } from '$lib/imgreveal';
 	import {
@@ -106,8 +107,12 @@
 	// Saved for offline. Local files are excluded: every row in the Local tab is on disk, so a
 	// marker there would be noise that means nothing.
 	// Every list asks about its own rows; the store batches the questions into one command.
+	// Untracked because `requestSaved` reads `dl.saved` to skip ids it already knows, and that read
+	// would otherwise re-run this effect in every row on screen whenever any download lands. The
+	// row's id is the only thing that should send a new question.
 	$effect(() => {
-		if (!api.isLocalId(song.video_id)) requestSaved(song.video_id);
+		const id = song.video_id;
+		if (!api.isLocalId(id)) untrack(() => requestSaved(id));
 	});
 	const saved = $derived(!api.isLocalId(song.video_id) && dl.saved.has(song.video_id));
 	const downloading = $derived(isDownloading(song.video_id));

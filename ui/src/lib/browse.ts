@@ -134,17 +134,46 @@ export async function enqueueItem(item: BrowseItem, next: boolean): Promise<void
 }
 
 /**
+ * What the page cache holds under `searchKey(q)`: the unfiltered results, plus the songs-filtered
+ * rows the search page's Songs shelf is drawn from. Both the typeahead and the search page write
+ * this key, so both write this one shape: a reader handed any other shape draws nothing (the search
+ * page would sit on its "search for…" prompt, the typeahead would come back empty). `songs` is
+ * empty when only the typeahead has searched, and the shelf then falls back to `res.songs`.
+ */
+export type CachedSearch = { res: SearchResults; songs: SongItem[] };
+
+export const searchKey = (q: string) => `search:${q}`;
+
+// `search_all` requests still out, by query. The typeahead fires once typing pauses and Enter
+// usually lands while that request is still in flight; sharing it means the search page waits on
+// the preview's answer instead of sending the same search a second time.
+const inFlight = new Map<string, Promise<SearchResults>>();
+
+/** `api.searchAll`, with one request shared by every caller asking for the same query at once. */
+export function sharedSearchAll(q: string): Promise<SearchResults> {
+	let p = inFlight.get(q);
+	if (!p) {
+		p = api.searchAll(q).finally(() => inFlight.delete(q));
+		inFlight.set(q, p);
+	}
+	return p;
+}
+
+/**
  * The handful of rows a typeahead shows for a query: one top hit, then a spread across the
- * categories rather than six songs. Cache-first, and it writes the same `search:<q>` key the search
- * page reads, so previewing a query and then running it doesn't search twice. Shared by the search
- * field (SearchSuggest) and the Ctrl+K palette, which is what keeps the two showing the same rows.
+ * categories rather than six songs. Cache-first, and it fills the same `searchKey(q)` entry the
+ * search page reads, so running a previewed query paints its results at once instead of a blank
+ * page. Shared by the search field (SearchSuggest) and the Ctrl+K palette, which is what keeps the
+ * two showing the same rows.
  */
 export async function searchPreview(q: string): Promise<BrowseItem[]> {
-	const key = `search:${q}`;
-	let res = getCached<SearchResults>(key);
+	const key = searchKey(q);
+	let res = getCached<CachedSearch>(key)?.res;
 	if (!res) {
-		res = await api.searchAll(q);
-		putCached(key, res);
+		res = await sharedSearchAll(q);
+		// Only into an empty slot: the search page may have stored the full entry while this was in
+		// flight, and replacing it would throw away the filtered songs it fetched.
+		if (!getCached(key)) putCached(key, { res, songs: [] } satisfies CachedSearch);
 	}
 	const out: BrowseItem[] = [];
 	const seen = new Set<string>();

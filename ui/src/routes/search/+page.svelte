@@ -36,11 +36,10 @@
 	import type { BrowseItem, SearchResults, SongItem } from '$lib/api';
 	import { getCached, putCached } from '$lib/pagecache';
 	import { auth, openAddToPlaylist, playSong, prefs } from '$lib/player.svelte';
-	import { asSong } from '$lib/browse';
+	import { asSong, searchKey, sharedSearchAll, type CachedSearch } from '$lib/browse';
 	import { chipClass } from '$lib/chip';
 	import { t } from '$lib/i18n.svelte';
 
-	type AllResult = { res: SearchResults; songs: SongItem[] };
 	/** One filter's page: a track list (songs, videos) or a card grid (everything else). */
 	type Filtered = { songs: SongItem[]; cards: BrowseItem[] };
 
@@ -69,8 +68,10 @@
 	const isList = (f: Filter) => f === 'songs' || f === 'videos';
 
 	async function loadAll(q: string) {
-		const key = `search:${q}`;
-		const hit = getCached<AllResult>(key);
+		const key = searchKey(q);
+		// Possibly the typeahead's entry, which has no filtered songs yet: the Songs shelf shows the
+		// unfiltered rows until the fresh ones below replace them.
+		const hit = getCached<CachedSearch>(key);
 		if (hit) {
 			res = hit.res;
 			songs = hit.songs;
@@ -81,16 +82,17 @@
 		}
 		try {
 			// In parallel, and the filtered one may fail on its own: the shelf falls back to the
-			// unfiltered rows rather than the whole search erroring out.
+			// unfiltered rows rather than the whole search erroring out. The unfiltered one joins
+			// the typeahead's request if Enter came while that was still out.
 			const [fresh, freshSongs] = await Promise.all([
-				api.searchAll(q),
+				sharedSearchAll(q),
 				api.search(q).catch(() => [] as SongItem[])
 			]);
 			if (latest !== `all:${q}`) return;
 			res = fresh;
 			songs = freshSongs;
 			searched = q;
-			putCached(key, { res: fresh, songs: freshSongs });
+			putCached(key, { res: fresh, songs: freshSongs } satisfies CachedSearch);
 		} catch (e) {
 			if (latest !== `all:${q}`) return;
 			if (!hit) error = String(e);

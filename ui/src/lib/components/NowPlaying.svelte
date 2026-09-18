@@ -22,7 +22,7 @@
 	import * as api from '$lib/api';
 	import { chooseNpTab, np, playback, ui } from '$lib/player.svelte';
 	import { durationSecs, lyricsFor, peekLyrics } from '$lib/prefetch.svelte';
-	import { canVideo, claimVideo, parkVideo, showVideo, video } from '$lib/video.svelte';
+	import { canVideo, claimVideo, hasVideo, parkVideo, showVideo, video } from '$lib/video.svelte';
 	import { appearance } from '$lib/theme.svelte';
 	import { t } from '$lib/i18n.svelte';
 	import { artworkLadder } from '$lib/thumb';
@@ -404,19 +404,22 @@
 					</button>
 					{#if canVideo()}
 						<!-- Both directions, or there is no way back to the video. On a plate, since it sits
-						     over whatever frame happens to be showing. -->
+						     over whatever frame happens to be showing. It shows the choice, not what is on
+						     screen yet: while a picture is still catching up to the music the artwork stays
+						     up, and reading `showVideo()` here offered "show video" then — a click on which
+						     turned the video off. -->
 						<button
 							type="button"
 							data-no-swipe
 							onclick={() => (video.want = !video.want)}
-							aria-label={showVideo() ? t('a11y.show_artwork') : t('a11y.show_video')}
+							aria-label={hasVideo() && video.want ? t('a11y.show_artwork') : t('a11y.show_video')}
 							class="absolute right-3 top-3 z-10 cursor-pointer rounded-md bg-black/40 p-1.5 text-white/70 transition-colors hover:text-white {chrome}"
 						>
 							<!-- icon swap via altIcon/showAlt: `icon` is frozen at mount -->
 							<HugeiconsIcon
 								icon={Video01Icon}
 								altIcon={VideoOffIcon}
-								showAlt={showVideo()}
+								showAlt={hasVideo() && video.want}
 								class="h-4 w-4"
 							/>
 						</button>

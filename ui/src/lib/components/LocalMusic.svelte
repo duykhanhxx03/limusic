@@ -22,6 +22,9 @@
 	import TrackRow from './TrackRow.svelte';
 	import * as api from '$lib/api';
 	import { indexCards, indexSongs, match } from '$lib/localsearch';
+	import { reveal } from '$lib/reveal.svelte';
+	import { rowWindow } from '$lib/rows';
+	import { rowScroller } from '$lib/rows.svelte';
 	import { t } from '$lib/i18n.svelte';
 	import {
 		addLocalFolder,
@@ -40,10 +43,6 @@
 	});
 
 	let view = $state('albums');
-	// A local collection can be thousands of files, and WebKitGTK does not enjoy thousands of rows.
-	// Render a page at a time — Play all and Shuffle still take every song in the list.
-	const PAGE = 100;
-	let shown = $state(PAGE);
 
 	// Filtering the collection. It is all in memory already, so this is a scan and not a request:
 	// no debounce, no loading state, the lists narrow as you type. The one cost worth dodging is
@@ -62,21 +61,32 @@
 	const albums = $derived(q ? match(ix.albums, q) : local.albums);
 	const artists = $derived(q ? match(ix.artists, q) : local.artists);
 
-	$effect(() => {
-		q; // a narrower list starts from the first page again
-		shown = PAGE;
+	// A local collection can be thousands of files, and WebKitGTK does not enjoy thousands of rows.
+	// The songs are windowed, the way LibrarySongs is: only the rows around the viewport exist, and
+	// the rest are two padded boxes (`rows.ts`). This used to grow a page of 100 rows per approach
+	// to the bottom and never shrink, so scrolling to the end of a big collection kept one live
+	// TrackRow per file until the tab closed. Play all and Shuffle still take every song in the list.
+	// `attachWithin` because the scrolling box is the Library route's <main>, not this component.
+	const sc = rowScroller();
+	const win = $derived(
+		rowWindow(sc.scrollTop - sc.offsetPx, sc.viewportPx, songs.length, sc.rowPx)
+	);
+
+	// The album and artist grids are revealed in chunks, as the Library's own grids are: a
+	// MediaCard carries a menu and deriveds of its own, and a collection with hundreds of albums
+	// otherwise builds every card in one pass on the tab click. One per view, so switching between
+	// them keeps each one's depth (the Library page's note on why one shared instance does not work).
+	const rvAlbums = reveal();
+	const rvArtists = reveal();
+	// A narrower list starts from the first chunk again. `.pre` so the reset lands before the grid
+	// renders the new list: a plain `$effect` runs after it, and would build the filtered grid
+	// against the old depth and then tear the excess back down.
+	$effect.pre(() => {
+		q;
+		rvAlbums.reset();
+		rvArtists.reset();
 	});
 
-	// Same shape as the playlist page and home: one page per approach to the bottom. Nothing is
-	// fetched here (the whole library is already in memory), so this only grows how much of it is
-	// rendered — no loading state, nothing that can fail.
-	function sentinel(node: HTMLElement) {
-		const io = new IntersectionObserver(([e]) => e.isIntersecting && (shown += PAGE), {
-			rootMargin: '600px 0px'
-		});
-		io.observe(node);
-		return () => io.disconnect();
-	}
 	const nowId = $derived(playback.now?.videoId);
 	// The song list as one queue — what the Play/Shuffle buttons above it do, and what the queue
 	// panel calls it. Not a `playFrom`: there's no page behind "the music on this disk", so it has
@@ -177,19 +187,22 @@
 			<Tabs.Content value="albums">
 				{#if view === 'albums'}
 					<div class="card-grid content-in">
-						{#each albums as album (album.id)}
+						{#each albums.slice(0, rvAlbums.count(albums.length)) as album (album.id)}
 							<MediaCard item={album} />
 						{/each}
 					</div>
+					<!-- Outside the grid, or it would be laid out as a cell. -->
+					{#if rvAlbums.more(albums.length)}<div {@attach rvAlbums.sentinel}></div>{/if}
 				{/if}
 			</Tabs.Content>
 			<Tabs.Content value="artists">
 				{#if view === 'artists'}
 					<div class="card-grid content-in">
-						{#each artists as artist (artist.id)}
+						{#each artists.slice(0, rvArtists.count(artists.length)) as artist (artist.id)}
 							<MediaCard item={artist} />
 						{/each}
 					</div>
+					{#if rvArtists.more(artists.length)}<div {@attach rvArtists.sentinel}></div>{/if}
 				{/if}
 			</Tabs.Content>
 			<Tabs.Content value="songs">
@@ -213,22 +226,28 @@
 							<HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" /> {t('common.shuffle')}
 						</Button>
 					</div>
-					<div class="content-in">
-						{#each songs.slice(0, shown) as song, i (song.video_id)}
-							<TrackRow
-								{song}
-								index={i}
-								active={song.video_id === nowId}
-								onplay={() => {
-									openPlayer();
-									api.playPlaylist(songs, i, undefined, SOURCE);
-								}}
-							/>
-						{/each}
+					<div class="content-in" {@attach sc.attachWithin}>
+						<!-- data-rows: where the scroller measures row 0 from, since the folders, the
+						     tabs and the buttons above scroll away with the list. data-row: where it
+						     measures a row's real height from. `n` is the row's place in the whole
+						     list, not in the slice, for its number and for where playback starts. -->
+						<div data-rows style="padding-top:{win.padTop}px;padding-bottom:{win.padBottom}px">
+							{#each songs.slice(win.start, win.end) as song, i (song.video_id)}
+								{@const n = win.start + i}
+								<div data-row>
+									<TrackRow
+										{song}
+										index={n}
+										active={song.video_id === nowId}
+										onplay={() => {
+											openPlayer();
+											api.playPlaylist(songs, n, undefined, SOURCE);
+										}}
+									/>
+								</div>
+							{/each}
+						</div>
 					</div>
-					{#if songs.length > shown}
-						<div {@attach sentinel}></div>
-					{/if}
 				{/if}
 			</Tabs.Content>
 		</Tabs.Root>

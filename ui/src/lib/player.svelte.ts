@@ -22,9 +22,31 @@ import { appearance } from './theme.svelte';
 import { t } from './i18n.svelte';
 import { durationSecs, warmNext } from './prefetch.svelte';
 
+/**
+ * The queue, held raw: replaced whole on every change, never written into. Playing a playlist
+ * queues all of it, so this can be five figures of rows, and a deep `$state` proxy makes anything
+ * that walks them (the queue panel's block split, an append) create a proxy, a map of sources and
+ * a source per property read for every row. Measured in node on 5,000 rows (2026-09-18),
+ * splitting and appending took ~50 ms and retained ~18 MB proxied, against ~5 ms and ~4 MB raw.
+ *
+ * It lives outside `playback` because `$state.raw` cannot be a property of a `$state` literal.
+ * `playback.queue` is an accessor onto it, and Svelte's proxy passes accessors straight through
+ * (no source of its own, and its set trap calls the setter), so every reader and writer of
+ * `playback.queue` keeps working unchanged.
+ *
+ * The rule that comes with it: never mutate `playback.queue` or its items in place, because
+ * nothing would see it. Build a new object and assign that (`onQueueIndex` does).
+ */
+let queueState = $state.raw<QueueState>({ items: [], currentIndex: 0 });
+
 export const playback = $state({
 	now: null as NowPlaying | null,
-	queue: { items: [], currentIndex: 0 } as QueueState,
+	get queue(): QueueState {
+		return queueState;
+	},
+	set queue(q: QueueState) {
+		queueState = q;
+	},
 	paused: false,
 	position: 0,
 	/** `performance.now()` when `position` last arrived. Ticks land at ~4 Hz, so `position` on its
@@ -1311,9 +1333,14 @@ export function initApp(mini = false): () => void {
 		// The items did not change, so keep the array we already hold and patch the rest. Splice
 		// the playing row back in: `start_current` backfills its duration and artists after the
 		// stream resolves, and that repair rides on this event rather than a whole new queue.
+		// Into a copy, since the queue is raw and a write into the held array would go unseen. It
+		// copies references only: well under a millisecond at five figures of rows.
 		api.onQueueIndex((q) => {
-			const items = playback.queue.items;
-			if (q.current && items[q.currentIndex]) items[q.currentIndex] = q.current;
+			let items = playback.queue.items;
+			if (q.current && items[q.currentIndex]) {
+				items = items.slice();
+				items[q.currentIndex] = q.current;
+			}
 			playback.queue = {
 				...playback.queue,
 				items,
@@ -1325,7 +1352,7 @@ export function initApp(mini = false): () => void {
 			};
 		}),
 		api.onQueueAppended((q) => {
-			const items = [...playback.queue.items, ...q.items];
+			const items = playback.queue.items.concat(q.items);
 			if (items.length !== q.len) {
 				// Missed an event. Cheaper to refetch once than to guess at what we are missing.
 				api.getQueue()

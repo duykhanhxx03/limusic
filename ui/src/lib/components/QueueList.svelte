@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
-	import { flip } from 'svelte/animate';
+	import { flip, type AnimationConfig, type FlipParams } from 'svelte/animate';
 	import { cubicOut } from 'svelte/easing';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import { HistoryIcon, InfinityIcon } from '@hugeicons/core-free-icons';
@@ -84,9 +84,14 @@
 	// rows the moment it opens, at roughly 165 KB of web-process memory each (`rows.ts`). Past a
 	// couple of hundred it renders only what is near the viewport.
 	//
-	// Below that it is exactly what it always was, flip animation included: windowing costs the
-	// reorder animation (flip measures against the viewport, so it would fight the scroll), and
-	// that is a bad trade for a queue you can see the end of.
+	// Windowed, the rows carry no `animate:` at all, not even a zero-length one. Flip measures
+	// against the viewport, so it would fight the scroll, and the directive is not free even at
+	// zero duration: Svelte measures every row before and after each update, and pins every row
+	// that leaves with `position: absolute` and a fresh layout read. The window drops rows off one
+	// end every time it steps, so dragging the scrollbar paid a forced layout per departing row.
+	//
+	// Below that the rows keep the reorder animation, a good trade for a queue you can see the end
+	// of, but only the rows on screen play it (`flipVisible`).
 	const WINDOW_ABOVE = 200;
 	const sc = rowScroller();
 	// One entry per block, in render order. A collapsed history is 0 rows but still charged a
@@ -99,11 +104,44 @@
 		...view.blocks.map((b) => b.rows.length)
 	]);
 	const windowed = $derived(counts.reduce((a, c) => a + c, 0) > WINDOW_ABOVE);
-	const wins = $derived(
-		windowed
+	// The previous windows whenever none of them moved. A window only steps when the scroll crosses
+	// a whole row, so most scroll events move nothing, and a fresh array on each one re-sliced every
+	// block and re-keyed its rows for no change at all.
+	let lastWins: RowWindow[] = [];
+	const wins = $derived.by(() => {
+		const next = windowed
 			? blockWindows(sc.scrollTop, sc.viewportPx, counts, sc.rowPx)
-			: counts.map(fullWindow)
-	);
+			: counts.map(fullWindow);
+		if (next.length !== lastWins.length || next.some((w, k) => !sameWindow(w, lastWins[k]))) {
+			lastWins = next;
+		}
+		return lastWins;
+	});
+
+	function sameWindow(a: RowWindow, b: RowWindow) {
+		return (
+			a.start === b.start &&
+			a.end === b.end &&
+			a.padTop === b.padTop &&
+			a.padBottom === b.padBottom
+		);
+	}
+
+	// `flip`, for the rows someone could see move. A track advance shifts every upcoming row up by
+	// one, and on each of them flip reads the computed style and starts a Web Animation, which
+	// leaves style dirty for the next row's measurement: up to two hundred forced recalculations
+	// per advance, nearly all for rows scrolled out of the panel. A row whose path never crosses
+	// the panel just lands where it is going.
+	function flipVisible(
+		node: Element,
+		move: { from: DOMRect; to: DOMRect },
+		params?: FlipParams
+	): AnimationConfig {
+		const box = el.getBoundingClientRect();
+		const top = Math.min(move.from.top, move.to.top);
+		const bottom = Math.max(move.from.bottom, move.to.bottom);
+		return top < box.bottom && bottom > box.top ? flip(node, move, params) : {};
+	}
 
 	async function togglePrev() {
 		const before = el.scrollHeight;
@@ -119,44 +157,64 @@
 	<!-- The padding stands in for the rows outside the window, so this block is exactly as tall as
 	     all of its rows and every heading below it stays where it was. -->
 	<div role="list" style="padding-top:{w.padTop}px;padding-bottom:{w.padBottom}px">
-		{#each list.slice(w.start, w.end) as { item, key, i } (key)}
-			<!-- data-row: what the scroller measures a row's real height from. -->
-			<div
-				data-row
-				role="listitem"
-				class="relative"
-				animate:flip={{ duration: windowed ? 0 : 200, easing: cubicOut }}
-				draggable={canDrag(i)}
-				ondragstart={(e) => onDragStart(e, i)}
-				ondragover={(e) => onDragOver(e, i)}
-				ondrop={onDrop}
-			>
-				<!-- Where the drop lands: a bar across the edge of the row it goes in front of. The
-				     last row also draws one below itself — nothing else can show a drop at the end. -->
-				{#if dropAt === i}
-					<div
-						class="pointer-events-none absolute inset-x-2 top-0 z-10 h-0.5 rounded-full bg-primary"
-					></div>
-				{:else if dropAt === i + 1 && i === lastIndex}
-					<div
-						class="pointer-events-none absolute inset-x-2 bottom-0 z-10 h-0.5 rounded-full bg-primary"
-					></div>
-				{/if}
-				<TrackRow
-					song={item}
-					index={i}
-					active={i === playback.queue.currentIndex}
-					hideRating
-					onplay={() => api.playIndex(i)}
-					onAdd={() => openAddToPlaylist(item)}
-					onRemove={i !== playback.queue.currentIndex
-						? () => api.removeFromQueue(i)
-						: undefined}
-					removeLabel={t('player.remove_from_queue')}
-				/>
-			</div>
-		{/each}
+		<!-- Two copies of the row wrapper because `animate:` has to sit on the each block's direct
+		     child and cannot be switched off from there (see WINDOW_ABOVE). data-row: what the
+		     scroller measures a row's real height from. -->
+		{#if windowed}
+			{#each list.slice(w.start, w.end) as r (r.key)}
+				<div
+					data-row
+					role="listitem"
+					class="relative"
+					draggable={canDrag(r.i)}
+					ondragstart={(e) => onDragStart(e, r.i)}
+					ondragover={(e) => onDragOver(e, r.i)}
+					ondrop={onDrop}
+				>
+					{@render row(r)}
+				</div>
+			{/each}
+		{:else}
+			{#each list as r (r.key)}
+				<div
+					data-row
+					role="listitem"
+					class="relative"
+					animate:flipVisible={{ duration: 200, easing: cubicOut }}
+					draggable={canDrag(r.i)}
+					ondragstart={(e) => onDragStart(e, r.i)}
+					ondragover={(e) => onDragOver(e, r.i)}
+					ondrop={onDrop}
+				>
+					{@render row(r)}
+				</div>
+			{/each}
+		{/if}
 	</div>
+{/snippet}
+
+{#snippet row({ item, i }: QueueRow)}
+	<!-- Where the drop lands: a bar across the edge of the row it goes in front of. The last row
+	     also draws one below itself — nothing else can show a drop at the end. -->
+	{#if dropAt === i}
+		<div
+			class="pointer-events-none absolute inset-x-2 top-0 z-10 h-0.5 rounded-full bg-primary"
+		></div>
+	{:else if dropAt === i + 1 && i === lastIndex}
+		<div
+			class="pointer-events-none absolute inset-x-2 bottom-0 z-10 h-0.5 rounded-full bg-primary"
+		></div>
+	{/if}
+	<TrackRow
+		song={item}
+		index={i}
+		active={i === playback.queue.currentIndex}
+		hideRating
+		onplay={() => api.playIndex(i)}
+		onAdd={() => openAddToPlaylist(item)}
+		onRemove={i !== playback.queue.currentIndex ? () => api.removeFromQueue(i) : undefined}
+		removeLabel={t('player.remove_from_queue')}
+	/>
 {/snippet}
 
 <!-- A drag cancelled with Esc, or dropped outside the list, never reaches `drop` — without this the

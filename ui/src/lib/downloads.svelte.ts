@@ -12,7 +12,12 @@ export const dl = $state({
 	 *  back with a Content-Range, and a caller has to be able to tell "0 of unknown" from "0%". */
 	progress: {} as Record<string, { received: number; total: number }>,
 	/** Bytes on disk, for the settings row. */
-	bytes: 0
+	bytes: 0,
+	/** Bumped when a download finishes or is removed, and at no other time. It is what the
+	 *  Downloads tab reloads on. `saved` would be the wrong signal: it also changes whenever any list
+	 *  in the app finds out that some of its rows were already on disk, and the tab's own rows do
+	 *  exactly that the first time it opens. */
+	version: 0
 });
 
 export const isSaved = (videoId: string) => dl.saved.has(videoId);
@@ -27,17 +32,30 @@ export function trackFraction(videoId: string): number {
 	return Math.min(1, p.received / p.total);
 }
 
+/** Already asked about, so a row that is genuinely not downloaded does not re-ask on every
+ *  re-render. An id leaves it when its download finishes or is removed, the only two ways its
+ *  answer can change. Shared by the per-row batch and the whole-list `noteSaved` calls, so a page
+ *  whose Download button has just asked about every track does not have its rows ask again. */
+let asked = new Set<string>();
+
 /** Ask Rust which of these are saved and fold the answer in. Cheap enough to call per page. */
 export async function noteSaved(videoIds: string[]) {
-	const unknown = videoIds.filter((id) => id && !dl.saved.has(id));
+	const unknown = videoIds.filter((id) => id && !dl.saved.has(id) && !asked.has(id));
 	if (!unknown.length) return;
+	// Marked before the answer, not after: rows that mount while it is in flight would otherwise
+	// send the same question again.
+	for (const id of unknown) asked.add(id);
 	try {
 		const have = await api.downloadedIds(unknown);
 		// Reassigned rather than mutated: a `Set` is not deeply reactive, so `add` alone would not
-		// re-render the buttons that read it.
-		dl.saved = new Set([...dl.saved, ...have]);
+		// re-render the buttons that read it. Only when something was found, though. Every row in
+		// the app reads `dl.saved`, so a reassignment re-runs all of them, and most answers are
+		// "none of these", which changes nothing.
+		if (have.length) dl.saved = new Set([...dl.saved, ...have]);
 	} catch {
-		// Offline or mid-restart: the buttons just show "not saved", which is recoverable.
+		// Offline or mid-restart: the buttons just show "not saved", which is recoverable. Not
+		// remembered as asked, so the next time these ids come up they are asked about again.
+		for (const id of unknown) asked.delete(id);
 	}
 }
 
@@ -55,14 +73,10 @@ export function requestSaved(videoId: string) {
 	batch = setTimeout(() => {
 		const ids = [...wanted];
 		wanted = new Set();
-		for (const id of ids) asked.add(id);
+		// `noteSaved` marks them as asked before it awaits anything, so nothing can slip in twice.
 		noteSaved(ids);
 	}, 50);
 }
-
-/** Already asked about, so a row that is genuinely not downloaded does not re-ask on every
- *  re-render. Cleared whenever the set of downloads changes. */
-let asked = new Set<string>();
 
 export function download(items: api.SongItem[]) {
 	const pending = items.filter((i) => !dl.saved.has(i.video_id));
@@ -93,9 +107,12 @@ export function cancel() {
 
 export async function remove(videoId: string) {
 	await api.removeDownload(videoId);
-	dl.saved = new Set([...dl.saved].filter((id) => id !== videoId));
+	// Only when it was known to be saved: Settings' Remove all comes through here once per
+	// download, and a copy of the set per call re-runs every row in the app each time.
+	if (dl.saved.has(videoId)) dl.saved = new Set([...dl.saved].filter((id) => id !== videoId));
 	// So a row re-asks and loses its marker rather than keeping a stale yes.
 	asked.delete(videoId);
+	dl.version++;
 	refreshSize();
 }
 
@@ -114,6 +131,7 @@ export function initDownloads(): Promise<() => void> {
 				delete dl.progress[p.videoId];
 				dl.saved = new Set([...dl.saved, p.videoId]);
 				asked.delete(p.videoId);
+				dl.version++;
 				refreshSize();
 				return;
 			}
