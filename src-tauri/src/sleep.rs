@@ -152,6 +152,8 @@ fn arm(state: &Arc<AppState>, deadline: Option<i64>, end_of_track: bool) -> u64 
     }
     state.sleep_timer.end_of_track.store(end_of_track, Ordering::SeqCst);
     state.sleep_timer.fading.store(false, Ordering::SeqCst);
+    // An end-of-track timer and a crossfade can't both have the end of the track.
+    crate::crossfade::sync(state);
     let gen = state.sleep_timer.generation.fetch_add(1, Ordering::SeqCst) + 1;
     // A fade in progress sees the new generation and puts the volume back itself; doing it here
     // too covers the step it may be sleeping through.
@@ -212,6 +214,7 @@ fn fire(state: &Arc<AppState>) {
     }
     state.sleep_timer.end_of_track.store(false, Ordering::SeqCst);
     state.sleep_timer.fading.store(false, Ordering::SeqCst);
+    crate::crossfade::sync(state);
     // Back to full level once the pause has landed, so pressing play in the morning isn't silent.
     // After a beat: audio already handed to the output device would otherwise play at full volume.
     let player_state = state.clone();

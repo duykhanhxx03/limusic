@@ -6,6 +6,7 @@ mod blocked;
 mod browser;
 mod cipher;
 mod commands;
+mod crossfade;
 mod db;
 mod diagnostics;
 mod downloads;
@@ -396,6 +397,10 @@ pub fn run() {
             // Before anything can play: the first track of a restored queue has to come out at the
             // level the user left, not at 100.
             let _ = player.set_volume(state::saved_volume(&db));
+            // No sleep timer survives a restart, so the setting applies as stored.
+            if let Err(e) = player.set_crossfade(crossfade::from_settings(&db)) {
+                tracing::warn!(error = %e, "crossfade: could not restore");
+            }
             // Same reason: a restored queue's first track must come out equalized the way the user
             // left it, not flat for the length of one song. A corrupt or missing row means off.
             if let Some(raw) = db.get_setting("equalizer") {

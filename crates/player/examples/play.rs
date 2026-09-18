@@ -17,7 +17,7 @@ async fn main() {
     let mut events = p.take_events().unwrap();
 
     p.load(&a, &HashMap::new(), None).expect("load A");
-    p.enqueue(&b).expect("enqueue B");
+    p.enqueue(&b, None, false).expect("enqueue B");
     p.play().expect("play");
 
     let mut ended = 0;

@@ -386,6 +386,25 @@
 		}
 	}
 
+	const crossfadeOn = $derived(settings.crossfade === 'true');
+	/** The length while the slider is being dragged; stored (and applied) when the drag ends. */
+	let crossfadeDraft = $state<number | null>(null);
+	const crossfadeSecs = $derived.by(() => {
+		if (crossfadeDraft !== null) return crossfadeDraft;
+		const v = Number(settings.crossfade_secs);
+		return Number.isFinite(v) && v >= 1 ? Math.min(v, 12) : 6;
+	});
+	const crossfadeFiltersOn = $derived(settings.crossfade_filters !== 'false');
+	const albumGaplessOn = $derived(settings.crossfade_album_gapless !== 'false');
+	async function setCrossfadeSetting(key: string, value: string) {
+		settings[key] = value;
+		await api.setSetting(key, value);
+	}
+	async function commitCrossfadeSecs(v: number) {
+		await setCrossfadeSetting('crossfade_secs', String(v));
+		crossfadeDraft = null;
+	}
+
 	const sponsorOn = $derived(settings.sponsorblock !== 'false');
 	async function setSponsor(on: boolean) {
 		settings.sponsorblock = on ? 'true' : 'false';
@@ -758,6 +777,35 @@
 							</div>
 						</section>
 						<section class={GROUP}>
+							<h3 class={LABEL}>{t('settings.sections.crossfade')}</h3>
+							<div class={CARD}>
+								{@render row({
+									title: t('settings.playback.crossfade'),
+									desc: t('settings.playback.crossfade_hint'),
+									control: crossfadeSwitch,
+									tall: true
+								})}
+								{#if crossfadeOn}
+									{@render row({
+										title: t('settings.playback.crossfade_length'),
+										control: crossfadeSlider
+									})}
+									{@render row({
+										title: t('settings.playback.crossfade_filters'),
+										desc: t('settings.playback.crossfade_filters_hint'),
+										control: crossfadeFiltersSwitch,
+										tall: true
+									})}
+									{@render row({
+										title: t('settings.playback.crossfade_album'),
+										desc: t('settings.playback.crossfade_album_hint'),
+										control: albumGaplessSwitch,
+										tall: true
+									})}
+								{/if}
+							</div>
+						</section>
+						<section class={GROUP}>
 							<h3 class={LABEL}>{t('settings.sections.video')}</h3>
 							<div class={CARD}>
 								{@render row({
@@ -973,6 +1021,35 @@
 {#snippet musicVideoSwitch()}<Switch checked={musicVideosOn} onCheckedChange={setMusicVideos} />{/snippet}
 {#snippet hideVideoSwitch()}<Switch checked={hideVideosOn} onCheckedChange={setHideVideos} />{/snippet}
 {#snippet sponsorSwitch()}<Switch checked={sponsorOn} onCheckedChange={setSponsor} />{/snippet}
+{#snippet crossfadeSwitch()}<Switch
+		checked={crossfadeOn}
+		onCheckedChange={(on) => setCrossfadeSetting('crossfade', on ? 'true' : 'false')}
+	/>{/snippet}
+{#snippet crossfadeFiltersSwitch()}<Switch
+		checked={crossfadeFiltersOn}
+		onCheckedChange={(on) => setCrossfadeSetting('crossfade_filters', on ? 'true' : 'false')}
+	/>{/snippet}
+{#snippet albumGaplessSwitch()}<Switch
+		checked={albumGaplessOn}
+		onCheckedChange={(on) => setCrossfadeSetting('crossfade_album_gapless', on ? 'true' : 'false')}
+	/>{/snippet}
+{#snippet crossfadeSlider()}
+	<div class="flex w-52 shrink-0 items-center gap-3">
+		<Slider
+			type="single"
+			aria-label={t('settings.playback.crossfade_length')}
+			min={1}
+			max={12}
+			step={1}
+			value={crossfadeSecs}
+			onValueChange={(v) => (crossfadeDraft = v)}
+			onValueCommit={commitCrossfadeSecs}
+		/>
+		<span class="w-14 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+			{t('settings.playback.crossfade_secs', { n: crossfadeSecs })}
+		</span>
+	</div>
+{/snippet}
 {#snippet boiduSwitch()}<Switch checked={boiduOn} onCheckedChange={setBoidu} />{/snippet}
 {#snippet simpMusicSwitch()}<Switch checked={simpMusicOn} onCheckedChange={setSimpMusic} />{/snippet}
 {#snippet lyricsOffset()}<LyricsOffset />{/snippet}

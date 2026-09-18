@@ -1910,14 +1910,20 @@ impl AppState {
             return;
         }
         // Headers are global in mpv; the direct-URL clients need none beyond UA, which the
-        // current track already set. Just append the URL.
-        if let Err(e) = self.player.enqueue(&data.stream_url) {
+        // current track already set. Just hand over the URL, with the gain a crossfade starts it at
+        // and whether this pair may overlap at all.
+        let blend = match (q.items.get(q.current), q.items.get(next_idx)) {
+            (Some(cur), Some(next)) => crate::crossfade::blends(&self.db, cur, next),
+            _ => true,
+        };
+        let gain = loudness_gain(data.loudness_db);
+        if let Err(e) = self.player.enqueue(&data.stream_url, gain, blend) {
             tracing::warn!(error = %e, "enqueue lookahead failed");
             return;
         }
         q.lookahead_loaded = Some(next_idx);
         q.lookahead_client = Some(data.stream_client.clone());
-        q.lookahead_gain = Some(loudness_gain(data.loudness_db));
+        q.lookahead_gain = Some(gain);
         q.lookahead_playback_ping = data.playback_ping.clone();
         // Same backfill as start_current: a gapless advance emits this item straight from the
         // queue, so the repair has to land before it becomes the current track.

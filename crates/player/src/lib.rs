@@ -1,12 +1,13 @@
 //! libmpv wrapper. context/14. YouTube-agnostic: takes a fully-resolved URL + headers, never
-//! a videoId. Gapless via mpv's internal playlist (1-track lookahead fed by the orchestrator).
+//! a videoId. Gapless via mpv's internal playlist (1-track lookahead fed by the orchestrator), or a
+//! crossfade across two mpv instances when one is set ([`Crossfade`]).
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use libmpv2::events::{Event, EventContext, PropertyData};
 use libmpv2::{Format, Mpv};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -61,19 +62,184 @@ fn friendly_error(e: &libmpv2::Error) -> String {
     }
 }
 
-/// The player. Wraps `Arc<Mpv>` (Send+Sync); the event loop runs on a dedicated OS thread and
-/// pumps [`PlayerEvent`]s into a channel taken once via [`Player::take_events`].
+/// How two tracks meet. `secs` 0 is off: the next track follows gaplessly through mpv's own
+/// playlist, exactly as before crossfading existed.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Crossfade {
+    /// How long the outgoing and incoming tracks overlap.
+    pub secs: f64,
+    /// DJ-style: the outgoing track closes down through a low-pass while the incoming one opens up
+    /// through a high-pass, so for most of the overlap the two sit at different ends of the
+    /// spectrum instead of two basslines and two vocals on top of each other.
+    pub filters: bool,
+}
+
+impl Crossfade {
+    fn on(&self) -> bool {
+        self.secs > 0.0
+    }
+
+    fn sweeps(&self) -> bool {
+        self.on() && self.filters
+    }
+}
+
+/// With less than this left of the outgoing track, an overlap isn't worth starting: the next track
+/// goes to mpv's playlist and follows gaplessly instead. Happens when its stream resolved late.
+const MIN_OVERLAP_SECS: f64 = 0.5;
+
+/// How long before its overlap the next track is loaded on the other deck, paused and silent.
+/// Opening a stream takes up to a second or so; loaded ahead, the track comes in on the beat of the
+/// ramp instead of partway up it.
+const CUE_AHEAD_SECS: f64 = 5.0;
+
+/// Where the sweeps start and end. The low-pass closes down to the bassline; the high-pass opens
+/// from hi-hats and voice down to below anything audible. Both move exponentially: pitch is heard
+/// on a log scale, and a linear sweep would spend most of the overlap in the top octave.
+const LOW_FROM_HZ: f64 = 20_000.0;
+const LOW_TO_HZ: f64 = 200.0;
+const HIGH_FROM_HZ: f64 = 1_000.0;
+const HIGH_TO_HZ: f64 = 20.0;
+/// The low-pass corner while it is switched out (`mix` 0), where it makes no difference to the
+/// sound. Chosen to be valid at any sample rate a music file has: a biquad asked for a corner above
+/// the Nyquist frequency is rejected, and retuning one that was rejected crashes libavfilter
+/// (reproduced with an 8 kHz file). For the same reason every retune stays below
+/// `NYQUIST_MARGIN` of the deck's own sample rate.
+const LOW_REST_HZ: f64 = 3_000.0;
+const NYQUIST_MARGIN: f64 = 0.45;
+
+/// One deck's two sweep filters. `mix` 0 passes the input through untouched (ffmpeg's biquads
+/// output `filtered·mix + input·(1−mix)`), which is how both sit in the chain outside an overlap:
+/// always there, so that starting one only retunes them with `af-command`. Adding them to the
+/// chain of a track that is playing would rebuild the chain mid-stream, which can click.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Sweep {
+    low_hz: f64,
+    low_mix: f64,
+    high_hz: f64,
+    high_mix: f64,
+}
+
+impl Sweep {
+    const FLAT: Sweep =
+        Sweep { low_hz: LOW_REST_HZ, low_mix: 0.0, high_hz: HIGH_TO_HZ, high_mix: 0.0 };
+
+    /// The outgoing track's, `p` (0–1) of the way through the overlap.
+    fn closing(p: f64) -> Sweep {
+        Sweep { low_hz: glide(LOW_FROM_HZ, LOW_TO_HZ, p), low_mix: 1.0, ..Self::FLAT }
+    }
+
+    /// The incoming track's.
+    fn opening(p: f64) -> Sweep {
+        Sweep { high_hz: glide(HIGH_FROM_HZ, HIGH_TO_HZ, p), high_mix: 1.0, ..Self::FLAT }
+    }
+
+    fn filters(&self) -> [String; 2] {
+        [
+            format!("@{LOW_LABEL}:lavfi=[lowpass=f={:.0}:m={}]", self.low_hz, self.low_mix),
+            format!("@{HIGH_LABEL}:lavfi=[highpass=f={:.0}:m={}]", self.high_hz, self.high_mix),
+        ]
+    }
+}
+
+const LOW_LABEL: &str = "xflow";
+const HIGH_LABEL: &str = "xfhigh";
+
+/// `from` to `to` exponentially, `p` of the way.
+fn glide(from: f64, to: f64, p: f64) -> f64 {
+    from * (to / from).powf(p.clamp(0.0, 1.0))
+}
+
+/// Equal-power levels `(outgoing, incoming)` at `p` of the way through an overlap: a quarter
+/// cosine and a quarter sine, whose squares sum to one. A linear crossfade dips by 3 dB in the
+/// middle, which two unrelated tracks make audible.
+fn overlap_levels(p: f64) -> (f64, f64) {
+    let a = p.clamp(0.0, 1.0) * std::f64::consts::FRAC_PI_2;
+    (a.cos(), a.sin())
+}
+
+/// The player. Two mpv instances ("decks") behind one face: the app sees one position, one
+/// duration and one stream of [`PlayerEvent`]s, always the active deck's. The second deck only
+/// plays during a crossfade: the next track is cued on it, paused, shortly before the current one
+/// nears its end, then starts while the current one fades out; after that the decks have swapped
+/// roles. With crossfading off it never loads anything.
+///
+/// Each deck's event loop runs on its own OS thread and feeds [`Mix::on_event`], which decides
+/// what reaches the channel taken once via [`Player::take_events`].
 pub struct Player {
-    mpv: Arc<Mpv>,
+    mix: Arc<Mix>,
     events: Option<UnboundedReceiver<PlayerEvent>>,
-    /// `(loudness gain dB, pitch semitones)`. mpv's `af` is one global chain, so the two things
-    /// that write to it have to be re-applied together: a bare `set_property("af", ...)` from
-    /// either one would drop the other's filter.
-    af: std::sync::Mutex<AfState>,
+}
+
+struct Mix {
+    decks: [Arc<Mpv>; 2],
+    state: std::sync::Mutex<MixState>,
+    tx: UnboundedSender<PlayerEvent>,
+}
+
+/// The next track, held back from mpv's playlist so it can start early on the other deck.
+struct Next {
+    url: String,
+    gain_db: Option<f64>,
+}
+
+/// An overlap in progress. It is driven by the outgoing deck's own clock, so it pauses with the
+/// music, follows the playback speed, and ends exactly as that track does.
+struct Overlap {
+    /// The outgoing deck.
+    from: usize,
+    /// Its position when the overlap began, and how long the overlap runs.
+    start: f64,
+    len: f64,
+}
+
+struct MixState {
+    /// The deck the app is talking to: its position, its duration, its track.
+    active: usize,
+    /// `(loudness gain dB per deck, pitch semitones, equalizer)`. mpv's `af` is one global chain
+    /// per deck, so everything that writes to it has to be re-applied together: a bare
+    /// `set_property("af", ...)` from any one of them would drop the others' filters.
+    gain: [Option<f64>; 2],
+    semitones: i32,
+    eq: Option<Equalizer>,
+    sweep: [Sweep; 2],
+    /// What each deck's chain was last built from, sweeps aside (those are retuned in place). A
+    /// retune that changes nothing is skipped: re-setting `af` rebuilds the chain mid-stream.
+    chain_key: [String; 2],
     /// The user's volume (0–100, perceptual) and a fade factor on top of it (0.0–1.0, amplitude).
-    /// Kept apart so a fade (the sleep timer's) never becomes the user's level: the slider and
-    /// the saved volume only ever see the first, and ending a fade puts the second back to 1.
-    volume: std::sync::Mutex<(i64, f64)>,
+    /// Kept apart so a fade (the sleep timer's) never becomes the user's level: the slider and the
+    /// saved volume only ever see the first, and ending a fade puts the second back to 1.
+    volume: i64,
+    fade: f64,
+    /// Each deck's level in an overlap (1 outside one).
+    level: [f64; 2],
+    loop_file: bool,
+    crossfade: Crossfade,
+    next: Option<Next>,
+    /// The deck holding the next track, loaded and paused, waiting for its overlap.
+    cued: Option<usize>,
+    overlap: Option<Overlap>,
+    /// A deck the mix itself started a track on, until that track starts. mpv is briefly idle in
+    /// between, and the app asking [`Player::is_idle`] right then must not read it as a stall.
+    handoff: Option<usize>,
+    duration: [f64; 2],
+    /// Each deck's sample rate (0 until known), which bounds the sweeps' corners.
+    rate: [f64; 2],
+    paused: [bool; 2],
+    idle: [bool; 2],
+    playing: bool,
+}
+
+/// What a deck's event loop reports to the mix.
+enum DeckEvent {
+    Position(f64),
+    Duration(f64),
+    Rate(i64),
+    Paused(bool),
+    Idle(bool),
+    Started,
+    Ended,
+    Failed(String),
 }
 
 impl Player {
@@ -87,57 +253,51 @@ impl Player {
             libc::setlocale(libc::LC_NUMERIC, c"C".as_ptr());
         }
 
-        // Mirror the Phase-0 spike: create, then set_property (setting some options during the
-        // pre-init phase returns PROPERTY_NOT_FOUND on this mpv build).
-        let mpv = Mpv::new()?;
-        mpv.set_property("vid", "no")?; // audio only
-        mpv.set_property("gapless-audio", "yes")?;
-        // If no audio device can be opened, play into nothing rather than failing the file.
-        // Default is `no`, which turns "the device went away" — unplugging headphones, a Bluetooth
-        // set dropping, a USB DAC pulled — into a failed track: the queue treats it as a dead URL
-        // and moves on, so you come back to find it has walked through the rest of the album in
-        // silence. With this, playback continues and plugging back in picks it up.
-        mpv.set_property("audio-fallback-to-null", "yes")?;
-        mpv.set_property("cache", "yes")?;
-        mpv.set_property("cache-on-disk", "yes")?;
-        mpv.set_property("demuxer-cache-dir", cache_dir)?;
-        // The demuxer runs at mpv's browser-sized defaults otherwise: 150 MiB forward and 50 MiB
-        // back, per open file, and the gapless lookahead keeps two open across every transition.
-        // This is audio only (`vid=no` above), so a whole 5-minute Opus track is about 4 MB and
-        // those ceilings only ever reserve headroom nothing uses. 32 MiB forward is several tracks
-        // of read-ahead; 8 MiB back is minutes of backward-seek without a refetch.
-        mpv.set_property("demuxer-max-bytes", 32 * 1024 * 1024_i64)?;
-        mpv.set_property("demuxer-max-back-bytes", 8 * 1024 * 1024_i64)?;
-        // Reconnect a stream that drops mid-track instead of ending it. Without these, ffmpeg's
-        // http reader treats a reset connection as end of file: the track stops where the network
-        // blinked and the queue moves on as if it had finished. `reconnect_streamed` covers
-        // googlevideo's responses, which ffmpeg considers non-seekable streams; the delay cap keeps
-        // a real outage from retrying forever before the failure is reported.
-        mpv.set_property(
-            "stream-lavf-o",
-            "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=30",
-        )?;
-        let mpv = Arc::new(mpv);
-
+        let decks = [Arc::new(new_deck(cache_dir)?), Arc::new(new_deck(cache_dir)?)];
         let (tx, rx) = unbounded_channel();
-        let ev = EventContext::new(mpv.ctx);
-        ev.disable_deprecated_events().ok();
-        ev.observe_property("time-pos", Format::Double, 0)?;
-        ev.observe_property("duration", Format::Double, 1)?;
-        ev.observe_property("pause", Format::Flag, 2)?;
-        ev.observe_property("idle-active", Format::Flag, 3)?;
-
-        std::thread::Builder::new()
-            .name("mpv-events".into())
-            .spawn(move || event_loop(ev, tx))
-            .expect("spawn mpv event thread");
-
-        Ok(Player {
-            mpv,
-            events: Some(rx),
-            af: std::sync::Mutex::new(AfState::default()),
-            volume: std::sync::Mutex::new((100, 1.0)),
-        })
+        let mix = Arc::new(Mix {
+            decks,
+            state: std::sync::Mutex::new(MixState {
+                active: 0,
+                gain: [None; 2],
+                semitones: 0,
+                eq: None,
+                sweep: [Sweep::FLAT; 2],
+                chain_key: Default::default(),
+                volume: 100,
+                fade: 1.0,
+                level: [1.0; 2],
+                loop_file: false,
+                crossfade: Crossfade::default(),
+                next: None,
+                cued: None,
+                overlap: None,
+                handoff: None,
+                duration: [0.0; 2],
+                rate: [0.0; 2],
+                // mpv reports the initial value of an observed property immediately; these are
+                // what it will say before anything is loaded: `pause: false`, `idle-active: true`.
+                paused: [false; 2],
+                idle: [true; 2],
+                playing: false,
+            }),
+            tx,
+        });
+        for deck in 0..2 {
+            let ev = EventContext::new(mix.decks[deck].ctx);
+            ev.disable_deprecated_events().ok();
+            ev.observe_property("time-pos", Format::Double, 0)?;
+            ev.observe_property("duration", Format::Double, 1)?;
+            ev.observe_property("pause", Format::Flag, 2)?;
+            ev.observe_property("idle-active", Format::Flag, 3)?;
+            ev.observe_property("audio-params/samplerate", Format::Int64, 4)?;
+            let mix = mix.clone();
+            std::thread::Builder::new()
+                .name(format!("mpv-events-{deck}"))
+                .spawn(move || event_loop(ev, deck, mix))
+                .expect("spawn mpv event thread");
+        }
+        Ok(Player { mix, events: Some(rx) })
     }
 
     /// Take the event receiver (once).
@@ -145,67 +305,103 @@ impl Player {
         self.events.take()
     }
 
-    /// Load and play a fresh URL, replacing the playlist. context/14.
+    fn lock(&self) -> std::sync::MutexGuard<'_, MixState> {
+        self.mix.state.lock().unwrap()
+    }
+
+    /// Load and play a fresh URL, replacing the playlist. context/14. Cuts an overlap short: the
+    /// user picked something, and the outgoing track has no business carrying on under it.
     pub fn load(
         &self,
         url: &str,
         headers: &HashMap<String, String>,
         gain_db: Option<f64>,
     ) -> Result<(), Error> {
-        self.apply_headers(headers)?;
-        self.set_gain(gain_db)?;
-        self.mpv.command("loadfile", &[&quoted(url), "replace"])?;
+        let mut s = self.lock();
+        self.mix.end_overlap(&mut s);
+        self.mix.uncue(&mut s);
+        s.next = None;
+        s.handoff = None;
+        let d = s.active;
+        self.mix.apply_headers(headers)?;
+        s.gain[d] = gain_db;
+        s.sweep[d] = Sweep::FLAT;
+        s.level[d] = 1.0;
+        self.mix.apply_af(&mut s, d, true)?;
+        self.mix.apply_volume(&s, d)?;
+        self.mix.decks[d].command("loadfile", &[&quoted(url), "replace"])?;
         Ok(())
     }
 
-    /// Append the next track for a gapless transition (the 1-track lookahead). context/14.
+    /// Hand over the next track (the 1-track lookahead). context/14. With a crossfade set and
+    /// `blend` true, it is held here and started on the other deck as the current track nears its
+    /// end, at its own loudness `gain_db`. Otherwise it joins mpv's playlist for a gapless
+    /// transition, and the orchestrator applies the gain when the track ends, as before.
     ///
     /// Note: mpv's `http-header-fields`/`user-agent` are global properties, so appended tracks
     /// inherit the currently-set headers. Phase 1 direct-URL clients need no per-track cookies,
     /// so this is fine; per-track header divergence is a Phase 2+ concern (WEB_REMIX `&pot=`).
-    pub fn enqueue(&self, url: &str) -> Result<(), Error> {
-        self.mpv.command("loadfile", &[&quoted(url), "append"])?;
+    pub fn enqueue(&self, url: &str, gain_db: Option<f64>, blend: bool) -> Result<(), Error> {
+        let mut s = self.lock();
+        if blend && s.crossfade.on() {
+            s.next = Some(Next { url: url.to_owned(), gain_db });
+            return Ok(());
+        }
+        s.next = None;
+        self.mix.decks[s.active].command("loadfile", &[&quoted(url), "append"])?;
         Ok(())
     }
 
-    /// Clear the mpv playlist (e.g. when the user jumps to a new track).
+    /// Drop the next track (e.g. when the user jumps to a new track or the queue changes).
     pub fn clear_playlist(&self) -> Result<(), Error> {
-        self.mpv.command("playlist-clear", &[])?;
+        let mut s = self.lock();
+        s.next = None;
+        self.mix.uncue(&mut s);
+        self.mix.decks[s.active].command("playlist-clear", &[])?;
         Ok(())
     }
 
-    /// True when mpv has nothing loaded (playlist exhausted or the last load failed). The
-    /// orchestrator uses this after a track ends/fails to tell "gaplessly advanced into the
-    /// lookahead" apart from "stalled — load the next track explicitly".
+    /// True when nothing is loaded (playlist exhausted or the last load failed). The orchestrator
+    /// uses this after a track ends/fails to tell "advanced into the lookahead" apart from
+    /// "stalled — load the next track explicitly". An overlap is an advance: the incoming track
+    /// is starting, and the outgoing one is still playing.
     pub fn is_idle(&self) -> bool {
-        self.mpv.get_property::<bool>("idle-active").unwrap_or(true)
+        let s = self.lock();
+        if s.overlap.is_some() || s.handoff.is_some() {
+            return false;
+        }
+        self.mix.decks[s.active].get_property::<bool>("idle-active").unwrap_or(true)
     }
 
     pub fn play(&self) -> Result<(), Error> {
-        self.mpv.set_property("pause", false)?;
-        Ok(())
+        self.mix.set_paused(&self.lock(), false)
     }
 
     pub fn pause(&self) -> Result<(), Error> {
-        self.mpv.set_property("pause", true)?;
-        Ok(())
+        self.mix.set_paused(&self.lock(), true)
     }
 
     pub fn toggle(&self) -> Result<(), Error> {
-        self.mpv.command("cycle", &["pause"])?;
-        Ok(())
+        let s = self.lock();
+        let paused = self.mix.decks[s.active].get_property::<bool>("pause")?;
+        self.mix.set_paused(&s, !paused)
     }
 
     /// Loop the current file seamlessly (repeat-one). mpv restarts the file at EOF *without*
     /// emitting end-file, so the queue logic upstream never advances while this is on — by design.
+    /// Only the active deck loops: an outgoing track that looped would never finish fading out.
     pub fn set_loop_file(&self, on: bool) -> Result<(), Error> {
-        self.mpv.set_property("loop-file", if on { "inf" } else { "no" })?;
+        let mut s = self.lock();
+        s.loop_file = on;
+        self.mix.decks[s.active].set_property("loop-file", if on { "inf" } else { "no" })?;
         Ok(())
     }
 
-    /// Absolute seek in seconds.
+    /// Absolute seek in seconds, in the active track. An overlap carries on: its clock is the
+    /// outgoing track's, which a seek in the new one doesn't touch.
     pub fn seek(&self, position_secs: f64) -> Result<(), Error> {
-        self.mpv.command("seek", &[&position_secs.to_string(), "absolute"])?;
+        let s = self.lock();
+        self.mix.decks[s.active].command("seek", &[&position_secs.to_string(), "absolute"])?;
         Ok(())
     }
 
@@ -215,68 +411,49 @@ impl Player {
     /// onto a 60 dB loudness range instead (see [`perceptual_to_mpv`]), so steps stay roughly
     /// the same size and the bottom of the slider is actually quiet rather than just near-floor.
     pub fn set_volume(&self, volume: i64) -> Result<(), Error> {
-        let fade = {
-            let mut v = self.volume.lock().unwrap();
-            v.0 = volume;
-            v.1
-        };
-        self.mpv.set_property("volume", faded_volume(volume, fade))?;
-        Ok(())
+        let mut s = self.lock();
+        s.volume = volume;
+        self.mix.apply_volumes(&s)
     }
 
     /// Scale the output by `amplitude` (0.0–1.0) without touching the user's volume. 1.0 ends a
     /// fade. Nothing observes mpv's `volume`, so the UI's slider stays where the user left it.
     pub fn set_fade(&self, amplitude: f64) -> Result<(), Error> {
-        let volume = {
-            let mut v = self.volume.lock().unwrap();
-            v.1 = amplitude.clamp(0.0, 1.0);
-            v
-        };
-        self.mpv.set_property("volume", faded_volume(volume.0, volume.1))?;
-        Ok(())
-    }
-
-    fn apply_headers(&self, headers: &HashMap<String, String>) -> Result<(), Error> {
-        // User-Agent has its own mpv property; everything else joins http-header-fields.
-        if let Some(ua) = headers.get("User-Agent").or_else(|| headers.get("user-agent")) {
-            self.mpv.set_property("user-agent", ua.as_str())?;
-        }
-        let fields: String = headers
-            .iter()
-            .filter(|(k, _)| !k.eq_ignore_ascii_case("user-agent"))
-            .map(|(k, v)| format!("{k}: {v}"))
-            .collect::<Vec<_>>()
-            .join(",");
-        self.mpv.set_property("http-header-fields", fields.as_str())?;
-        Ok(())
+        let mut s = self.lock();
+        s.fade = amplitude.clamp(0.0, 1.0);
+        self.mix.apply_volumes(&s)
     }
 
     /// Apply a per-track loudness gain (dB) as an mpv `volume` audio filter. context/14. Kept
     /// YouTube-agnostic: the caller computes the gain from `loudnessDb` (see `state::loudness_gain`);
-    /// this just applies whatever dB it's handed.
+    /// this just applies whatever dB it's handed, to the active deck.
     ///
     /// `af` is a **global** mpv property, not a per-playlist-entry one, so a gaplessly-advanced
     /// track keeps whatever the last [`Self::load`] set. The orchestrator has to call this itself
-    /// on a gapless advance or every track after the first plays at the first track's gain.
+    /// on a gapless advance or every track after the first plays at the first track's gain. (A
+    /// track that came in through a crossfade already has its own; the same value again is a no-op.)
     // ponytail: set on advance, so the head of a gapless track carries the old gain for the event
     // round-trip (a few ms) and the filter chain reinits mid-stream. If that ever clicks audibly,
     // keep one labelled filter (`af=@gain:lavfi=[volume=0dB]`) and retune it with `af-command`.
     pub fn set_gain(&self, gain_db: Option<f64>) -> Result<(), Error> {
-        self.af.lock().unwrap().gain_db = gain_db;
-        self.apply_af()
+        let mut s = self.lock();
+        let d = s.active;
+        s.gain[d] = gain_db;
+        self.mix.apply_af(&mut s, d, false)
     }
 
     /// The graphic equalizer. `gains` is one value in dB per band of [`EQ_BANDS`], `preamp` is an
     /// overall trim. `None` turns it off entirely, which is not the same as all-zero gains: zeros
     /// still build ten biquads that the audio has to pass through for no effect.
     pub fn set_equalizer(&self, eq: Option<Equalizer>) -> Result<(), Error> {
-        let previous = std::mem::replace(&mut self.af.lock().unwrap().eq, eq);
-        if let Err(e) = self.apply_af() {
+        let mut s = self.lock();
+        let previous = std::mem::replace(&mut s.eq, eq);
+        if let Err(e) = self.mix.apply_af_all(&mut s) {
             // Same rollback as `set_pitch`: mpv rejects the whole chain on a bad filter, loudness
             // gain and pitch included, so put back what was working rather than leave the track
             // playing dry.
-            self.af.lock().unwrap().eq = previous;
-            let _ = self.apply_af();
+            s.eq = previous;
+            let _ = self.mix.apply_af_all(&mut s);
             return Err(e);
         }
         Ok(())
@@ -285,8 +462,7 @@ impl Player {
     /// Tempo, 0.25–2.0. Pitch is unaffected: `audio-pitch-correction` (mpv's default) time-stretches
     /// rather than resamples, so this is Metrolist's `PlaybackParameters.speed` exactly.
     pub fn set_speed(&self, speed: f64) -> Result<(), Error> {
-        self.mpv.set_property("speed", speed.clamp(0.25, 2.0))?;
-        Ok(())
+        self.mix.set_all("speed", speed.clamp(0.25, 2.0))
     }
 
     /// Pitch shift in semitones, −12..=12 (one octave either way), via the rubberband filter.
@@ -297,22 +473,365 @@ impl Player {
     // Windows/macOS build ever turns up without it.
     pub fn set_pitch(&self, semitones: i32) -> Result<(), Error> {
         let wanted = semitones.clamp(-12, 12);
-        let previous = std::mem::replace(&mut self.af.lock().unwrap().semitones, wanted);
-        if let Err(e) = self.apply_af() {
+        let mut s = self.lock();
+        let previous = std::mem::replace(&mut s.semitones, wanted);
+        if let Err(e) = self.mix.apply_af_all(&mut s) {
             // No librubberband in this build: mpv rejects the *whole* chain, loudness gain
             // included, so put the old value back rather than leave every later set_gain failing.
             // (mpv never applied the bad chain, so this restores what is already playing.)
-            self.af.lock().unwrap().semitones = previous;
-            let _ = self.apply_af();
+            s.semitones = previous;
+            let _ = self.mix.apply_af_all(&mut s);
             return Err(if wanted == 0 { e } else { Error::NoPitchFilter });
         }
         Ok(())
     }
 
-    fn apply_af(&self) -> Result<(), Error> {
-        let state = self.af.lock().unwrap().clone();
-        self.mpv.set_property("af", af_chain(&state).as_str())?;
+    /// How tracks meet from here on. Turning it off hands a held next track to mpv's playlist, so
+    /// it still follows gaplessly; an overlap already running finishes, and a track already cued
+    /// starts when the current one ends.
+    pub fn set_crossfade(&self, crossfade: Crossfade) -> Result<(), Error> {
+        let mut s = self.lock();
+        s.crossfade = Crossfade { secs: crossfade.secs.max(0.0), ..crossfade };
+        if !s.crossfade.on() {
+            if let Some(next) = s.next.take() {
+                self.mix.decks[s.active].command("loadfile", &[&quoted(&next.url), "append"])?;
+            }
+        }
+        // The sweep filters join or leave both chains.
+        self.mix.apply_af_all(&mut s)
+    }
+}
+
+/// One mpv instance, configured for audio.
+fn new_deck(cache_dir: &str) -> Result<Mpv, Error> {
+    // Mirror the Phase-0 spike: create, then set_property (setting some options during the
+    // pre-init phase returns PROPERTY_NOT_FOUND on this mpv build).
+    let mpv = Mpv::new()?;
+    mpv.set_property("vid", "no")?; // audio only
+    mpv.set_property("gapless-audio", "yes")?;
+    // If no audio device can be opened, play into nothing rather than failing the file.
+    // Default is `no`, which turns "the device went away" — unplugging headphones, a Bluetooth
+    // set dropping, a USB DAC pulled — into a failed track: the queue treats it as a dead URL
+    // and moves on, so you come back to find it has walked through the rest of the album in
+    // silence. With this, playback continues and plugging back in picks it up.
+    mpv.set_property("audio-fallback-to-null", "yes")?;
+    // Tests play real audio through the mix, and must not do it out of the speakers.
+    #[cfg(test)]
+    mpv.set_property("ao", "null")?;
+    mpv.set_property("cache", "yes")?;
+    mpv.set_property("cache-on-disk", "yes")?;
+    mpv.set_property("demuxer-cache-dir", cache_dir)?;
+    // The demuxer runs at mpv's browser-sized defaults otherwise: 150 MiB forward and 50 MiB
+    // back, per open file, and the gapless lookahead keeps two open across every transition.
+    // This is audio only (`vid=no` above), so a whole 5-minute Opus track is about 4 MB and
+    // those ceilings only ever reserve headroom nothing uses. 32 MiB forward is several tracks
+    // of read-ahead; 8 MiB back is minutes of backward-seek without a refetch.
+    mpv.set_property("demuxer-max-bytes", 32 * 1024 * 1024_i64)?;
+    mpv.set_property("demuxer-max-back-bytes", 8 * 1024 * 1024_i64)?;
+    // Reconnect a stream that drops mid-track instead of ending it. Without these, ffmpeg's
+    // http reader treats a reset connection as end of file: the track stops where the network
+    // blinked and the queue moves on as if it had finished. `reconnect_streamed` covers
+    // googlevideo's responses, which ffmpeg considers non-seekable streams; the delay cap keeps
+    // a real outage from retrying forever before the failure is reported.
+    mpv.set_property(
+        "stream-lavf-o",
+        "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=30",
+    )?;
+    Ok(mpv)
+}
+
+impl Mix {
+    fn set_all<T: libmpv2::SetData + Copy>(&self, name: &str, value: T) -> Result<(), Error> {
+        for deck in &self.decks {
+            deck.set_property(name, value)?;
+        }
         Ok(())
+    }
+
+    /// Pause or resume the music: every deck but a cued one, which waits for its overlap.
+    fn set_paused(&self, s: &MixState, paused: bool) -> Result<(), Error> {
+        for (d, deck) in self.decks.iter().enumerate() {
+            if s.cued != Some(d) {
+                deck.set_property("pause", paused)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_headers(&self, headers: &HashMap<String, String>) -> Result<(), Error> {
+        // User-Agent has its own mpv property; everything else joins http-header-fields.
+        let fields: String = headers
+            .iter()
+            .filter(|(k, _)| !k.eq_ignore_ascii_case("user-agent"))
+            .map(|(k, v)| format!("{k}: {v}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        for deck in &self.decks {
+            if let Some(ua) = headers.get("User-Agent").or_else(|| headers.get("user-agent")) {
+                deck.set_property("user-agent", ua.as_str())?;
+            }
+            deck.set_property("http-header-fields", fields.as_str())?;
+        }
+        Ok(())
+    }
+
+    fn apply_volume(&self, s: &MixState, d: usize) -> Result<(), Error> {
+        self.decks[d].set_property("volume", faded_volume(s.volume, s.fade * s.level[d]))?;
+        Ok(())
+    }
+
+    fn apply_volumes(&self, s: &MixState) -> Result<(), Error> {
+        (0..2).try_for_each(|d| self.apply_volume(s, d))
+    }
+
+    /// Build deck `d`'s chain from the state and hand it to mpv, unless it would be the chain the
+    /// deck already has (`force` hands it over regardless, for a deck about to load a track).
+    fn apply_af(&self, s: &mut MixState, d: usize, force: bool) -> Result<(), Error> {
+        let base =
+            af_chain(&AfState { gain_db: s.gain[d], semitones: s.semitones, eq: s.eq.clone() });
+        let key = format!("{base}|{}", s.crossfade.sweeps());
+        if !force && s.chain_key[d] == key {
+            return Ok(());
+        }
+        let mut chain: Vec<String> = Vec::new();
+        if !base.is_empty() {
+            chain.push(base);
+        }
+        if s.crossfade.sweeps() {
+            chain.extend(s.sweep[d].filters());
+        }
+        self.decks[d].set_property("af", chain.join(",").as_str())?;
+        s.chain_key[d] = key;
+        Ok(())
+    }
+
+    fn apply_af_all(&self, s: &mut MixState) -> Result<(), Error> {
+        (0..2).try_for_each(|d| self.apply_af(s, d, false))
+    }
+
+    /// Retune deck `d`'s sweep filters in place. Corners stay below the deck's Nyquist frequency
+    /// (see `LOW_REST_HZ`), and with its sample rate not known yet nothing is sent at all.
+    fn retune(&self, s: &mut MixState, d: usize, sweep: Sweep) {
+        s.sweep[d] = sweep;
+        let limit = s.rate[d] * NYQUIST_MARGIN;
+        if !s.crossfade.sweeps() || limit < HIGH_FROM_HZ {
+            return;
+        }
+        let deck = &self.decks[d];
+        let hz = |f: f64| format!("{:.0}", f.min(limit));
+        // Corner before mix, so a filter being switched in is already where it should be. Errors
+        // are ignored: a deck between tracks has no chain to talk to, and the next chain it builds
+        // starts from `s.sweep`.
+        let _ = deck.command("af-command", &[LOW_LABEL, "f", &hz(sweep.low_hz)]);
+        let _ = deck.command("af-command", &[LOW_LABEL, "m", &sweep.low_mix.to_string()]);
+        let _ = deck.command("af-command", &[HIGH_LABEL, "f", &hz(sweep.high_hz)]);
+        let _ = deck.command("af-command", &[HIGH_LABEL, "m", &sweep.high_mix.to_string()]);
+    }
+
+    /// One event from `deck`, turned into what the app hears. Returns false once nobody listens.
+    fn on_event(&self, deck: usize, ev: DeckEvent) -> bool {
+        let mut s = self.state.lock().unwrap();
+        let mut out = Vec::new();
+        let outgoing = s.overlap.as_ref().is_some_and(|o| o.from == deck);
+        match ev {
+            DeckEvent::Position(p) if outgoing => self.step_overlap(&mut s, p),
+            DeckEvent::Position(p) if deck == s.active => {
+                out.push(PlayerEvent::Position(p));
+                self.maybe_overlap(&mut s, deck, p, &mut out);
+            }
+            DeckEvent::Duration(d) => {
+                s.duration[deck] = d;
+                if deck == s.active {
+                    out.push(PlayerEvent::Duration(d));
+                }
+            }
+            DeckEvent::Rate(r) => s.rate[deck] = r as f64,
+            DeckEvent::Paused(p) => s.paused[deck] = p,
+            DeckEvent::Idle(i) => s.idle[deck] = i,
+            DeckEvent::Started if s.handoff == Some(deck) => s.handoff = None,
+            DeckEvent::Ended if outgoing => self.end_overlap(&mut s),
+            DeckEvent::Ended if deck == s.active => {
+                // The track ended before its overlap could start (its length was off, or the next
+                // one resolved in the last moments): the next track starts now, at full level.
+                if s.cued.is_some() {
+                    self.start_cued(&mut s, deck, None, &mut out);
+                } else {
+                    if let Some(next) = s.next.take() {
+                        self.cut_to(&mut s, deck, next);
+                    }
+                    out.push(PlayerEvent::TrackEnded);
+                }
+            }
+            DeckEvent::Failed(msg) => {
+                if s.handoff == Some(deck) {
+                    s.handoff = None;
+                }
+                if outgoing {
+                    self.end_overlap(&mut s);
+                } else if s.cued == Some(deck) {
+                    // The next track's stream is dead. Nothing is cued any more, so when the
+                    // current track ends the app finds the player idle and loads the next one
+                    // itself, which re-resolves it.
+                    s.cued = None;
+                    tracing::warn!(error = %msg, "crossfade: the cued track failed to load");
+                } else if deck == s.active {
+                    out.push(PlayerEvent::TrackFailed(msg));
+                }
+            }
+            // The other deck, between tracks, or a start nobody is waiting on.
+            _ => {}
+        }
+        // Playing is either deck playing: through an overlap both are, and the handoff between
+        // them must not read as a stop and a start. A cued deck is paused, so it doesn't count.
+        let now = (0..2).any(|d| !s.paused[d] && !s.idle[d]);
+        if now != s.playing {
+            s.playing = now;
+            out.push(PlayerEvent::Playing(now));
+        }
+        // Sent under the lock, so events from the two decks reach the app in the order the mix
+        // decided on them: the outgoing track's end before anything from the incoming one.
+        out.into_iter().all(|e| self.tx.send(e).is_ok())
+    }
+
+    /// A position tick from the active deck. Cues the next track a little ahead of the crossfade,
+    /// and starts the overlap once the track is within the crossfade of its end.
+    fn maybe_overlap(&self, s: &mut MixState, deck: usize, pos: f64, out: &mut Vec<PlayerEvent>) {
+        if s.overlap.is_some() || s.loop_file || !s.crossfade.on() {
+            return;
+        }
+        let duration = s.duration[deck];
+        if !(duration > 0.0 && pos.is_finite()) {
+            return;
+        }
+        // A third of the track at most: a crossfade longer than that isn't a transition any more.
+        let len = s.crossfade.secs.min(duration / 3.0);
+        let left = duration - pos;
+        if s.cued.is_none() && left <= len + CUE_AHEAD_SECS {
+            let Some(next) = s.next.take() else { return };
+            if left < MIN_OVERLAP_SECS {
+                let _ = self.decks[deck].command("loadfile", &[&quoted(&next.url), "append"]);
+                return;
+            }
+            self.cue(s, deck, next);
+        }
+        if s.cued.is_some() && left <= len {
+            self.start_cued(
+                s,
+                deck,
+                Some(Overlap { from: deck, start: pos, len: left.max(1e-3) }),
+                out,
+            );
+        }
+    }
+
+    /// Load `next` on the deck that isn't `from`, paused and silent.
+    fn cue(&self, s: &mut MixState, from: usize, next: Next) {
+        let to = 1 - from;
+        s.gain[to] = next.gain_db;
+        s.sweep[to] = if s.crossfade.sweeps() { Sweep::opening(0.0) } else { Sweep::FLAT };
+        s.level[to] = 0.0;
+        s.duration[to] = 0.0;
+        let deck = &self.decks[to];
+        let cued =
+            self.apply_af(s, to, true).and_then(|()| self.apply_volume(s, to)).and_then(|()| {
+                deck.set_property("pause", true)?;
+                deck.set_property("loop-file", "no")?;
+                deck.command("loadfile", &[&quoted(&next.url), "replace"])?;
+                Ok(())
+            });
+        match cued {
+            Ok(()) => {
+                s.cued = Some(to);
+                s.handoff = Some(to);
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "crossfade: couldn't cue the next track, going gapless");
+                s.level[to] = 1.0;
+                let _ = self.decks[from].command("loadfile", &[&quoted(&next.url), "append"]);
+            }
+        }
+    }
+
+    /// Start the cued track and make its deck the active one: under `overlap`, or at full level
+    /// when there is none. To the app the current track has ended: the queue advances, and the
+    /// new track's length (reported while it was cued) is announced as it would be on a load.
+    fn start_cued(
+        &self,
+        s: &mut MixState,
+        from: usize,
+        overlap: Option<Overlap>,
+        out: &mut Vec<PlayerEvent>,
+    ) {
+        let Some(to) = s.cued.take() else { return };
+        match &overlap {
+            Some(o) => tracing::info!(secs = o.len, "crossfade: overlap started"),
+            None => tracing::info!("crossfade: the track ended early, cut to the cued one"),
+        }
+        if overlap.is_none() {
+            s.level[to] = 1.0;
+            let _ = self.apply_volume(s, to);
+            self.retune(s, to, Sweep::FLAT);
+        }
+        // Playing on if the music is: an overlap can begin paused, from a seek into its window.
+        let _ = self.decks[to].set_property("pause", s.paused[from]);
+        s.overlap = overlap;
+        s.active = to;
+        out.push(PlayerEvent::TrackEnded);
+        if s.duration[to] > 0.0 {
+            out.push(PlayerEvent::Duration(s.duration[to]));
+        }
+    }
+
+    /// Drop a cued track: the queue changed under it, or something else is being played.
+    fn uncue(&self, s: &mut MixState) {
+        let Some(c) = s.cued.take() else { return };
+        let _ = self.decks[c].command("stop", &[]);
+        s.level[c] = 1.0;
+        if s.handoff == Some(c) {
+            s.handoff = None;
+        }
+    }
+
+    /// A position tick from the outgoing deck: move both levels (and sweeps) along.
+    fn step_overlap(&self, s: &mut MixState, pos: f64) {
+        let Some(o) = &s.overlap else { return };
+        let (from, to) = (o.from, 1 - o.from);
+        let p = ((pos - o.start) / o.len).clamp(0.0, 1.0);
+        (s.level[from], s.level[to]) = overlap_levels(p);
+        let _ = self.apply_volume(s, from);
+        let _ = self.apply_volume(s, to);
+        self.retune(s, from, Sweep::closing(p));
+        self.retune(s, to, Sweep::opening(p));
+        if p >= 1.0 {
+            self.end_overlap(s);
+        }
+    }
+
+    /// Finish an overlap now: the outgoing deck stops, the incoming one is at full level. A no-op
+    /// when none is running.
+    fn end_overlap(&self, s: &mut MixState) {
+        let Some(o) = s.overlap.take() else { return };
+        let (from, to) = (o.from, 1 - o.from);
+        let _ = self.decks[from].command("stop", &[]);
+        s.level[to] = 1.0;
+        let _ = self.apply_volume(s, to);
+        self.retune(s, to, Sweep::FLAT);
+        self.retune(s, from, Sweep::FLAT);
+    }
+
+    /// Start `next` on `deck` straight away, replacing what it had.
+    fn cut_to(&self, s: &mut MixState, deck: usize, next: Next) {
+        s.gain[deck] = next.gain_db;
+        s.sweep[deck] = Sweep::FLAT;
+        s.level[deck] = 1.0;
+        let started =
+            self.apply_af(s, deck, true).and_then(|()| self.apply_volume(s, deck)).and_then(|()| {
+                Ok(self.decks[deck].command("loadfile", &[&quoted(&next.url), "replace"])?)
+            });
+        match started {
+            Ok(()) => s.handoff = Some(deck),
+            Err(e) => tracing::warn!(error = %e, "couldn't start the held next track"),
+        }
     }
 }
 
@@ -393,80 +912,52 @@ fn pitch_filter() -> &'static str {
     "rubberband"
 }
 
-fn event_loop(mut ev: EventContext, tx: tokio::sync::mpsc::UnboundedSender<PlayerEvent>) {
+fn event_loop(mut ev: EventContext, deck: usize, mix: Arc<Mix>) {
     // Playback state is derived from two properties, never polled: mpv answers `mpv_get_property`
     // synchronously on its core lock, so asking it from the app's async event pump can stall that
     // pump exactly when mpv is busiest (a gapless transition opening the next stream) — and a
     // stalled pump stops draining mpv's events, so track-end is never handled and playback wedges.
-    // These arrive as events; nothing has to ask.
-    //
-    // mpv reports the initial value of an observed property immediately, so both are seeded here
-    // before anything is loaded: `pause: false`, `idle-active: true` ⇒ not playing.
-    let mut paused = false;
-    let mut idle = true;
-    let mut playing = false;
+    // These arrive as events; nothing has to ask. `pause` alone would be a trap: it starts out
+    // `false` and a `loadfile` doesn't touch it, so `idle-active` is the one that says a file began
+    // (see `PlayerEvent::Playing`).
     loop {
-        match ev.wait_event(1.0) {
-            Some(Ok(event)) => {
-                let out = match event {
-                    Event::PropertyChange {
-                        name: "time-pos",
-                        change: PropertyData::Double(p),
-                        ..
-                    } => Some(PlayerEvent::Position(p)),
-                    Event::PropertyChange {
-                        name: "duration",
-                        change: PropertyData::Double(d),
-                        ..
-                    } => Some(PlayerEvent::Duration(d)),
-                    Event::PropertyChange {
-                        name: "pause", change: PropertyData::Flag(p), ..
-                    } => {
-                        paused = p;
-                        None
-                    }
-                    Event::PropertyChange {
-                        name: "idle-active",
-                        change: PropertyData::Flag(i),
-                        ..
-                    } => {
-                        idle = i;
-                        None
-                    }
-                    Event::EndFile(reason) => match reason as i32 {
-                        EOF => Some(PlayerEvent::TrackEnded),
-                        // STOP/QUIT/REDIRECT are deliberate (loadfile replace, shutdown) — ignore.
-                        // ERROR never reaches this arm: libmpv2 surfaces end-file-with-error as
-                        // Err from wait_event (see below).
-                        _ => None,
-                    },
-                    _ => None,
-                };
-                if let Some(e) = out {
-                    // Receiver dropped ⇒ player gone ⇒ stop the thread.
-                    if tx.send(e).is_err() {
-                        break;
-                    }
+        let e = match ev.wait_event(1.0) {
+            Some(Ok(event)) => match event {
+                Event::PropertyChange {
+                    name: "time-pos", change: PropertyData::Double(p), ..
+                } => DeckEvent::Position(p),
+                Event::PropertyChange {
+                    name: "duration", change: PropertyData::Double(d), ..
+                } => DeckEvent::Duration(d),
+                Event::PropertyChange { name: "pause", change: PropertyData::Flag(p), .. } => {
+                    DeckEvent::Paused(p)
                 }
-                // A gapless advance never touches either property, so no spurious stop/start is
-                // emitted between tracks.
-                let now = !paused && !idle;
-                if now != playing {
-                    playing = now;
-                    if tx.send(PlayerEvent::Playing(now)).is_err() {
-                        break;
-                    }
-                }
-            }
-            Some(Err(e)) => {
-                // libmpv2 routes MPV_EVENT_END_FILE with an error (dead URL, 403, bad format)
-                // through here instead of Event::EndFile — in our usage (no async get/set/command
-                // replies) an Err from wait_event *is* a failed track.
-                if tx.send(PlayerEvent::TrackFailed(friendly_error(&e))).is_err() {
-                    break;
-                }
-            }
-            None => {}
+                Event::PropertyChange {
+                    name: "idle-active",
+                    change: PropertyData::Flag(i),
+                    ..
+                } => DeckEvent::Idle(i),
+                Event::PropertyChange {
+                    name: "audio-params/samplerate",
+                    change: PropertyData::Int64(r),
+                    ..
+                } => DeckEvent::Rate(r),
+                Event::StartFile => DeckEvent::Started,
+                // STOP/QUIT/REDIRECT are deliberate (loadfile replace, shutdown, the end of an
+                // overlap) — ignored. ERROR never reaches this arm: libmpv2 surfaces
+                // end-file-with-error as Err from wait_event (see below).
+                Event::EndFile(reason) if reason as i32 == EOF => DeckEvent::Ended,
+                _ => continue,
+            },
+            // libmpv2 routes MPV_EVENT_END_FILE with an error (dead URL, 403, bad format) through
+            // here instead of Event::EndFile — in our usage (no async get/set/command replies) an
+            // Err from wait_event *is* a failed track.
+            Some(Err(e)) => DeckEvent::Failed(friendly_error(&e)),
+            None => continue,
+        };
+        // Receiver dropped ⇒ player gone ⇒ stop the thread.
+        if !mix.on_event(deck, e) {
+            break;
         }
     }
 }
@@ -506,7 +997,10 @@ fn perceptual_to_mpv(percent: i64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{af_chain, faded_volume, perceptual_to_mpv, quoted, AfState, Equalizer, EQ_BANDS};
+    use super::{
+        af_chain, faded_volume, glide, overlap_levels, perceptual_to_mpv, quoted, AfState,
+        Equalizer, Sweep, EQ_BANDS,
+    };
 
     fn chain(gain_db: Option<f64>, semitones: i32, eq: Option<Equalizer>) -> String {
         af_chain(&AfState { gain_db, semitones, eq })
@@ -574,7 +1068,7 @@ mod tests {
         let dir = std::env::temp_dir().join("limusic-af-test");
         std::fs::create_dir_all(&dir).unwrap();
         let p = Player::new(dir.to_str().unwrap()).expect("libmpv");
-        let af = || p.mpv.get_property::<String>("af").unwrap();
+        let af = || p.mix.decks[0].get_property::<String>("af").unwrap();
 
         // 1. Loudness normalization, then a pitch round trip. The gain has to survive both steps.
         p.set_gain(Some(-7.7)).unwrap();
@@ -629,9 +1123,9 @@ mod tests {
         assert!(!af().contains("equalizer"), "turning it off left filters: {}", af());
 
         // 5. The reconnect options are accepted, and a fade never becomes the user's volume.
-        let lavf = p.mpv.get_property::<String>("stream-lavf-o").unwrap();
+        let lavf = p.mix.decks[0].get_property::<String>("stream-lavf-o").unwrap();
         assert!(lavf.contains("reconnect_streamed=1"), "reconnect options missing: {lavf}");
-        let vol = || p.mpv.get_property::<f64>("volume").unwrap();
+        let vol = || p.mix.decks[0].get_property::<f64>("volume").unwrap();
         p.set_volume(60).unwrap();
         let user = vol();
         p.set_fade(0.0).unwrap();
@@ -678,5 +1172,180 @@ mod tests {
         // Monotonic, and finer steps at the loud end than the quiet one.
         assert!((1..=100).all(|s| perceptual_to_mpv(s) > perceptual_to_mpv(s - 1)));
         assert!(db(100) - db(99) < db(2) - db(1));
+    }
+
+    #[test]
+    fn an_overlap_holds_the_power_level() {
+        // Equal power: the two levels' squares always sum to one, so the pair never dips.
+        for i in 0..=20 {
+            let (out, inc) = overlap_levels(i as f64 / 20.0);
+            assert!((out * out + inc * inc - 1.0).abs() < 1e-12);
+        }
+        assert_eq!(overlap_levels(0.0), (1.0, 0.0));
+        let (out, inc) = overlap_levels(1.0);
+        assert!(out.abs() < 1e-12 && (inc - 1.0).abs() < 1e-12);
+        // Past either end it holds, rather than swinging back.
+        assert_eq!(overlap_levels(-0.5), (1.0, 0.0));
+        assert_eq!(overlap_levels(1.5), overlap_levels(1.0));
+    }
+
+    #[test]
+    fn the_sweeps_glide_on_a_log_scale() {
+        assert_eq!(glide(20_000.0, 200.0, 0.0), 20_000.0);
+        assert!((glide(20_000.0, 200.0, 1.0) - 200.0).abs() < 1e-9);
+        // Halfway is the geometric midpoint: as many octaves behind as ahead.
+        assert!((glide(20_000.0, 200.0, 0.5) - 2_000.0).abs() < 1e-9);
+        // Outside an overlap both filters are in the chain and pass the audio through untouched.
+        assert_eq!(
+            Sweep::FLAT.filters(),
+            [
+                "@xflow:lavfi=[lowpass=f=3000:m=0]".to_string(),
+                "@xfhigh:lavfi=[highpass=f=20:m=0]".to_string()
+            ]
+        );
+        assert_eq!(Sweep::opening(0.0).filters()[1], "@xfhigh:lavfi=[highpass=f=1000:m=1]");
+        assert_eq!(Sweep::closing(1.0).filters()[0], "@xflow:lavfi=[lowpass=f=200:m=1]");
+    }
+
+    /// A mono 16-bit WAV of a sine: a source whose length mpv knows up front, which a crossfade
+    /// needs (it starts a fixed time before the end).
+    fn tone(dir: &std::path::Path, hz: f64, secs: f64, rate: u32) -> String {
+        let n = (secs * rate as f64) as u32;
+        let mut wav = Vec::with_capacity(44 + 2 * n as usize);
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + 2 * n).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        wav.extend_from_slice(&1u16.to_le_bytes()); // mono
+        wav.extend_from_slice(&rate.to_le_bytes());
+        wav.extend_from_slice(&(rate * 2).to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&(2 * n).to_le_bytes());
+        for i in 0..n {
+            let x = (i as f64 / rate as f64 * hz * std::f64::consts::TAU).sin() * 8_000.0;
+            wav.extend_from_slice(&(x as i16).to_le_bytes());
+        }
+        let path = dir.join(format!("{hz}.wav"));
+        std::fs::write(&path, wav).unwrap();
+        path.to_str().unwrap().to_owned()
+    }
+
+    /// Everything the player sends until `stop` matches one, or `None` after `secs`.
+    fn until(
+        rx: &mut tokio::sync::mpsc::UnboundedReceiver<super::PlayerEvent>,
+        secs: f64,
+        stop: impl Fn(&super::PlayerEvent) -> bool,
+    ) -> Option<Vec<super::PlayerEvent>> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs_f64(secs);
+        let mut seen = Vec::new();
+        while std::time::Instant::now() < deadline {
+            match rx.try_recv() {
+                Ok(e) => {
+                    let done = stop(&e);
+                    seen.push(e);
+                    if done {
+                        return Some(seen);
+                    }
+                }
+                Err(_) => std::thread::sleep(std::time::Duration::from_millis(5)),
+            }
+        }
+        None
+    }
+
+    fn last_position(events: &[super::PlayerEvent]) -> f64 {
+        events
+            .iter()
+            .rev()
+            .find_map(|e| match e {
+                super::PlayerEvent::Position(p) => Some(*p),
+                _ => None,
+            })
+            .unwrap_or(0.0)
+    }
+
+    /// The mix, driven through real libmpv on the null audio output: two tones cross, the app is
+    /// told the first one ended when the overlap starts rather than at its end, the second deck
+    /// takes over, and a transition asked to stay gapless goes through mpv's playlist. Played at double speed to keep the
+    /// test short; the overlap runs on media time, so it scales with it.
+    #[test]
+    fn a_crossfade_hands_over_early_and_a_held_pair_stays_gapless() {
+        use super::{Crossfade, Player, PlayerEvent};
+        use std::collections::HashMap;
+
+        let dir = std::env::temp_dir().join("limusic-crossfade-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        // The first at 8 kHz: its low-pass sweeps from 20 kHz, far above that file's Nyquist
+        // frequency, which crashed libavfilter until the corners were bounded by the sample rate.
+        let a = tone(&dir, 440.0, 4.0, 8_000);
+        let (b, c) = (tone(&dir, 660.0, 4.0, 48_000), tone(&dir, 550.0, 4.0, 44_100));
+        let mut p = Player::new(dir.to_str().unwrap()).expect("libmpv");
+        let mut rx = p.take_events().unwrap();
+        p.set_speed(2.0).unwrap();
+        p.set_crossfade(Crossfade { secs: 1.5, filters: true }).unwrap();
+        let ended = |e: &PlayerEvent| matches!(e, PlayerEvent::TrackEnded);
+
+        // 1. A crossfade. The overlap is a third of a 4 s track at most, so it starts 1.33 s out.
+        p.load(&a, &HashMap::new(), None).unwrap();
+        p.play().unwrap();
+        p.enqueue(&b, Some(-3.0), true).unwrap();
+        let seen = until(&mut rx, 5.0, ended).expect("the first track never handed over");
+        let at = last_position(&seen);
+        assert!((2.4..3.5).contains(&at), "handed over at {at}, not 1.33 s before the end");
+        // Mid-overlap: the player is busy, not stalled, and the new track is the active one,
+        // at its own loudness and with its high-pass in the chain.
+        assert!(!p.is_idle());
+        {
+            let s = p.lock();
+            assert_eq!(s.active, 1);
+            assert!(s.overlap.is_some());
+            // The sweeps are bounded by each deck's sample rate, so it has to be known.
+            assert_eq!(s.rate, [8_000.0, 48_000.0]);
+        }
+        let af1 = p.mix.decks[1].get_property::<String>("af").unwrap();
+        assert!(af1.contains("volume=-3dB") && af1.contains("highpass"), "incoming chain: {af1}");
+        // Its length was learned while it was cued and is announced now, as a load would.
+        let next = until(&mut rx, 1.0, |e| matches!(e, PlayerEvent::Duration(_))).unwrap();
+        assert!(!next.iter().any(ended));
+        // Both decks sound at once somewhere in the middle.
+        let vol = |d: usize| p.mix.decks[d].get_property::<f64>("volume").unwrap();
+        let mut both = false;
+        while p.lock().overlap.is_some() {
+            both |= vol(0) > 0.0 && vol(1) > 0.0;
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(both, "the two tracks never overlapped");
+        // Afterwards the outgoing deck is stopped and the incoming one at full level.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(p.mix.decks[0].get_property::<bool>("idle-active").unwrap());
+        assert_eq!(vol(1), super::perceptual_to_mpv(100));
+        // Nothing left to cross into: the second track plays to its end, and the player idles.
+        until(&mut rx, 5.0, ended).expect("the second track never ended");
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(p.is_idle());
+
+        // 2. A pair held together (an album, say) goes through mpv's playlist: no early handover,
+        // and the other deck never loads.
+        p.load(&a, &HashMap::new(), None).unwrap();
+        p.play().unwrap();
+        p.enqueue(&c, None, false).unwrap();
+        until(&mut rx, 5.0, ended).expect("the gapless track never ended");
+        let s = p.lock();
+        assert!(s.overlap.is_none());
+        assert!(p.mix.decks[1 - s.active].get_property::<bool>("idle-active").unwrap());
+        drop(s);
+
+        // 3. Loading something else mid-overlap cuts the outgoing track off at once.
+        p.load(&a, &HashMap::new(), None).unwrap();
+        p.enqueue(&b, None, true).unwrap();
+        until(&mut rx, 5.0, ended).expect("no handover");
+        let from = p.lock().overlap.as_ref().map(|o| o.from).expect("an overlap is running");
+        p.load(&c, &HashMap::new(), None).unwrap();
+        assert!(p.lock().overlap.is_none());
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(p.mix.decks[from].get_property::<bool>("idle-active").unwrap());
     }
 }

@@ -190,7 +190,7 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 /// enough that the list stays a list rather than a log.
 const SEARCH_HISTORY_LIMIT: usize = 30;
 
-const UI_SETTINGS: [&str; 21] = [
+const UI_SETTINGS: [&str; 25] = [
     "volume",
     "proxy",
     "quality",
@@ -212,6 +212,10 @@ const UI_SETTINGS: [&str; 21] = [
     "content_language",
     "charts_country",
     "sponsorblock",
+    "crossfade",
+    "crossfade_secs",
+    "crossfade_filters",
+    "crossfade_album_gapless",
 ];
 
 /// The country (`gl`) and language (`hl`) YouTube Music localizes to, from the two settings. Either
@@ -527,6 +531,11 @@ pub async fn set_setting(
     // would keep its word timings (and one fetched while off would never gain them) forever.
     if key == "lyrics_boidu" || key == "lyrics_simpmusic" {
         state.db.clear_lyrics_cache();
+    }
+    // The next transition already follows the new setting; the album rule applies from the next
+    // track the lookahead hands over.
+    if key.starts_with("crossfade") {
+        crate::crossfade::sync(&state);
     }
     // Every request from here on asks for the new country and language. What is already on screen
     // was localized for the old one; the UI drops its page cache and reloads.
