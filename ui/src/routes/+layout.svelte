@@ -1,7 +1,7 @@
 <script lang="ts">
 	import './layout.css';
 	import favicon from '$lib/assets/favicon.svg';
-	import { ModeWatcher, mode } from 'mode-watcher';
+	import { ModeWatcher, mode, setMode } from 'mode-watcher';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import {
 		CheckmarkCircle02Icon,
@@ -20,7 +20,8 @@
 		applyArtworkAccent,
 		prewarmArtworkAccent,
 		refreshArtworkAccent,
-		initTheme
+		initTheme,
+		LIGHT_MODE
 	} from '$lib/theme.svelte';
 	import { loadAppIcon } from '$lib/appicon.svelte';
 	import { thumb } from '$lib/thumb';
@@ -153,6 +154,11 @@
 	// Wire the Tauri event bridge once for the whole app; teardown on destroy. Check for an update
 	// on every app open (silent unless one exists).
 	onMount(() => {
+		// Light mode is hidden (LIGHT_MODE): a "light" or "system" saved before it was is replaced
+		// once, here. ModeWatcher, a child, has already applied what was saved by the time a
+		// parent's onMount runs, so this is the last word; from the next launch on, the saved
+		// value is "dark" and the first frame is dark too.
+		if (!LIGHT_MODE) setMode('dark');
 		// Before the mini-window bail-out: both windows run this SPA and both can throw.
 		initErrorLog();
 		if (isMini) {
@@ -194,7 +200,8 @@
 />
 
 <svelte:head><link rel="icon" href={favicon} /></svelte:head>
-<ModeWatcher />
+<!-- With light mode hidden (LIGHT_MODE, theme.svelte.ts): dark whatever the OS says. -->
+<ModeWatcher defaultMode={LIGHT_MODE ? 'system' : 'dark'} track={LIGHT_MODE} />
 
 <!-- The mini player is the whole window when it is the window: no titlebar, no sidebar, no routes,
      and no toasts (a banner would cover most of a 560x180 widget). -->

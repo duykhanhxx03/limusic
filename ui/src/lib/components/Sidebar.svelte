@@ -35,6 +35,7 @@
 		toast
 	} from '$lib/player.svelte';
 	import { mergeSaved, orderLibrary } from '$lib/personal';
+	import { LIGHT_MODE } from '$lib/theme.svelte';
 	import { t } from '$lib/i18n.svelte';
 
 	const nav = $derived([
@@ -270,17 +271,20 @@
 			/>
 			<span class="hidden {wide('lg:inline')}">{t('nav.settings')}</span>
 		</button>
-		<Button
-			variant="ghost"
-			size="icon-sm"
-			class="hover:text-primary"
-			onclick={toggleMode}
-			title={t('a11y.toggle_theme')}
-			aria-label={t('a11y.toggle_theme')}
-		>
-			<HugeiconsIcon icon={Sun01Icon} strokeWidth={2} class="h-4 w-4 dark:hidden" />
-			<HugeiconsIcon icon={Moon02Icon} strokeWidth={2} class="hidden h-4 w-4 dark:block" />
-		</Button>
+		<!-- The light/dark toggle, hidden while light mode is (LIGHT_MODE, theme.svelte.ts). -->
+		{#if LIGHT_MODE}
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				class="hover:text-primary"
+				onclick={toggleMode}
+				title={t('a11y.toggle_theme')}
+				aria-label={t('a11y.toggle_theme')}
+			>
+				<HugeiconsIcon icon={Sun01Icon} strokeWidth={2} class="h-4 w-4 dark:hidden" />
+				<HugeiconsIcon icon={Moon02Icon} strokeWidth={2} class="hidden h-4 w-4 dark:block" />
+			</Button>
+		{/if}
 		<!-- Hidden below lg: the rail is collapsed by the breakpoint there, so there is nothing to toggle. -->
 		<Button
 			variant="ghost"

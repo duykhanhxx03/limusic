@@ -15,6 +15,14 @@ import { hexToHsv, isLight } from './color';
 import { artworkAccent, toAccent, warmAccent } from './artcolor';
 import { allowFontFile } from './api';
 
+/**
+ * Light mode is hidden, not removed: the light palettes, the `.dark` switch and the sidebar's
+ * toggle are all still here. Off, the app is dark from its first frame whatever the OS prefers,
+ * and the toggle is not drawn. Back to true restores the toggle and the old default (follow the
+ * OS until the user picks).
+ */
+export const LIGHT_MODE = false;
+
 export type ThemeId = 'rose' | 'blue' | 'lime' | 'purple' | 'teal' | 'catppuccin' | 'tokyonight'  | 'caffeine' | 'neon' | 'breeze';
 
 // `fg` (accent themes only) is the text/icon colour that sits ON the accent: light accents (lime,
