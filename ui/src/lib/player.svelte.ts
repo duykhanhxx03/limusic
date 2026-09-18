@@ -58,6 +58,9 @@ export const np = $state({ open: false, tab: 'queue' as 'queue' | 'lyrics' });
  */
 export const prefs = $state({
 	musicVideos: false,
+	/** "Hide music videos". The search page reads it to drop its Videos filter, which could only
+	 *  ever come back empty with the setting on. */
+	hideVideos: false,
 	/** The country the Explore page's charts are showing, as an ISO code (`ZZ` = Global). Empty
 	 *  means "whatever YouTube picks from the IP", which is what a fresh install wants. */
 	chartsCountry: '',
@@ -1318,6 +1321,7 @@ export function initApp(mini = false): () => void {
 	api.getSettings()
 		.then((s) => {
 			prefs.musicVideos = s.music_videos === 'true';
+			prefs.hideVideos = s.hide_videos === 'true';
 			prefs.chartsCountry = s.charts_country ?? '';
 			const offset = Number.parseInt(s.lyrics_offset_ms ?? '', 10);
 			if (Number.isFinite(offset)) prefs.lyricsOffsetMs = offset;

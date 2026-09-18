@@ -21,6 +21,14 @@ pub async fn search(state: St<'_>, query: String) -> Result<Vec<SongItem>, Strin
     Ok(result.items)
 }
 
+/// Music videos only, for the search page's Videos filter.
+#[tauri::command]
+pub async fn search_videos(state: St<'_>, query: String) -> Result<Vec<SongItem>, String> {
+    let client = metadata_client(&state)?;
+    let result = state.it.search_videos(client, &query).await.map_err(|e| e.to_string())?;
+    Ok(result.items)
+}
+
 /// Unfiltered search → categorized sections for the search page.
 #[tauri::command]
 pub async fn search_all(state: St<'_>, query: String) -> Result<SearchResults, String> {
@@ -178,6 +186,10 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 /// `visitor_data`) and internal blobs (`queue_json`, `queue_index`, `queue_position`) never cross
 /// into the webview: they'd otherwise ship the login credential to the renderer on every open, and
 /// the webview can't overwrite them either.
+/// How many past searches to keep. Long enough to cover "what was that album called", short
+/// enough that the list stays a list rather than a log.
+const SEARCH_HISTORY_LIMIT: usize = 30;
+
 const UI_SETTINGS: [&str; 20] = [
     "volume",
     "proxy",
@@ -784,6 +796,33 @@ pub async fn get_home(state: St<'_>, params: Option<String>) -> Result<HomePage,
 pub async fn get_home_more(state: St<'_>, token: String) -> Result<HomePage, String> {
     let client = metadata_client(&state)?;
     state.it.home_continuation(client, &token).await.map_err(|e| e.to_string())
+}
+
+/// What this machine has searched for, most recent first. Local only: YouTube is never asked,
+/// and nothing here leaves the device.
+#[tauri::command]
+pub async fn search_history(state: St<'_>) -> Result<Vec<String>, String> {
+    Ok(state.db.search_history(SEARCH_HISTORY_LIMIT))
+}
+
+/// Remember a query. Repeating a search moves it back to the top rather than listing it twice.
+#[tauri::command]
+pub async fn add_search_history(state: St<'_>, query: String) -> Result<(), String> {
+    let query = query.trim();
+    if !query.is_empty() {
+        state.db.add_search_history(query, SEARCH_HISTORY_LIMIT);
+    }
+    Ok(())
+}
+
+/// Forget one query (the ✕ on a row), or all of them.
+#[tauri::command]
+pub async fn remove_search_history(state: St<'_>, query: Option<String>) -> Result<(), String> {
+    match query {
+        Some(q) => state.db.remove_search_history(&q),
+        None => state.db.clear_search_history(),
+    }
+    Ok(())
 }
 
 /// The Explore page: mood/genre chips + the region's own shelves. One request, signed out or in.

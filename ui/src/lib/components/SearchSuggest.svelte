@@ -20,16 +20,23 @@
 
 	let {
 		value = $bindable(''),
+		/** The text field itself, for callers that fill it and hand the cursor back. */
+		inputRef = $bindable(null),
 		placeholder = 'Search',
 		inputClass = '',
 		/** Panel geometry. Default matches the field; a narrow field wants its own width. */
 		panelClass = 'left-0 right-0',
+		/** Where the shortcut hint sits — further in when the caller puts a button at the field's
+		 *  end (the titlebar's Browse). */
+		kbdClass = 'right-2.5',
 		onpick
 	}: {
 		value?: string;
+		inputRef?: HTMLInputElement | null;
 		placeholder?: string;
 		inputClass?: string;
 		panelClass?: string;
+		kbdClass?: string;
 		/** Fired after a row is taken (played or navigated) — for callers that dismiss themselves. */
 		onpick?: () => void;
 	} = $props();
@@ -135,6 +142,7 @@
 >
 	<Input
 		bind:value
+		bind:ref={inputRef}
 		{placeholder}
 		class="pr-16 {inputClass}"
 		autocomplete="off"
@@ -149,7 +157,7 @@
 	     the field behind it is the target. -->
 	{#if !value}
 		<kbd
-			class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rounded bg-muted px-1.5 py-0.5 font-mono text-[0.625rem] font-medium tracking-wide text-muted-foreground"
+			class="pointer-events-none absolute {kbdClass} top-1/2 -translate-y-1/2 rounded bg-muted px-1.5 py-0.5 font-mono text-[0.625rem] font-medium tracking-wide text-muted-foreground"
 		>
 			{MOD}K
 		</kbd>

@@ -215,6 +215,10 @@ impl Db {
                 etag       TEXT,
                 fetched_at INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS search_history (
+                query       TEXT PRIMARY KEY COLLATE NOCASE,
+                searched_at INTEGER NOT NULL
+            ) WITHOUT ROWID;
             CREATE TABLE IF NOT EXISTS mood_cover (
                 params     TEXT PRIMARY KEY,
                 url        TEXT NOT NULL,
@@ -873,6 +877,50 @@ impl Db {
         conn.query_row("SELECT 1 FROM autoeq_entry WHERE path = ?1", [path], |_| Ok(())).is_ok()
     }
 
+    /// Past searches, newest first.
+    pub fn search_history(&self, limit: usize) -> Vec<String> {
+        let conn = self.0.lock().unwrap();
+        let Ok(mut stmt) =
+            conn.prepare("SELECT query FROM search_history ORDER BY searched_at DESC LIMIT ?1")
+        else {
+            return Vec::new();
+        };
+        stmt.query_map([limit as i64], |r| r.get(0))
+            .map(|rows| rows.flatten().collect())
+            .unwrap_or_default()
+    }
+
+    /// Record a search and trim the list to `limit`. The key is case-insensitive, so searching
+    /// "son tung" after "Son Tung" moves the entry up (under the newer spelling) instead of
+    /// listing the same search twice. Milliseconds, not seconds: two searches inside one second
+    /// are the ordinary case when the first one was a typo.
+    pub fn add_search_history(&self, query: &str, limit: usize) {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let conn = self.0.lock().unwrap();
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO search_history(query, searched_at) VALUES(?1, ?2)",
+            rusqlite::params![query, now_ms],
+        );
+        let _ = conn.execute(
+            "DELETE FROM search_history WHERE query NOT IN
+                 (SELECT query FROM search_history ORDER BY searched_at DESC LIMIT ?1)",
+            [limit as i64],
+        );
+    }
+
+    pub fn remove_search_history(&self, query: &str) {
+        let conn = self.0.lock().unwrap();
+        let _ = conn.execute("DELETE FROM search_history WHERE query = ?1", [query]);
+    }
+
+    pub fn clear_search_history(&self) {
+        let conn = self.0.lock().unwrap();
+        let _ = conn.execute("DELETE FROM search_history", []);
+    }
+
     /// The cached cover for a mood card, if it was fetched inside `max_age` seconds. A mood's
     /// artwork is the first playlist YouTube files under it, which costs a whole category browse
     /// to learn — so it is worth keeping, and worth re-checking eventually, because YouTube
@@ -1245,6 +1293,35 @@ pub struct PlayEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Newest first, one entry per search whatever its capitalisation, trimmed to the limit.
+    #[test]
+    fn search_history_orders_dedupes_and_trims() {
+        let path =
+            std::env::temp_dir().join(format!("limusic-search-history-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let d = Db::open(&path).unwrap();
+        for q in ["first", "second", "third"] {
+            d.add_search_history(q, 3);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert_eq!(d.search_history(10), ["third", "second", "first"]);
+
+        // Searching an old query again brings it back to the top, under the spelling just used.
+        d.add_search_history("FIRST", 3);
+        assert_eq!(d.search_history(10), ["FIRST", "third", "second"]);
+
+        // A fourth distinct search pushes the oldest out.
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        d.add_search_history("fourth", 3);
+        assert_eq!(d.search_history(10), ["fourth", "FIRST", "third"]);
+
+        d.remove_search_history("third");
+        assert_eq!(d.search_history(10), ["fourth", "FIRST"]);
+        d.clear_search_history();
+        assert!(d.search_history(10).is_empty());
+        let _ = std::fs::remove_file(&path);
+    }
 
     #[test]
     fn the_lyrics_cache_is_cleared_once_for_the_new_provider() {

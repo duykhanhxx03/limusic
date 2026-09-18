@@ -319,6 +319,14 @@ export interface ArtistPage {
 export const search = (query: string) => invoke<SongItem[]>('search', { query });
 /** Unfiltered search → categorized sections. */
 export const searchAll = (query: string) => invoke<SearchResults>('search_all', { query });
+/** Music videos only — the search page's Videos filter. */
+export const searchVideos = (query: string) => invoke<SongItem[]>('search_videos', { query });
+/** This machine's past searches, newest first. Never leaves the device. */
+export const getSearchHistory = () => invoke<string[]>('search_history');
+export const addSearchHistory = (query: string) => invoke<void>('add_search_history', { query });
+/** Forget one search; with no argument, forget them all. */
+export const removeSearchHistory = (query?: string) =>
+	invoke<void>('remove_search_history', { query });
 /** Filtered "Show more" card search for one category (albums / artists / playlists). */
 export const searchCards = (query: string, category: 'albums' | 'artists' | 'playlists') =>
 	invoke<BrowseItem[]>('search_cards', { query, category });

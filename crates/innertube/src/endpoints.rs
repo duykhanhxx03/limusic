@@ -20,6 +20,7 @@ use crate::transport::{Error, InnerTube};
 
 /// Search filter params (opaque base64). context/08.
 pub const FILTER_SONG: &str = "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D";
+pub const FILTER_VIDEO: &str = "EgWKAQIQAWoKEAkQChAFEAMQBA%3D%3D";
 pub const FILTER_ALBUM: &str = "EgWKAQIYAWoKEAkQChAFEAMQBA%3D%3D";
 pub const FILTER_ARTIST: &str = "EgWKAQIgAWoKEAkQChAFEAMQBA%3D%3D";
 pub const FILTER_COMMUNITY_PLAYLIST: &str = "EgeKAQQoAEABagoQAxAEEAoQCRAF";
@@ -123,6 +124,24 @@ impl InnerTube {
         query: &str,
     ) -> Result<SearchResult, Error> {
         let value = self.search_raw(metadata_client, query, Some(FILTER_SONG)).await?;
+        let mut r = metadata::parse_search(&value);
+        self.drop_video_songs(&mut r.items);
+        Ok(r)
+    }
+
+    /// Search music videos only (`FILTER_VIDEO`). Rows come back shaped like song rows, because a
+    /// music video *is* a track with a video attached; what differs is that every one of them is
+    /// one. context/08.
+    ///
+    /// Nothing calls this when "hide music videos" is on: the same filter that empties an
+    /// all-videos shelf would empty this list, so the UI hides the filter instead of offering a
+    /// search that can only come back blank.
+    pub async fn search_videos(
+        &self,
+        metadata_client: &YouTubeClient,
+        query: &str,
+    ) -> Result<SearchResult, Error> {
+        let value = self.search_raw(metadata_client, query, Some(FILTER_VIDEO)).await?;
         let mut r = metadata::parse_search(&value);
         self.drop_video_songs(&mut r.items);
         Ok(r)

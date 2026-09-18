@@ -576,3 +576,18 @@ async fn explore_charts_and_moods() {
         "no artist rows in the global charts — the list-row parse regressed"
     );
 }
+
+/// The Videos filter is an opaque protobuf literal copied out of YouTube's own search page, which
+/// is exactly the kind of thing that stops meaning what it meant. Pins that it still returns
+/// videos, and only videos.
+///   cargo test -p innertube --features integration-tests videos_filter -- --nocapture
+#[tokio::test]
+async fn videos_filter_returns_only_videos() {
+    let it = InnerTube::new(Session::default(), None).unwrap();
+    let clients = Clients::bundled();
+    let client = clients.get("WEB_REMIX").expect("WEB_REMIX client");
+    let r = it.search_videos(client, "son tung").await.expect("video search");
+    eprintln!("videos: {} rows, first {:?}", r.items.len(), r.items.first().map(|i| &i.title));
+    assert!(r.items.len() >= 5, "video search came back nearly empty");
+    assert!(r.items.iter().all(|i| i.is_video), "a non-video row came through the videos filter");
+}

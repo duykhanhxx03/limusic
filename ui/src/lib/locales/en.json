@@ -38,6 +38,7 @@
 		"reset": "Reset",
 		"unknown_artist": "Unknown Artist",
 		"songs": "Songs",
+		"videos": "Videos",
 		"albums": "Albums",
 		"artists": "Artists",
 		"playlists": "Playlists",
@@ -88,6 +89,7 @@
 		"search": "Search",
 		"library": "Library",
 		"explore": "Explore",
+		"browse": "Browse",
 		"settings": "Settings",
 		"new_playlist": "New Playlist",
 		"account": "Account",
@@ -686,6 +688,14 @@
 		"save_rest": "Download {count} more",
 		"cancel": "Stop downloading",
 		"saved": "Downloaded"
+	},
+	"search": {
+		"recent": "Recent searches",
+		"clear_all": "Clear all",
+		"edit": "Edit this search",
+		"remove": "Remove from history",
+		"filters": "Result type",
+		"browse_all": "Browse all"
 	},
 	"explore": {
 		"moods": "Moods & genres",

@@ -633,6 +633,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::search,
             commands::search_all,
+            commands::search_videos,
+            commands::search_history,
+            commands::add_search_history,
+            commands::remove_search_history,
             commands::search_cards,
             commands::play,
             commands::play_index,

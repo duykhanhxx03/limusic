@@ -38,6 +38,7 @@
 		"reset": "Đặt lại",
 		"unknown_artist": "Nghệ sĩ không rõ",
 		"songs": "Bài hát",
+		"videos": "Video",
 		"albums": "Album",
 		"artists": "Nghệ sĩ",
 		"playlists": "Danh sách phát",
@@ -88,6 +89,7 @@
 		"search": "Tìm kiếm",
 		"library": "Thư viện",
 		"explore": "Khám phá",
+		"browse": "Duyệt thể loại",
 		"settings": "Cài đặt",
 		"new_playlist": "Danh sách phát mới",
 		"account": "Tài khoản",
@@ -686,6 +688,14 @@
 		"save_rest": "Tải thêm {count} bài",
 		"cancel": "Dừng tải",
 		"saved": "Đã tải"
+	},
+	"search": {
+		"recent": "Tìm kiếm gần đây",
+		"clear_all": "Xoá tất cả",
+		"edit": "Sửa lại từ khoá này",
+		"remove": "Xoá khỏi lịch sử",
+		"filters": "Loại kết quả",
+		"browse_all": "Duyệt tất cả"
 	},
 	"explore": {
 		"moods": "Tâm trạng và thể loại",

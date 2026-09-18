@@ -362,6 +362,7 @@
 
 	async function setHideVideos(on: boolean) {
 		settings.hide_videos = on ? 'true' : 'false';
+		prefs.hideVideos = on;
 		await api.setSetting('hide_videos', settings.hide_videos);
 	}
 

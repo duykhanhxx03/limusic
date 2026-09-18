@@ -24,6 +24,7 @@
 		MinimizeScreenIcon,
 		CameraVideoIcon,
 		Link04Icon,
+		Archive02Icon,
 		Home01Icon,
 		HistoryIcon,
 		Search01Icon
@@ -118,9 +119,28 @@
 				<SearchSuggest
 					bind:value={searchQuery}
 					placeholder={t('common.search')}
-					inputClass="h-8 rounded-full pl-9"
+					inputClass="h-8 rounded-full pl-9 pr-24"
 					panelClass="left-1/2 -ml-[13rem] w-[26rem]"
+					kbdClass="right-11"
 				/>
+				<!-- Browse, at the end of the field where Spotify keeps it: every mood and genre as
+				     cards, for when you know the kind of thing you want and not its name. Inside the
+				     form's box but not a submit — it navigates, it never searches. -->
+				<span
+					aria-hidden="true"
+					class="pointer-events-none absolute right-9 top-1/2 h-4 w-px -translate-y-1/2 bg-foreground/15"
+				></span>
+				<a
+					href="/explore/moods"
+					title={t('nav.browse')}
+					aria-label={t('nav.browse')}
+					class="absolute right-1 top-1/2 z-10 flex size-7 -translate-y-1/2 items-center justify-center rounded-full transition-colors {page
+						.url.pathname === '/explore/moods'
+						? 'text-primary'
+						: 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground'}"
+				>
+					<HugeiconsIcon icon={Archive02Icon} class="h-4 w-4" />
+				</a>
 			</form>
 
 			<a
