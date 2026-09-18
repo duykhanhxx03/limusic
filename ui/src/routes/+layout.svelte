@@ -46,7 +46,7 @@
 	import KeyboardShortcuts from '$lib/components/KeyboardShortcuts.svelte';
 	import HomeFeed from '$lib/components/HomeFeed.svelte';
 	import { Button } from '$lib/components/ui/button';
-	import { auth, initApp, np, playback, ui } from '$lib/player.svelte';
+	import { auth, chooseNpTab, initApp, np, playback, ui } from '$lib/player.svelte';
 	import { win, initWin } from '$lib/win.svelte';
 	import { initZoom } from '$lib/zoom';
 	import { initShortcuts } from '$lib/shortcuts';
@@ -65,6 +65,8 @@
 	// by side over the content; narrower, they stack (see QueuePanel / LyricsPanel).
 	let queueOpen = $state(false);
 	let lyricsOpen = $state(false);
+	/** The player bar's height, for `--bar-h` (see the root element). */
+	let barHeight = $state(0);
 	// Two ways the now-playing view and these panels can divide the same two buttons, picked in
 	// settings (#62). Tabbed (the default): the view carries queue and lyrics itself, so the panels
 	// step aside for it and the bar's buttons switch its tabs. Off: these are the only owner, the
@@ -206,12 +208,16 @@
 	     for us, so ours would only fight it.
 	     12px, not `rounded-lg`: that resolves to --radius, which every theme sets differently, so
 	     the window corner used to change with the theme. This is the GNOME/Adwaita value (#65). -->
+	<!-- --bar-h: the player bar's measured height, which the now-playing view reaches down under so
+	     that, when the bar slides away while lyrics are being read, the view's own background is
+	     what is left there rather than a bare strip. -->
 	<div
 		class="flex h-screen flex-col overflow-hidden bg-background text-foreground {win.maximized ||
 		ui.theaterOpen ||
 		win.chrome !== 'off'
 			? ''
 			: 'rounded-[12px]'}"
+		style="--bar-h:{barHeight}px"
 	>
 		<ResizeBorders />
 		<Titlebar />
@@ -227,6 +233,17 @@
 			style="--sidebar-open:{ui.sidebarWidth}px"
 		>
 			<Sidebar />
+			<!-- The sidebar, continued under the player bar. Only ever seen while lyrics are being
+			     read with the bar slid away (ui.immersive): without it the rail stopped short of the
+			     window's bottom edge and left a block of page colour where the bar had been. The
+			     now-playing view does the same for its own side (see NowPlaying). -->
+			{#if np.open}
+				<div
+					aria-hidden="true"
+					class="pointer-events-none absolute left-0 top-full bg-sidebar"
+					style="width: var(--sidebar-w); height: var(--bar-h)"
+				></div>
+			{/if}
 			<!-- dragScroll: dragging a card up to home's Shortcuts grid has to be possible from anywhere in
 			     the feed, so aiming at the top edge scrolls this container while the drag is in flight. -->
 			<main bind:this={mainEl} class="min-w-0 flex-1 overflow-y-auto" {@attach dragScroll}>
@@ -256,13 +273,26 @@
 			     z-20 on the wrapper, not the bar: the intro's transform makes this a stacking context,
 			     so a z on the footer inside would be trapped under it. The now-playing view is z-20 and
 			     earlier in the DOM, which is what puts it behind the bar as it slides in and out. -->
-			<div class="relative z-20" in:fly={{ y: 64, duration: 250, easing: cubicOut }}>
-				<PlayerBar
-					onToggleQueue={() => (tabbed ? (np.tab = 'queue') : (queueOpen = !queueOpen))}
-					queueOpen={tabbed ? np.tab === 'queue' : queueOpen}
-					onToggleLyrics={() => (tabbed ? (np.tab = 'lyrics') : (lyricsOpen = !lyricsOpen))}
-					lyricsOpen={tabbed ? np.tab === 'lyrics' : lyricsOpen}
-				/>
+			<div
+				class="relative z-20"
+				in:fly={{ y: 64, duration: 250, easing: cubicOut }}
+				bind:clientHeight={barHeight}
+			>
+				<!-- Its own element for the immersive slide: the wrapper above carries the intro's
+				     transform, and the two would fight over one. Translate only, so nothing reflows and
+				     the lyrics above don't move a pixel as it goes. -->
+				<div
+					class="transition-[translate,opacity] duration-[var(--duration-very-slow)] ease-[var(--ease-smooth-out)] {ui.immersive
+						? 'pointer-events-none translate-y-full opacity-0'
+						: ''}"
+				>
+					<PlayerBar
+						onToggleQueue={() => (tabbed ? chooseNpTab('queue') : (queueOpen = !queueOpen))}
+						queueOpen={tabbed ? np.tab === 'queue' : queueOpen}
+						onToggleLyrics={() => (tabbed ? chooseNpTab('lyrics') : (lyricsOpen = !lyricsOpen))}
+						lyricsOpen={tabbed ? np.tab === 'lyrics' : lyricsOpen}
+					/>
+				</div>
 			</div>
 		{/if}
 	</div>

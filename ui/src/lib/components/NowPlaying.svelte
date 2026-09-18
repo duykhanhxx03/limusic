@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { fade, scale } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import { slideUp } from '$lib/motion';
@@ -19,7 +19,8 @@
 	} from '@hugeicons/core-free-icons';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import * as api from '$lib/api';
-	import { np, playback, ui } from '$lib/player.svelte';
+	import { chooseNpTab, np, playback, ui } from '$lib/player.svelte';
+	import { durationSecs, lyricsFor, peekLyrics } from '$lib/prefetch.svelte';
 	import { canVideo, claimVideo, parkVideo, showVideo, video } from '$lib/video.svelte';
 	import { appearance } from '$lib/theme.svelte';
 	import { t } from '$lib/i18n.svelte';
@@ -87,6 +88,147 @@
 		api.togglePause();
 	}
 
+	// --- the tab follows the lyrics ------------------------------------------------------------
+	// The reader picks a tab and the view keeps to it (np.chosen, remembered across launches) —
+	// except that "Lyrics" over a track that has none is an empty panel, so for that track the view
+	// steps over to the queue, and steps back on the next track that has some. Stepping away waits
+	// out NO_LYRICS_GRACE_MS from the track change: the change is already a lot of motion, and the
+	// lookup often lands inside it anyway. Stepping back never waits.
+	//
+	// Keyed on the track alone. Picking Lyrics by hand over a lyric-less track is a request to see
+	// that empty panel, and it is not overruled — not even by a grace timer already running, which
+	// is what `np.choiceAt` is checked against.
+	const NO_LYRICS_GRACE_MS = 2500;
+	const readable = (l: api.Lyrics | null) => !!l && !l.instrumental && l.lines.length > 0;
+	const trackId = $derived(playback.now?.videoId);
+
+	$effect(() => {
+		const id = trackId;
+		if (!id || !tabbed) return;
+		return untrack(() => {
+			const now = playback.now;
+			if (!now || np.chosen !== 'lyrics') return;
+			const started = performance.now();
+			let live = true;
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			const settle = (l: api.Lyrics | null) => {
+				if (!live) return;
+				if (readable(l)) {
+					np.tab = 'lyrics';
+					return;
+				}
+				timer = setTimeout(
+					() => {
+						if (live && np.chosen === 'lyrics' && np.choiceAt < started) np.tab = 'queue';
+					},
+					Math.max(0, NO_LYRICS_GRACE_MS - (performance.now() - started))
+				);
+			};
+			const warm = peekLyrics(id);
+			if (warm !== undefined) settle(warm);
+			else {
+				// The same lookup LyricsView makes (and shares, see prefetch.svelte.ts): with the
+				// queue on screen there is no LyricsView to ask, and this is how the view finds out
+				// when to come back.
+				const album = playback.queue.items[playback.queue.currentIndex]?.album;
+				lyricsFor({
+					videoId: id,
+					title: now.title,
+					artists: now.artists,
+					album: album ?? undefined,
+					duration: durationSecs(now.duration)
+				}).then(settle, () => {});
+			}
+			return () => {
+				live = false;
+				clearTimeout(timer);
+			};
+		});
+	});
+
+	// --- reading mode --------------------------------------------------------------------------
+	// Lyrics are read, not operated. With them on screen, the music playing and the reader's hands
+	// off for IDLE_MS, everything that isn't the words goes: the collapse button, the tab strip,
+	// the pointer, and the player bar (the layout slides it away on `ui.immersive`). Anything the
+	// reader does — a nudge of the mouse, a key — brings it all straight back.
+	const IDLE_MS = 8000;
+	const canRest = $derived(tabbed && np.tab === 'lyrics' && !playback.paused);
+	$effect(() => {
+		if (!canRest) {
+			ui.immersive = false;
+			return;
+		}
+		let timer = setTimeout(() => (ui.immersive = true), IDLE_MS);
+		const wake = () => {
+			if (ui.immersive) ui.immersive = false;
+			clearTimeout(timer);
+			timer = setTimeout(() => (ui.immersive = true), IDLE_MS);
+		};
+		const events = ['pointermove', 'pointerdown', 'keydown', 'wheel'] as const;
+		for (const e of events) window.addEventListener(e, wake, { passive: true, capture: true });
+		return () => {
+			clearTimeout(timer);
+			for (const e of events) window.removeEventListener(e, wake, { capture: true });
+			ui.immersive = false;
+		};
+	});
+	// Fading chrome keeps its box (nothing reflows), but stops taking clicks while invisible.
+	const chrome = $derived(
+		`transition-opacity duration-[var(--duration-very-slow)] ${ui.immersive ? 'pointer-events-none opacity-0' : ''}`
+	);
+
+	// --- swipe the cover -----------------------------------------------------------------------
+	// Drag the artwork sideways to change track: left for the next one, right for the one before,
+	// the way a stack of covers would go. It follows the pointer 1:1, and springs back if let go
+	// short of SWIPE_COMMIT of its own width. A press that never travels SWIPE_START stays a click,
+	// which still toggles playback.
+	const SWIPE_START = 8;
+	const SWIPE_COMMIT = 0.22;
+	let dragX = $state(0);
+	let dragging = $state(false);
+	let swipePointer = -1;
+	let swipeFrom = 0;
+	let swipeWidth = $state(1);
+	// Set by a drag, read by the click the browser may still deliver on release.
+	let swiped = false;
+
+	function swipeDown(e: PointerEvent) {
+		if (e.button !== 0 || (e.target as Element).closest('[data-no-swipe]')) return;
+		swipePointer = e.pointerId;
+		swipeFrom = e.clientX;
+		swipeWidth = (e.currentTarget as HTMLElement).clientWidth || 1;
+		swiped = false;
+	}
+	function swipeMove(e: PointerEvent) {
+		if (e.pointerId !== swipePointer) return;
+		const dx = e.clientX - swipeFrom;
+		if (!dragging) {
+			if (Math.abs(dx) < SWIPE_START) return;
+			dragging = true;
+			(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+		}
+		dragX = dx;
+	}
+	function swipeEnd(e: PointerEvent) {
+		if (e.pointerId !== swipePointer) return;
+		swipePointer = -1;
+		if (!dragging) return;
+		const dx = dragX;
+		dragging = false;
+		dragX = 0;
+		swiped = true;
+		if (e.type === 'pointerup' && Math.abs(dx) > swipeWidth * SWIPE_COMMIT) {
+			if (dx < 0) api.nextTrack();
+			else api.prevTrack();
+		}
+	}
+	function onArtClick() {
+		if (swiped) {
+			swiped = false;
+			return;
+		}
+		toggle();
+	}
 </script>
 
 <!-- Covers the page but not the sidebar (you navigate away to minimise) and not the player bar,
@@ -100,9 +242,15 @@
 	in:slideUp={{ duration: 460 }}
 	out:slideUp={{ duration: 340 }}
 	onintroend={() => (settled = true)}
-	style="left: var(--sidebar-w)"
-	class="absolute inset-y-0 right-0 z-20 flex justify-center overflow-hidden bg-background px-4 py-4 sm:px-6 sm:py-6 lg:px-10 {inset}"
+	style="left: var(--sidebar-w); bottom: calc(-1 * var(--bar-h, 0px)); padding-bottom: calc(var(--bar-h, 0px) + 1.5rem)"
+	class="absolute top-0 right-0 z-20 flex justify-center overflow-hidden bg-background px-4 py-4 sm:px-6 sm:py-6 lg:px-10 {inset} {ui.immersive
+		? 'cursor-none'
+		: ''}"
 >
+	<!-- The view reaches down under the player bar (`bottom`), padded back up by the same amount so
+	     nothing inside moves. The bar paints over that strip; the strip is only seen when the bar
+	     slides away while lyrics are being read, and then it is this view's own background there,
+	     not a bare band of page colour. -->
 	<!-- The artwork itself, blurred to a wash, is the background: same trick as HomeHero, and it
 	     needs no colour extraction (which a remote image would taint the canvas for anyway). The
 	     120px variant is the one the player bar has already loaded for this track, so this costs
@@ -145,7 +293,7 @@
 		onclick={() => (np.open = false)}
 		aria-label={t('player.minimize_player')}
 		title={t('player.minimize_player')}
-		class="absolute left-4 top-4 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-foreground/8 text-muted-foreground transition-colors hover:bg-foreground/15 hover:text-foreground"
+		class="absolute left-4 top-4 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-foreground/8 text-muted-foreground transition-colors hover:bg-foreground/15 hover:text-foreground {chrome}"
 	>
 		<HugeiconsIcon icon={ArrowDown01Icon} class="h-5 w-5" />
 	</button>
@@ -179,12 +327,23 @@
 				<!-- No wheel handler here any more: scrolling over the artwork used to be the volume, and
 				     next to the lyrics column the same gesture meant two different things. The volume
 				     slider in the player bar still takes the wheel, since the pointer has to be on it. -->
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<div
-					class="relative w-full {showVideo() ? 'max-w-[var(--vid)]' : 'max-w-[var(--art)]'}"
+					class="relative w-full touch-pan-y select-none {showVideo()
+						? 'max-w-[var(--vid)]'
+						: 'max-w-[var(--art)]'} {dragging
+						? ''
+						: 'transition-[translate,opacity] duration-[var(--duration-fast)] ease-[var(--ease-smooth-out)]'}"
+					style="translate: {dragX}px 0; opacity: {1 - Math.min(Math.abs(dragX) / swipeWidth, 1) * 0.5}"
+					onpointerdown={swipeDown}
+					onpointermove={swipeMove}
+					onpointerup={swipeEnd}
+					onpointercancel={swipeEnd}
+					ondragstart={(e) => e.preventDefault()}
 				>
 					<button
 						type="button"
-						onclick={toggle}
+						onclick={onArtClick}
 						aria-label={t('a11y.play_pause')}
 						class="block w-full cursor-pointer"
 					>
@@ -237,9 +396,10 @@
 						     over whatever frame happens to be showing. -->
 						<button
 							type="button"
+							data-no-swipe
 							onclick={() => (video.want = !video.want)}
 							aria-label={showVideo() ? t('a11y.show_artwork') : t('a11y.show_video')}
-							class="absolute right-3 top-3 z-10 cursor-pointer rounded-md bg-black/40 p-1.5 text-white/70 transition-colors hover:text-white"
+							class="absolute right-3 top-3 z-10 cursor-pointer rounded-md bg-black/40 p-1.5 text-white/70 transition-colors hover:text-white {chrome}"
 						>
 							<!-- icon swap via altIcon/showAlt: `icon` is frozen at mount -->
 							<HugeiconsIcon
@@ -260,10 +420,10 @@
 			<div class="flex min-h-0 min-w-0 flex-col {big ? 'flex-1' : 'w-full md:w-auto md:flex-[5]'}">
 				<Tabs.Root
 					value={np.tab}
-					onValueChange={(v) => (np.tab = v as typeof np.tab)}
+					onValueChange={(v) => chooseNpTab(v as typeof np.tab)}
 					class="min-h-0 flex-1"
 				>
-					<div class="flex items-center gap-2 {big ? 'justify-end' : ''}">
+					<div class="flex items-center gap-2 {big ? 'justify-end' : ''} {chrome}">
 						<!-- Same two glyphs the player bar uses for the queue and lyrics buttons. -->
 						<Tabs.List class={big ? 'hidden' : 'flex-1'}>
 							<Tabs.Trigger value="queue" class="gap-2.5">

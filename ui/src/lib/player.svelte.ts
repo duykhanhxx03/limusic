@@ -49,7 +49,30 @@ export const playback = $state({
  * "play this" path already goes through this module. The open has to happen at the click: a
  * gapless advance looks exactly like a user play from the `now-playing` event alone.
  */
-export const np = $state({ open: false, tab: 'queue' as 'queue' | 'lyrics' });
+const NP_TAB_KEY = 'np_tab';
+const storedNpTab = (): 'queue' | 'lyrics' =>
+	browser && localStorage.getItem(NP_TAB_KEY) === 'lyrics' ? 'lyrics' : 'queue';
+
+export const np = $state({
+	open: false,
+	/** The tab on screen. */
+	tab: storedNpTab(),
+	/** The tab the reader picked, remembered across launches. `tab` steps off it to the queue while
+	 *  a track has no lyrics to show, and back onto it when the next one does (NowPlaying). */
+	chosen: storedNpTab(),
+	/** `performance.now()` of the last pick, so an automatic switch already scheduled can tell it
+	 *  has been overruled since. */
+	choiceAt: 0
+});
+
+/** A tab picked by the reader — the tab strip, or the player bar's queue and lyrics buttons: shown
+ *  now, and the one the view opens on next time. */
+export function chooseNpTab(tab: 'queue' | 'lyrics') {
+	np.tab = tab;
+	np.chosen = tab;
+	np.choiceAt = performance.now();
+	if (browser) localStorage.setItem(NP_TAB_KEY, tab);
+}
 
 /**
  * Backend settings the app has to know outside the settings modal (which holds the rest in its own
@@ -1089,6 +1112,9 @@ export const ui = $state({
 	linkOpen: false, // the "open a pasted link" modal
 	paletteOpen: false, // the Ctrl+K search palette
 	theaterOpen: false, // fullscreen theater view (artwork + lyrics)
+	// Reading lyrics with the pointer left alone: the now-playing view drops its chrome and the
+	// player bar slides away (NowPlaying sets it, the layout reads it).
+	immersive: false,
 	shortcutsOpen: false, // the Ctrl+H (⌘/ on macOS) keyboard-shortcuts list
 	channelPickerOpen: false,
 	channelPickerRequired: false, // true while a multi-channel login is not finalized yet

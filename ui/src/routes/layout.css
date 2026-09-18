@@ -904,6 +904,21 @@ input[type='range'].range::-webkit-slider-thumb {
 	opacity: 0;
 	transition: opacity 0.15s ease, transform 0.15s ease;
 }
+/* The player bar's seek has no knob: the bar is the handle. It thickens under the pointer and
+   again while held, so what you are grabbing is the whole width rather than a 12px dot that only
+   appears on hover. The thumb stays (invisible) because WebKit positions the value by it. */
+input[type='range'].range.seek::-webkit-slider-runnable-track {
+	transition: height var(--duration-quick) var(--ease-smooth-out);
+}
+input[type='range'].range.seek:hover::-webkit-slider-runnable-track {
+	height: 6px;
+}
+input[type='range'].range.seek:active::-webkit-slider-runnable-track {
+	height: 8px;
+}
+input[type='range'].range.seek::-webkit-slider-thumb {
+	opacity: 0 !important;
+}
 /* Theater mode's bar is the width of the cover and is being read from across a room, where 4px on
    that width reads as a hairline. */
 input[type='range'].range.theater-range::-webkit-slider-runnable-track {
@@ -924,6 +939,22 @@ input[type='range'].range:focus-visible::-webkit-slider-thumb {
 }
 input[type='range'].range:active::-webkit-slider-thumb {
 	transform: scale(1.25);
+}
+
+/* Transport buttons: they dip under the pointer and spring back a touch past rest on release — a
+   press you can see, which matters most on play/pause, where the icon swap waits for mpv. `scale`,
+   not `transform`, so it composes with the Button's own `translate` on :active. */
+.press {
+	transition:
+		scale var(--duration-fast) var(--ease-bounce),
+		color var(--duration-quick),
+		background-color var(--duration-quick),
+		box-shadow var(--duration-quick);
+}
+.press:active {
+	scale: 0.88;
+	transition-duration: var(--duration-micro);
+	transition-timing-function: var(--ease-out);
 }
 
 /* Custom scrollbars everywhere (KI-5). WebKitGTK paints its *native* overlay

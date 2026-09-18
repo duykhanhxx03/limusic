@@ -344,6 +344,7 @@
 			<Button
 				variant="ghost"
 				size="icon-sm"
+				class="press"
 				onclick={() => api.toggleShuffle()}
 				aria-label={t('player.shuffle')}
 				aria-pressed={shuffleOn}
@@ -353,13 +354,13 @@
 					class="h-4 w-4 {shuffleOn ? 'text-primary' : 'text-muted-foreground'}"
 				/>
 			</Button>
-			<Button variant="ghost" size="icon-sm" onclick={() => api.prevTrack()} aria-label={t('player.previous')}>
+			<Button variant="ghost" size="icon-sm" class="press" onclick={() => api.prevTrack()} aria-label={t('player.previous')}>
 				<HugeiconsIcon icon={PreviousIcon} class="h-5 w-5" />
 			</Button>
 			<Button
 				variant="default"
 				size="icon"
-				class="rounded-full"
+				class="press rounded-full"
 				onclick={() => api.togglePause()}
 				aria-label={playback.paused ? t('player.play') : t('player.pause')}
 			>
@@ -372,12 +373,13 @@
 				class="h-5 w-5"
 			/>
 			</Button>
-			<Button variant="ghost" size="icon-sm" onclick={() => api.nextTrack()} aria-label={t('player.next')}>
+			<Button variant="ghost" size="icon-sm" class="press" onclick={() => api.nextTrack()} aria-label={t('player.next')}>
 				<HugeiconsIcon icon={NextIcon} class="h-5 w-5" />
 			</Button>
 			<Button
 				variant="ghost"
 				size="icon-sm"
+				class="press"
 				onclick={cycleRepeat}
 				aria-label={t('player.repeat_state', {
 					state: repeat === 'off' ? t('player.repeat_off') : repeat === 'one' ? t('player.repeat_one') : t('player.repeat_all')
@@ -397,7 +399,7 @@
 			<span class="tabular-nums">{fmt(shownPosition)}</span>
 			<input
 				type="range"
-				class="range flex-1"
+				class="range seek flex-1"
 				style="--pct:{playback.duration ? (shownPosition / playback.duration) * 100 : 0}%"
 				min="0"
 				max={playback.duration || 0}
