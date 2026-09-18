@@ -12,6 +12,10 @@
  * soft edge, depth is a blur filter, and nothing is rasterised again until the layout changes. At
  * rest every position is snapped to the device pixel grid, so still text is as sharp as the DOM's.
  *
+ * Every line but the sung one goes one step further: it is drawn once more, blur and all, into a
+ * texture of its own, redrawn only when something inside it changes. At rest it costs one textured
+ * quad a frame instead of a draw call per word and a blur per frame.
+ *
  * Time comes from the same `MediaClock` the DOM view uses; which line is sung, and whether an
  * interlude is on, is still decided by `LyricsView` and handed in. This file only draws.
  */
@@ -25,9 +29,11 @@ import {
 	Mesh,
 	MeshGeometry,
 	Rectangle,
+	RendererType,
 	Shader,
 	Sprite,
 	Texture,
+	Ticker,
 	UniformGroup
 } from 'pixi.js';
 import type { LyricLine } from '$lib/api';
@@ -181,6 +187,13 @@ function setSpacing(ctx: CanvasRenderingContext2D, px: number) {
 	if ('letterSpacing' in ctx) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${px}px`;
 }
 
+/** The smallest whole number of CSS px that is also a whole number of device px: 1 at a ratio of 1
+ *  or 2, 4 at 1.25, 5 at the app's zoom steps of 0.2. 0 when no step small enough exists. */
+function pixelGrid(dpr: number): number {
+	for (let k = 1; k <= 16; k++) if (Math.abs(k * dpr - Math.round(k * dpr)) < 1e-3) return k;
+	return 0;
+}
+
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
 /** CSS `ease-in-out`, near enough: the app's token for a content swap. */
@@ -192,6 +205,17 @@ const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t 
 const SWAP_OUT_MS = 150;
 const SWAP_IN_MS = 400;
 const SWAP_RISE = 8;
+
+/** Rows rasterised per frame while new lyrics are still all but invisible: laying out a whole
+ *  set at once cost one 15–50 ms frame, and a row arriving a frame late is unseen at that opacity. */
+const BUILD_BUDGET = 5;
+/** A resize that rewraps the lines does so at most this often; in between, the old layout stays.
+ *  Rewrapping rebuilds every row on screen, which a window or panel drag asked for every frame. */
+const REWRAP_MS = 200;
+/** The interlude dots, when nothing else moves, redraw this often rather than every display frame:
+ *  their fill and breath move them a quarter of a pixel at most in that time, too little to see
+ *  the steps, and a sung word or a scroll still gets every frame. */
+const DOTS_MS = 50;
 
 const reducedMotion =
 	typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -205,7 +229,8 @@ type Token = {
 	start: number;
 	end: number;
 	timed: boolean;
-	/** Position of the word's box inside the row's text area, CSS px, snapped to device pixels. */
+	/** Position of the word's box inside the row's text area, CSS px, placed on device pixels in
+	 *  the row (`tokenize`). */
 	x: number;
 	y: number;
 	w: number;
@@ -223,7 +248,15 @@ type Row = {
 	height: number;
 	/** Layout top in content coordinates, CSS px. */
 	top: number;
+	/** Placed, scaled and faded as a whole; the unit a row is cached as (`settle`). */
 	node: Container;
+	/** What the row draws, one level inside `node`. The blur sits here rather than on `node` so
+	 *  a cached row keeps it baked into its texture instead of blurring that texture every frame. */
+	body: Container;
+	/** `node` is drawn from a texture of itself. */
+	cached: boolean;
+	/** Something drawn inside the row changed this frame, so a cached row redraws its texture. */
+	dirty: boolean;
 	built: boolean;
 	sources: CanvasSource[];
 	y: Spring;
@@ -260,10 +293,26 @@ type Metrics = {
 	cellPad: number;
 	dot: number;
 	dotGap: number;
+	/** `pixelGrid(dpr)`: where a row's cache texture may start so that it lines up with the
+	 *  screen's pixels. 0 turns caching off. */
+	grid: number;
 };
+
+/** What the next frame is for: nothing, only the interlude dots (a slower one will do), or motion. */
+type Pace = 'rest' | 'dots' | 'full';
 
 export class LyricStage {
 	static async create(opts: StageOptions): Promise<LyricStage> {
+		// Pixi's global system ticker is not the app's ticker stopped below. The renderer's
+		// scheduler (which drives its GPU garbage collector) and the event system's hover poller
+		// both add listeners to it during `init`, and it starts itself on the first one: a
+		// requestAnimationFrame every frame for as long as a stage lives, paused or not, which
+		// keeps the page awake at 60 Hz and defeats the sleep in `frame`. Kept stopped, it is
+		// advanced by `frame` instead, only while something is drawn. The poller loses nothing:
+		// it only re-tests `dynamic` targets under a still pointer, and the rows are `static`.
+		// Hover and click-to-seek come from the DOM pointer events the event system listens to.
+		Ticker.system.autoStart = false;
+		Ticker.system.stop();
 		const app = new Application();
 		const { clientWidth: w, clientHeight: h } = opts.host;
 		await app.init({
@@ -308,6 +357,11 @@ export class LyricStage {
 
 	private frameId = 0;
 	private lastTs = 0;
+	/** The slower frame the interlude dots asked for (`DOTS_MS`); `kick` replaces it. */
+	private dotsTimer: ReturnType<typeof setTimeout> | undefined;
+	/** A rewrap a resize put off (`REWRAP_MS`), and when the last one ran. */
+	private rewrapTimer: ReturnType<typeof setTimeout> | undefined;
+	private rewrapAt = 0;
 	private readonly measurer = document.createElement('canvas').getContext('2d')!;
 	private readonly resizeObserver: ResizeObserver;
 	private readonly themeObserver: MutationObserver;
@@ -359,6 +413,8 @@ export class LyricStage {
 		this.dead = true;
 		cancelAnimationFrame(this.frameId);
 		clearTimeout(this.browseTimer);
+		clearTimeout(this.dotsTimer);
+		clearTimeout(this.rewrapTimer);
 		this.resizeObserver.disconnect();
 		this.themeObserver.disconnect();
 		this.host.removeEventListener('wheel', this.onWheel);
@@ -492,9 +548,13 @@ export class LyricStage {
 			// Half-leading, as CSS places a glyph run in its line box.
 			ascent: (lineH - (asc + desc)) / 2 + asc,
 			transAscent: (20 - (tAsc + tDesc)) / 2 + tAsc,
-			cellPad: Math.ceil(size * 0.5),
+			// Rounded up to whole device pixels: a word's cell starts this far before the word, and at
+			// a ratio like 1.25 a padding of 21 px (26.25 device px) put every glyph between pixels,
+			// drawn soft even at rest and softer again through a cached row's texture.
+			cellPad: Math.ceil(Math.ceil(size * 0.5) * dpr) / dpr,
 			dot: expanded ? 12 : 8,
-			dotGap: expanded ? 10 : 8
+			dotGap: expanded ? 10 : 8,
+			grid: pixelGrid(dpr)
 		};
 	}
 
@@ -503,23 +563,51 @@ export class LyricStage {
 		if (!w || !h) return;
 		const m = this.metrics();
 		this.app.renderer.resize(w, h, m.dpr);
+		const old = this.m;
 		const same =
-			m.size === this.m.size &&
-			m.colW === this.m.colW &&
-			m.dpr === this.m.dpr &&
-			m.family === this.m.family;
-		this.m = m;
+			m.size === old.size && m.colW === old.colW && m.dpr === old.dpr && m.family === old.family;
 		if (same) {
+			clearTimeout(this.rewrapTimer);
+			this.rewrapTimer = undefined;
+			this.m = m;
 			this.focus(false);
 			this.kick();
-		} else {
-			this.relayout(false);
+			return;
 		}
+		const wait = this.rewrapAt + REWRAP_MS - performance.now();
+		if (wait <= 0) {
+			this.m = m;
+			this.relayout(false);
+			return;
+		}
+		// A drag resizes every frame, and a rewrap rebuilds every row on screen. Until the next one
+		// is due the rows keep the layout they were built for, only moved to stay centred in the
+		// new width (the page's column hangs from its left edge, so it stays put).
+		const centred = !this.page || this.expanded;
+		this.m = {
+			...old,
+			colX: centred ? Math.round(((w - old.colW) / 2) * old.dpr) / old.dpr : old.colX,
+			bottom: m.bottom
+		};
+		this.focus(false);
+		this.kick();
+		this.rewrapTimer ??= setTimeout(() => {
+			this.rewrapTimer = undefined;
+			if (!this.dead) this.resize();
+		}, wait);
 	}
 
 	// --- layout ---------------------------------------------------------------------------------
 
 	private relayout(animate: boolean) {
+		// A rewrap a resize put off happens here instead, with the metrics it was waiting for; the
+		// ones in `this.m` meanwhile are the old layout's.
+		if (this.rewrapTimer !== undefined) {
+			clearTimeout(this.rewrapTimer);
+			this.rewrapTimer = undefined;
+			this.m = this.metrics();
+		}
+		this.rewrapAt = performance.now();
 		for (const row of [...this.rows, ...this.leaving]) this.dropRow(row);
 		this.rows = [];
 		this.leaving = [];
@@ -579,7 +667,14 @@ export class LyricStage {
 
 		let x = 0;
 		let y = 0;
+		// Every word on the device pixel grid, down as well as across: a line height like 51.92 px
+		// put a wrapped line and a translation between pixel rows, so a cached row resampled them
+		// once into its texture and again drawing it scaled or moving, softer than the line above.
+		// Down, it is the word's place in the row that lands on the grid: the text area starts `padY`
+		// below the row's top, which at a ratio like 1.2 is between pixels itself. Only the words
+		// move; the rows keep their measured height, and the layout its place.
 		const snap = (v: number) => Math.round(v * m.dpr) / m.dpr;
+		const snapY = (v: number) => snap(m.padY + v) - m.padY;
 		for (const u of units) {
 			const width = u.reduce((sum, t) => sum + t.w, 0);
 			if (x > 0 && x + width > m.colW) {
@@ -588,7 +683,7 @@ export class LyricStage {
 			}
 			for (const t of u) {
 				t.x = snap(x);
-				t.y = y;
+				t.y = snapY(y);
 				x += t.w;
 				tokens.push(t);
 			}
@@ -616,7 +711,7 @@ export class LyricStage {
 					end: 0,
 					timed: false,
 					x: snap(x),
-					y,
+					y: snapY(y),
 					w,
 					lift: 0
 				});
@@ -630,6 +725,8 @@ export class LyricStage {
 	private makeRow(index: number, tokens: Token[], textH: number, dots = false): Row {
 		const m = this.m;
 		const node = new Container();
+		const body = new Container();
+		node.addChild(body);
 		this.app.stage.addChild(node);
 		const row: Row = {
 			index,
@@ -638,6 +735,9 @@ export class LyricStage {
 			height: dots ? m.dot + (this.expanded ? 32 : 16) : textH + m.padY * 2,
 			top: 0,
 			node,
+			body,
+			cached: false,
+			dirty: false,
 			built: false,
 			sources: [],
 			y: new Spring(0),
@@ -831,6 +931,40 @@ export class LyricStage {
 		row.sources.push(source);
 		const glowSource = glowCanvas ? new CanvasSource({ resource: glowCanvas, resolution: 1 }) : null;
 		if (glowSource) row.sources.push(glowSource);
+		// Uploaded now, the canvases can let go of their pixels: kept, each is a second copy of the
+		// row's atlas in memory for as long as the row is built. Nothing reads them again. These
+		// sources are never updated or resized, texture sources are not garbage-collected unless
+		// asked (`autoGarbageCollect`), and a lost context ends the stage (`onLost`) rather than
+		// restoring it. WebGL only, where the upload copies the pixels.
+		if (this.app.renderer.type === RendererType.WEBGL) {
+			for (const s of row.sources) this.app.renderer.texture.initSource(s);
+			for (const c of [canvas, glowCanvas]) if (c) c.width = c.height = 0;
+		}
+
+		// The row's drawn extent: every cell, padding and all, which is where a blur or a glow can
+		// reach, and a word's lift above that. As `boundsArea` it is also the texture the row is
+		// cached into (`settle`), so it lies on the pixel grid: starting on it, the words land in the
+		// texture pixel for pixel as they would on screen, and a cached row at rest is the same image
+		// as a live one; a whole number of device pixels across, a blur drawn into it is not
+		// stretched (Pixi sizes the blur's output by the texture's size in CSS px, but its viewport
+		// in whole pixels).
+		if (m.grid) {
+			const g = m.grid;
+			let right = 0;
+			let bottom = 0;
+			for (let k = 0; k < tokens.length; k++) {
+				right = Math.max(right, tokens[k].x - pad + cells[k].w / dpr);
+				bottom = Math.max(bottom, m.padY + tokens[k].y - pad + cells[k].h / dpr);
+			}
+			const left = Math.floor(-pad / g) * g;
+			const top = Math.floor((m.padY - pad - LIFT * m.size - 1) / g) * g;
+			row.node.boundsArea = new Rectangle(
+				left,
+				top,
+				Math.ceil((right - left) / g) * g,
+				Math.ceil((bottom - top) / g) * g
+			);
+		}
 
 		for (let k = 0; k < tokens.length; k++) {
 			const t = tokens[k];
@@ -865,10 +999,11 @@ export class LyricStage {
 				glow.scale.set(1 / dpr);
 				glow.position.set(t.x - pad, m.padY + t.y - pad);
 				glow.alpha = 0;
-				row.node.addChild(glow);
+				glow.visible = false;
+				row.body.addChild(glow);
 				t.glow = glow;
 			}
-			row.node.addChild(mesh);
+			row.body.addChild(mesh);
 		}
 		this.tint(row);
 	}
@@ -885,7 +1020,7 @@ export class LyricStage {
 			shapes.push(g);
 		}
 		group.position.set(0, row.height / 2);
-		row.node.addChild(group);
+		row.body.addChild(group);
 		row.dotShapes = shapes;
 		row.dotGroup = group;
 		this.tint(row);
@@ -897,11 +1032,13 @@ export class LyricStage {
 			if (t.glow) t.glow.tint = this.color;
 		}
 		for (const g of row.dotShapes ?? []) g.tint = this.color;
+		row.dirty = true;
 	}
 
 	private unbuild(row: Row) {
 		if (!row.built) return;
 		row.built = false;
+		this.settle(row, false);
 		for (const t of row.tokens) {
 			if (t.mesh) {
 				// A mesh does not own its geometry or shader, and their GPU buffers outlive it.
@@ -915,12 +1052,12 @@ export class LyricStage {
 			t.sweep = undefined;
 			t.glow = undefined;
 		}
-		for (const child of row.node.removeChildren()) child.destroy({ children: true });
+		for (const child of row.body.removeChildren()) child.destroy({ children: true });
 		for (const source of row.sources) source.destroy();
 		row.sources = [];
 		row.dotShapes = undefined;
 		row.dotGroup = undefined;
-		row.node.filters = null;
+		row.body.filters = null;
 		row.filter?.destroy();
 		row.filter = null;
 	}
@@ -928,6 +1065,36 @@ export class LyricStage {
 	private dropRow(row: Row) {
 		this.unbuild(row);
 		row.node.destroy({ children: true });
+	}
+
+	/** Draw the row from a texture of itself while `cache` holds: the row is shown and is not the
+	 *  sung line, whose words change every frame. Its place, scale and opacity stay free, because
+	 *  they apply to the texture as a whole. Anything that changes inside it (a sweep flipping on a
+	 *  seek, a lift or dimming or blur easing, the theme's colour) marks it `dirty`, and the texture
+	 *  is redrawn that frame, which costs about what drawing the row directly would.
+	 *
+	 *  Redrawn rather than drawn directly while it eases, because at a fractional pixel ratio Pixi
+	 *  lands a blur drawn to the screen over half a pixel away from the same blur drawn into a
+	 *  texture: a row handed from one to the other when its blur settled would twitch. */
+	private settle(row: Row, cache: boolean) {
+		if (cache && row.built && row.node.boundsArea) {
+			if (!row.cached) {
+				row.node.cacheAsTexture({ resolution: this.m.dpr });
+				row.cached = true;
+			} else if (row.dirty) {
+				row.node.updateCacheTexture();
+			}
+		} else if (row.cached) {
+			row.node.cacheAsTexture(false);
+			row.cached = false;
+			// Pixi (8.20) leaves the children's inherited opacity as it was inside the cached group,
+			// which the row's own alpha did not reach, and recomputes it only when that alpha next
+			// changes: a dimmed row would come back at full strength. Re-adding the body is what
+			// makes it recompute them now.
+			row.node.removeChild(row.body);
+			row.node.addChild(row.body);
+		}
+		row.dirty = false;
 	}
 
 	// --- the frame loop -------------------------------------------------------------------------
@@ -938,6 +1105,9 @@ export class LyricStage {
 	};
 
 	private kick() {
+		// A display frame does whatever the slower one the dots asked for would have.
+		clearTimeout(this.dotsTimer);
+		this.dotsTimer = undefined;
 		if (!this.frameId && !this.dead) this.frameId = requestAnimationFrame(this.frame);
 	}
 
@@ -946,21 +1116,30 @@ export class LyricStage {
 		if (this.dead) return;
 		const dt = this.lastTs ? Math.min(100, ts - this.lastTs) : 16;
 		this.lastTs = ts;
-		const moving = this.update(ts, dt);
+		const pace = this.update(ts, dt);
+		// The system ticker stopped in `create`, advanced by hand. The GPU garbage collector it
+		// clocks falls due here and collects after the render below, the only place it ever did,
+		// so it loses nothing by waiting while the stage sleeps and nothing is drawn.
+		Ticker.system.update(ts);
 		this.app.render();
-		if (moving) this.kick();
-		else this.lastTs = 0;
+		if (pace === 'full') this.kick();
+		else {
+			// Until the next kick nothing moves but the dots, which are painted from the clock, not
+			// from `dt`. That kick can land anywhere in the dots' wait, up to `DOTS_MS` after this
+			// frame; timed from here, the first step of whatever it sets moving would jump.
+			this.lastTs = 0;
+			if (pace === 'dots') this.dotsTimer = setTimeout(() => this.kick(), DOTS_MS);
+		}
 	};
 
-	/** Advance everything to wall time `now`; true while anything is still in motion. */
-	private update(now: number, dtMs: number): boolean {
-		const m = this.m;
+	/** Advance everything to wall time `now`, and say what the next frame is for. */
+	private update(now: number, dtMs: number): Pace {
 		const ms = this.clock.valueAt(now) * 1000;
 		const playing = !this.clock.isPaused;
 		const viewH = this.host.clientHeight;
 		const dt = dtMs / 1000;
-		const snap = (v: number) => Math.round(v * m.dpr) / m.dpr;
 		let moving = false;
+		let dots = false;
 
 		let fade = 1;
 		let rise = 0;
@@ -983,6 +1162,17 @@ export class LyricStage {
 		}
 		if (this.app.stage.alpha !== fade) this.app.stage.alpha = fade;
 		if (this.app.stage.y !== rise) this.app.stage.y = rise;
+
+		// Read after the swap, which may have laid out new lines (and, with a rewrap pending, for
+		// new metrics).
+		const m = this.m;
+		const snap = (v: number) => Math.round(v * m.dpr) / m.dpr;
+		// How far past its box a row can draw: its cells' padding, which holds a glow, a blur's
+		// spread and a lifted word.
+		const reach = m.cellPad * 2;
+		// New lyrics are still all but invisible for their first few frames (`easeInOut` is under 5%
+		// for the first ~90 ms); their rows are rasterised a few a frame while that lasts.
+		let budget = this.swap?.phase === 'in' && fade < 0.05 ? BUILD_BUDGET : Infinity;
 
 		for (const row of this.rows) {
 			const focusIndex = this.interlude ? -1 : this.active;
@@ -1018,11 +1208,28 @@ export class LyricStage {
 				continue;
 			}
 			if (!onScreen) {
+				this.settle(row, false);
 				row.node.visible = false;
 				continue;
 			}
-			this.build(row);
-			row.node.visible = true;
+			if (!row.built) {
+				if (budget <= 0) {
+					row.node.visible = false;
+					moving = true;
+					continue;
+				}
+				budget--;
+				this.build(row);
+			}
+			// Built ahead in the band around the canvas, drawn only where it meets it. A row that is
+			// not drawn is not painted either: what it shows is worked out afresh from the clock
+			// when it comes back, and it no longer keeps frames coming for nobody to see.
+			const shown = y + rise + row.height + reach > 0 && y + rise - reach < viewH;
+			row.node.visible = shown;
+			if (!shown) {
+				this.settle(row, false);
+				continue;
+			}
 
 			const node = row.node;
 			const settled = row.y.resting && row.scale.resting;
@@ -1030,21 +1237,40 @@ export class LyricStage {
 			node.position.set(m.colX, (settled ? snap(y) : y) + row.height / 2);
 			node.scale.set(row.scale.value);
 			node.alpha = row.alpha;
+			const body = row.body;
 			if (row.blur > 0.05) {
-				row.filter ??= new BlurFilter({ strength: 0, quality: 3, resolution: m.dpr });
-				row.filter.strength = row.blur;
-				// Room for the whole kernel; with Pixi's default the spread was cut off in a hard seam.
-				row.filter.padding = Math.ceil(row.blur * 4) + 2;
-				if (node.filters?.[0] !== row.filter) node.filters = [row.filter];
-			} else if (node.filters) {
-				node.filters = null;
+				if (!row.filter) {
+					row.filter = new BlurFilter({ strength: 0, quality: 3, resolution: m.dpr });
+					// Pixi clips a filter to the canvas, measured from where it draws to. Into a
+					// cached row's texture, that is the texture's corner rather than the row's place
+					// on screen, and a row taller than the canvas would lose its lower part.
+					row.filter.clipToViewport = false;
+				}
+				if (row.filter.strength !== row.blur) {
+					row.filter.strength = row.blur;
+					// Room for the whole kernel; with Pixi's default the spread was cut off in a hard seam.
+					// In whole device pixels as well: Pixi lines the blur's area up with them before
+					// padding it, and at a ratio like 1.25 a padding that is not moved the blurred line
+					// a pixel or more off where it sits unblurred.
+					const g = m.grid || 1;
+					row.filter.padding = Math.ceil((Math.ceil(row.blur * 4) + 2) / g) * g;
+					row.dirty = true;
+				}
+				if (body.filters?.[0] !== row.filter) {
+					body.filters = [row.filter];
+					row.dirty = true;
+				}
+			} else if (body.filters) {
+				body.filters = null;
+				row.dirty = true;
 			}
 
 			if (row.dots) {
-				if (this.paintDots(row, ms, now, playing)) moving = true;
+				if (this.paintDots(row, ms, now, playing)) dots = true;
 				continue;
 			}
 			if (this.paintWords(row, isAnchor, ms, playing, dtMs)) moving = true;
+			this.settle(row, !isAnchor);
 		}
 
 		this.leaving = this.leaving.filter((row) => {
@@ -1058,10 +1284,11 @@ export class LyricStage {
 			moving = true;
 			return true;
 		});
-		return moving;
+		return moving ? 'full' : dots ? 'dots' : 'rest';
 	}
 
-	/** Sweep, lift and glow for one row's words. True while they are still changing. */
+	/** Sweep, lift and glow for one row's words. True while they are still changing. Every value it
+	 *  changes marks the row `dirty`, which is what redraws a cached row's texture. */
 	private paintWords(row: Row, sung: boolean, ms: number, playing: boolean, dtMs: number): boolean {
 		const m = this.m;
 		const band = BAND * m.size;
@@ -1086,14 +1313,32 @@ export class LyricStage {
 				p = row.index < this.active || (this.interlude && row.index < this.interlude.at) ? 1 : 0;
 			}
 			const edge = p * (t.w + band * 2) - band;
-			if (u.uEdge !== edge) u.uEdge = edge;
-			if (u.uDim !== row.dim) u.uDim = row.dim;
+			if (u.uEdge !== edge) {
+				u.uEdge = edge;
+				row.dirty = true;
+			}
+			if (u.uDim !== row.dim) {
+				u.uDim = row.dim;
+				row.dirty = true;
+			}
 			t.lift = sung ? rise : approach(t.lift, 0, dtMs, 90, 0.01);
 			if (t.lift !== 0 && !sung) moving = true;
-			t.mesh.position.y = m.padY + t.y + t.lift;
+			const y = m.padY + t.y + t.lift;
+			if (t.mesh.position.y !== y) {
+				t.mesh.position.y = y;
+				row.dirty = true;
+			}
 			if (t.glow) {
-				t.glow.alpha = glow;
-				t.glow.position.y = m.padY + t.y + t.lift - m.cellPad;
+				// Under 1/255 the glow's alpha packs to zero and it draws nothing, which is almost
+				// all the time: then it is not drawn at all.
+				const lit = glow >= 1 / 255;
+				const gy = y - m.cellPad;
+				if (t.glow.visible !== lit || t.glow.alpha !== glow || t.glow.position.y !== gy) {
+					t.glow.visible = lit;
+					t.glow.alpha = glow;
+					t.glow.position.y = gy;
+					row.dirty = true;
+				}
 			}
 		}
 		return moving;

@@ -207,6 +207,28 @@
 		return lastWord?.end_ms ?? l.end_time_ms ?? l.time_ms ?? 0;
 	}
 
+	/** Whether a line says when its singing stops: its words carry their own ends, and some sources
+	 *  close the line itself. A plain LRC line only says when it starts. */
+	function hasEnd(l: api.LyricLine): boolean {
+		return !!l.words?.length || l.end_time_ms != null;
+	}
+
+	/** A line with nothing to sing: an empty LRC line, which is how LRC marks a gap, or one that is
+	 *  only a note sign, which some files write for the same thing and this view draws for it. */
+	const UNSUNG = /^[\s♩♪♫♬]*$/;
+
+	/** When the singing before line `i + 1` stops, or null when nothing says. Before the first line
+	 *  that is the start of the song, and a line with nothing to sing is the gap's own mark, so it
+	 *  stops at its cue. A sung line with no known end is neither: taking its cue as its end put the
+	 *  dots under it while it was still being sung, on every slow line whose next cue was five
+	 *  seconds off, and kept the renderer drawing them at full rate for most of a slow song. */
+	function silentFrom(i: number): number | null {
+		if (i < 0) return 0;
+		const l = lines[i];
+		if (!l || (!hasEnd(l) && !UNSUNG.test(l.text))) return null;
+		return lineEnd(i);
+	}
+
 	function lineAt(ms: number): number {
 		let i = -1;
 		for (let j = 0; j < lines.length; j++) {
@@ -220,8 +242,8 @@
 
 	function interludeAt(i: number, ms: number) {
 		const to = lines[i + 1]?.time_ms;
-		if (to === undefined) return null;
-		const from = i < 0 ? 0 : lineEnd(i);
+		const from = silentFrom(i);
+		if (to === undefined || from === null) return null;
 		if (to - from < INTERLUDE_MS || ms < from || ms >= to) return null;
 		return { at: i + 1, from, to };
 	}
@@ -256,8 +278,10 @@
 		let next = Infinity;
 		const cue = lines[i + 1]?.time_ms;
 		if (cue !== undefined && cue > ms) next = cue;
-		const from = i < 0 ? 0 : lineEnd(i);
-		if (from > ms && cue !== undefined && cue - from >= INTERLUDE_MS) next = Math.min(next, from);
+		const from = silentFrom(i);
+		if (from !== null && from > ms && cue !== undefined && cue - from >= INTERLUDE_MS) {
+			next = Math.min(next, from);
+		}
 		for (const w of lines[i]?.words ?? []) {
 			if (w.start_ms > ms) next = Math.min(next, w.start_ms);
 			else if (isHeld(w) && w.end_ms > ms) next = Math.min(next, w.end_ms);
