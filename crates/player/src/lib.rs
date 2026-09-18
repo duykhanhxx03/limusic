@@ -142,16 +142,30 @@ impl Sweep {
         Sweep { high_hz: glide(HIGH_FROM_HZ, HIGH_TO_HZ, p), high_mix: 1.0, ..Self::FLAT }
     }
 
+    /// Each sits in a graph of its own, which has to stay that way: `af-command` reaches every
+    /// filter in the graph it is sent to, and these two are retuned to different corners.
     fn filters(&self) -> [String; 2] {
         [
-            format!("@{LOW_LABEL}:lavfi=[lowpass=f={:.0}:m={}]", self.low_hz, self.low_mix),
-            format!("@{HIGH_LABEL}:lavfi=[highpass=f={:.0}:m={}]", self.high_hz, self.high_mix),
+            format!(
+                "@{LOW_LABEL}:lavfi=[lowpass=f={:.0}:m={}]{ONE_THREAD}",
+                self.low_hz, self.low_mix
+            ),
+            format!(
+                "@{HIGH_LABEL}:lavfi=[highpass=f={:.0}:m={}]{ONE_THREAD}",
+                self.high_hz, self.high_mix
+            ),
         ]
     }
 }
 
 const LOW_LABEL: &str = "xflow";
 const HIGH_LABEL: &str = "xfhigh";
+
+/// Appended to every `lavfi` graph. Left to itself, libavfilter gives each graph a pool of worker
+/// threads sized to the CPU count (15 on a 16-thread machine), for filters that each do a few
+/// multiplications a sample, and wakes the pool for every block of audio: with the equalizer on,
+/// 1360 context switches a second against 151 on one thread.
+const ONE_THREAD: &str = ":o=[threads=1]";
 
 /// `from` to `to` exponentially, `p` of the way.
 fn glide(from: f64, to: f64, p: f64) -> f64 {
@@ -247,6 +261,13 @@ struct MixState {
     semitones: i32,
     eq: Option<Equalizer>,
     sweep: [Sweep; 2],
+    /// The values each deck's sweep filters were last sent with `af-command`, in the order
+    /// [`Mix::retune`] sends them. A retune sends only the ones that differ: through an overlap,
+    /// one corner per deck moves and the other three values hold. Forgotten whenever mpv may have
+    /// rebuilt the filters, which it does from the chain's text, putting back the values that text
+    /// was written with: a new chain, a seek or a new file (both end in a playback restart), and a
+    /// new sample rate.
+    tuned: [[Option<String>; 4]; 2],
     /// What each deck's chain was last built from, sweeps aside (those are retuned in place). A
     /// retune that changes nothing is skipped: re-setting `af` rebuilds the chain mid-stream.
     chain_key: [String; 2],
@@ -294,6 +315,8 @@ enum DeckEvent {
     Paused(bool),
     Idle(bool),
     Started,
+    /// Playback (re)started after a seek, a loop or a new file.
+    Restarted,
     Ended,
     Failed(String),
 }
@@ -328,6 +351,7 @@ impl Player {
                 semitones: 0,
                 eq: None,
                 sweep: [Sweep::FLAT; 2],
+                tuned: Default::default(),
                 chain_key: Default::default(),
                 volume: 100,
                 fade: 1.0,
@@ -590,6 +614,7 @@ fn new_deck(cache_dir: &str) -> Result<Mpv, Error> {
     // Mirror the Phase-0 spike: create, then set_property (setting some options during the
     // pre-init phase returns PROPERTY_NOT_FOUND on this mpv build).
     let mpv = Mpv::new()?;
+    quiet_builtins(&mpv);
     mpv.set_property("vid", "no")?; // audio only
     mpv.set_property("gapless-audio", "yes")?;
     // If no audio device can be opened, play into nothing rather than failing the file.
@@ -601,7 +626,9 @@ fn new_deck(cache_dir: &str) -> Result<Mpv, Error> {
     // Tests play real audio through the mix, and must not do it out of the speakers.
     #[cfg(test)]
     mpv.set_property("ao", "null")?;
-    mpv.set_property("cache", "yes")?;
+    // Network streams only. `yes` put local and downloaded files through the cache as well, and
+    // with the cache on disk that wrote a copy of the whole file into it on every play.
+    mpv.set_property("cache", "auto")?;
     mpv.set_property("cache-on-disk", "yes")?;
     mpv.set_property("demuxer-cache-dir", cache_dir)?;
     // The demuxer runs at mpv's browser-sized defaults otherwise: 150 MiB forward and 50 MiB
@@ -621,6 +648,29 @@ fn new_deck(cache_dir: &str) -> Result<Mpv, Error> {
         "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=30",
     )?;
     Ok(mpv)
+}
+
+/// Unload the scripts mpv starts for its life as a standalone player, which an embedded instance
+/// has no use for: each is a Lua state and a thread, in every instance. One also costs time:
+/// `ytdl_hook` hands every http URL that fails to open to yt-dlp, which holds a dead stream's
+/// end-file back by 0.6–1.1 s while a ~65 MB process starts up, only to fail on it too.
+///
+/// Each one is best effort: these names come and go between mpv releases, and 0.37 (Ubuntu 24.04's)
+/// lacks some of them. A name this build doesn't know leaves that script running, which is no
+/// reason to fail the player: the app can't start without one.
+pub(crate) fn quiet_builtins(mpv: &Mpv) {
+    for name in [
+        "ytdl",
+        "load-stats-overlay",
+        "load-console",
+        "load-select",
+        "load-positioning",
+        "load-commands",
+        "load-context-menu",
+        "load-auto-profiles",
+    ] {
+        let _ = mpv.set_property(name, "no");
+    }
 }
 
 impl Mix {
@@ -730,6 +780,7 @@ impl Mix {
         }
         self.decks[d].set_property("af", chain.join(",").as_str())?;
         s.chain_key[d] = key;
+        s.tuned[d] = Default::default();
         Ok(())
     }
 
@@ -737,7 +788,8 @@ impl Mix {
         (0..2).try_for_each(|d| self.apply_af(s, d, false))
     }
 
-    /// Retune deck `d`'s sweep filters in place. Corners stay below the deck's Nyquist frequency
+    /// Retune deck `d`'s sweep filters in place, sending only the values that differ from what
+    /// they were last sent (`MixState::tuned`). Corners stay below the deck's Nyquist frequency
     /// (see `LOW_REST_HZ`), and with its sample rate not known yet nothing is sent at all.
     fn retune(&self, s: &mut MixState, d: usize, sweep: Sweep) {
         s.sweep[d] = sweep;
@@ -747,13 +799,37 @@ impl Mix {
         }
         let deck = &self.decks[d];
         let hz = |f: f64| format!("{:.0}", f.min(limit));
-        // Corner before mix, so a filter being switched in is already where it should be. Errors
-        // are ignored: a deck between tracks has no chain to talk to, and the next chain it builds
-        // starts from `s.sweep`.
-        let _ = deck.command("af-command", &[LOW_LABEL, "f", &hz(sweep.low_hz)]);
-        let _ = deck.command("af-command", &[LOW_LABEL, "m", &sweep.low_mix.to_string()]);
-        let _ = deck.command("af-command", &[HIGH_LABEL, "f", &hz(sweep.high_hz)]);
-        let _ = deck.command("af-command", &[HIGH_LABEL, "m", &sweep.high_mix.to_string()]);
+        // Corner before mix, so a filter being switched in is already where it should be.
+        let values = [
+            (LOW_LABEL, "f", hz(sweep.low_hz)),
+            (LOW_LABEL, "m", sweep.low_mix.to_string()),
+            (HIGH_LABEL, "f", hz(sweep.high_hz)),
+            (HIGH_LABEL, "m", sweep.high_mix.to_string()),
+        ];
+        for ((label, param, value), sent) in values.into_iter().zip(&mut s.tuned[d]) {
+            if sent.as_deref() == Some(value.as_str()) {
+                continue;
+            }
+            // Errors are ignored, and the value counts as sent regardless. mpv reports one even
+            // when the filter took the value (the rest of its graph doesn't know the command), so
+            // an error says nothing. And a deck between tracks has no chain to talk to, but the
+            // next chain it builds starts from `s.sweep` and forgets this.
+            let _ = deck.command("af-command", &[label, param, &value]);
+            *sent = Some(value);
+        }
+    }
+
+    /// Send deck `d`'s sweeps again in full, after mpv rebuilt its filters from the chain's text.
+    /// Forgetting what was sent is not enough, because that text can be behind the sweeps: a track
+    /// that came in through a crossfade still has the chain it was cued with, high-pass switched
+    /// in, and the overlap switched it out with `af-command` alone. Nothing else retunes the deck
+    /// until its next overlap, so a seek or a repeat-one loop would play the rest of the track
+    /// through a 1 kHz high-pass. (What mpv filtered ahead of this event, the audio it buffers
+    /// before playback resumes, has still been through the rebuilt graph.)
+    fn resend_sweeps(&self, s: &mut MixState, d: usize) {
+        s.tuned[d] = Default::default();
+        let sweep = s.sweep[d];
+        self.retune(s, d, sweep);
     }
 
     /// One event from `deck`, turned into what the app hears. Returns false once nobody listens.
@@ -773,7 +849,13 @@ impl Mix {
                     out.push(PlayerEvent::Duration(d));
                 }
             }
-            DeckEvent::Rate(r) => s.rate[deck] = r as f64,
+            // A new sample rate and a restart (the seek, loop or new file behind it) both rebuild
+            // the deck's lavfi graphs from their text, undoing whatever the sweeps were retuned to.
+            DeckEvent::Rate(r) => {
+                s.rate[deck] = r as f64;
+                self.resend_sweeps(&mut s, deck);
+            }
+            DeckEvent::Restarted => self.resend_sweeps(&mut s, deck),
             DeckEvent::Path(path) => {
                 // A new track on the deck that is playing: where its music ends decides when the
                 // crossfade out of it starts.
@@ -1036,7 +1118,7 @@ fn af_chain(state: &AfState) -> String {
     let preamp = eq.as_ref().map(|e| e.preamp_db).unwrap_or(0.0);
     let total = gain_db.unwrap_or(0.0) + preamp;
     if gain_db.is_some() || preamp != 0.0 {
-        chain.push(format!("lavfi=[volume={total}dB]"));
+        chain.push(format!("lavfi=[volume={total}dB]{ONE_THREAD}"));
     }
     if let Some(e) = eq {
         for (i, &f) in EQ_BANDS.iter().enumerate() {
@@ -1052,7 +1134,7 @@ fn af_chain(state: &AfState) -> String {
             // more and the same gains overshoot the correction.
             // One lavfi per band rather than one graph with commas in it: `af` splits on commas
             // too, and the existing chain already joins that way.
-            chain.push(format!("lavfi=[equalizer=f={f}:t=q:w={EQ_Q}:g={g}]"));
+            chain.push(format!("lavfi=[equalizer=f={f}:t=q:w={EQ_Q}:g={g}]{ONE_THREAD}"));
         }
     }
     if semitones != 0 {
@@ -1115,6 +1197,7 @@ fn event_loop(mut ev: EventContext, deck: usize, mix: Arc<Mix>) {
                 }
                 Event::StartFile => DeckEvent::Started,
                 Event::FileLoaded => DeckEvent::Loaded,
+                Event::PlaybackRestart => DeckEvent::Restarted,
                 // STOP/QUIT/REDIRECT are deliberate (loadfile replace, shutdown, the end of an
                 // overlap) — ignored. ERROR never reaches this arm: libmpv2 surfaces
                 // end-file-with-error as Err from wait_event (see below).
@@ -1182,9 +1265,12 @@ mod tests {
     fn gain_and_pitch_share_one_chain() {
         // The bug this exists for: either setter clobbering the other's filter.
         assert_eq!(chain(None, 0, None), "");
-        assert_eq!(chain(Some(-3.5), 0, None), "lavfi=[volume=-3.5dB]");
+        assert_eq!(chain(Some(-3.5), 0, None), "lavfi=[volume=-3.5dB]:o=[threads=1]");
         assert_eq!(chain(None, 12, None), "rubberband=pitch-scale=2");
-        assert_eq!(chain(Some(-6.0), -12, None), "lavfi=[volume=-6dB],rubberband=pitch-scale=0.5");
+        assert_eq!(
+            chain(Some(-6.0), -12, None),
+            "lavfi=[volume=-6dB]:o=[threads=1],rubberband=pitch-scale=0.5"
+        );
         // One semitone up is the twelfth root of two.
         assert!(chain(None, 1, None).ends_with("1.0594630943592953"));
     }
@@ -1205,7 +1291,8 @@ mod tests {
         let c = chain(None, 0, Some(eq));
         assert_eq!(
             c,
-            "lavfi=[equalizer=f=31:t=q:w=1.41:g=6],lavfi=[equalizer=f=16000:t=q:w=1.41:g=-3]"
+            "lavfi=[equalizer=f=31:t=q:w=1.41:g=6]:o=[threads=1],\
+             lavfi=[equalizer=f=16000:t=q:w=1.41:g=-3]:o=[threads=1]"
         );
     }
 
@@ -1213,9 +1300,9 @@ mod tests {
     fn the_preamp_folds_into_the_loudness_volume() {
         // Two `volume` filters would be two passes for one multiplication.
         let eq = Equalizer { preamp_db: -2.0, ..Default::default() };
-        assert_eq!(chain(Some(-4.0), 0, Some(eq.clone())), "lavfi=[volume=-6dB]");
+        assert_eq!(chain(Some(-4.0), 0, Some(eq.clone())), "lavfi=[volume=-6dB]:o=[threads=1]");
         // And a preamp alone still produces one.
-        assert_eq!(chain(None, 0, Some(eq)), "lavfi=[volume=-2dB]");
+        assert_eq!(chain(None, 0, Some(eq)), "lavfi=[volume=-2dB]:o=[threads=1]");
     }
 
     #[test]
@@ -1291,12 +1378,17 @@ mod tests {
         assert_eq!(live.matches("equalizer").count(), 10, "a band was dropped: {live}");
         assert!(live.contains("f=31:t=q:w=1.41:g=6.9"), "31 Hz band wrong: {live}");
         assert!(live.contains("f=16000:t=q:w=1.41:g=-6.5"), "16 kHz band wrong: {live}");
+        // Every graph on one thread: mpv took the option rather than dropping it.
+        assert_eq!(live.matches("threads=1").count(), 11, "a graph kept its pool: {live}");
         p.set_equalizer(None).unwrap();
         assert!(!af().contains("equalizer"), "turning it off left filters: {}", af());
 
         // 5. The reconnect options are accepted, and a fade never becomes the user's volume.
         let lavf = p.mix.decks[0].get_property::<String>("stream-lavf-o").unwrap();
         assert!(lavf.contains("reconnect_streamed=1"), "reconnect options missing: {lavf}");
+        // No yt-dlp behind a URL that fails, and no disk cache for a file that is already on disk.
+        assert!(!p.mix.decks[0].get_property::<bool>("ytdl").unwrap(), "ytdl_hook still loaded");
+        assert_eq!(p.mix.decks[0].get_property::<String>("cache").unwrap(), "auto");
         let vol = || p.mix.decks[0].get_property::<f64>("volume").unwrap();
         p.set_volume(60).unwrap();
         let user = vol();
@@ -1371,12 +1463,18 @@ mod tests {
         assert_eq!(
             Sweep::FLAT.filters(),
             [
-                "@xflow:lavfi=[lowpass=f=3000:m=0]".to_string(),
-                "@xfhigh:lavfi=[highpass=f=20:m=0]".to_string()
+                "@xflow:lavfi=[lowpass=f=3000:m=0]:o=[threads=1]".to_string(),
+                "@xfhigh:lavfi=[highpass=f=20:m=0]:o=[threads=1]".to_string()
             ]
         );
-        assert_eq!(Sweep::opening(0.0).filters()[1], "@xfhigh:lavfi=[highpass=f=1000:m=1]");
-        assert_eq!(Sweep::closing(1.0).filters()[0], "@xflow:lavfi=[lowpass=f=200:m=1]");
+        assert_eq!(
+            Sweep::opening(0.0).filters()[1],
+            "@xfhigh:lavfi=[highpass=f=1000:m=1]:o=[threads=1]"
+        );
+        assert_eq!(
+            Sweep::closing(1.0).filters()[0],
+            "@xflow:lavfi=[lowpass=f=200:m=1]:o=[threads=1]"
+        );
     }
 
     /// A mono 16-bit WAV of a sine: a source whose length mpv knows up front, which a crossfade
@@ -1501,6 +1599,22 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(200));
         assert!(p.mix.decks[0].get_property::<bool>("idle-active").unwrap());
         assert_eq!(vol(1), super::perceptual_to_mpv(100));
+        // And its sweeps were last told to pass it through untouched: the retunes that skip what
+        // hasn't moved still sent the high-pass its way out.
+        let flat = ["3000", "0", "20", "0"].map(|v| Some(v.to_owned()));
+        assert_eq!(p.lock().tuned[1], flat);
+        // Only by `af-command`: its chain is still the one it was cued with, high-pass switched
+        // in. A seek rebuilds the filters from that text, so the restart after it has to send the
+        // sweeps again. (What was sent is forgotten here first, so that the values seen are new.)
+        let af1 = p.mix.decks[1].get_property::<String>("af").unwrap();
+        assert!(af1.contains("highpass=f=1000:m=1"), "incoming chain: {af1}");
+        p.lock().tuned[1] = Default::default();
+        p.seek(1.0).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while p.lock().tuned[1] != flat {
+            assert!(std::time::Instant::now() < deadline, "a seek brought the high-pass back");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         // Nothing left to cross into: the second track plays to its end, and the player idles.
         until(&mut rx, 5.0, ended).expect("the second track never ended");
         std::thread::sleep(std::time::Duration::from_millis(200));

@@ -79,6 +79,7 @@ pub(crate) fn spawn(pcm: PathBuf, done: impl Fn(Measured) + Send + 'static) -> S
 
 fn open(pcm: &Path) -> Result<(Mpv, EventContext), libmpv2::Error> {
     let mpv = Mpv::new()?;
+    crate::quiet_builtins(&mpv);
     for (k, v) in [
         ("vid", "no"),
         ("ao", "pcm"),
