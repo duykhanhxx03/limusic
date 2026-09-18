@@ -82,7 +82,9 @@
 		"shuffle_all": "Phát ngẫu nhiên tất cả",
 		"play_all": "Phát tất cả",
 		"top_result": "Kết quả hàng đầu",
-		"all_results_for": "Tất cả kết quả cho “{query}”"
+		"all_results_for": "Tất cả kết quả cho “{query}”",
+		"and_more": "và {count} mục khác",
+		"text_file": "Văn bản"
 	},
 	"nav": {
 		"home": "Trang chủ",
@@ -106,7 +108,8 @@
 		"remove_account_desc": "{name} chỉ bị gỡ khỏi danh sách này. Tài khoản Google không bị ảnh hưởng, và bạn có thể đăng nhập lại bất cứ lúc nào.",
 		"saved_accounts_hint": "Chọn một tài khoản đã lưu để chuyển sang.",
 		"history": "Lịch sử",
-		"no_channels": "YouTube không trả về kênh nào để chọn."
+		"no_channels": "YouTube không trả về kênh nào để chọn.",
+		"search_prompt": "Bạn muốn nghe gì?"
 	},
 	"player": {
 		"play": "Phát",
@@ -160,7 +163,15 @@
 		"remove_dislike": "Bỏ không thích",
 		"add_to_playlist": "Thêm vào danh sách phát",
 		"pin_to_top": "Ghim lên đầu",
-		"unpin": "Bỏ ghim"
+		"unpin": "Bỏ ghim",
+		"now_playing_view": "Chế độ xem Đang phát",
+		"about_artist": "Giới thiệu về nghệ sĩ",
+		"next_in_queue": "Tiếp theo trong hàng đợi",
+		"open_queue": "Mở hàng đợi",
+		"close_panel": "Đóng",
+		"nothing_next": "Chưa có bài tiếp theo",
+		"follow": "Theo dõi",
+		"following": "Đang theo dõi"
 	},
 	"home": {
 		"good_morning": "Chào buổi sáng",
@@ -179,7 +190,8 @@
 		"hide_section": "Ẩn {title} khỏi trang chủ",
 		"feed_empty": "Lần này trang chủ trả về rỗng.",
 		"signed_out_hint": "Đăng nhập và trang chủ sẽ đầy các bản phối và danh sách phát dựng từ thứ bạn nghe.",
-		"add_to_end": "Thêm vào cuối"
+		"add_to_end": "Thêm vào cuối",
+		"edit_home_desc": "Chọn những mục hiện trên Trang chủ và thứ tự của chúng."
 	},
 	"history": {
 		"title": "Lịch sử",
@@ -218,9 +230,29 @@
 		"search_playlists": "Tìm danh sách phát…",
 		"no_playlists_hint": "Chưa có danh sách phát nào. Lưu một cái từ trang của nó, hoặc tạo mới trong Thư viện.",
 		"empty_playlist": "Danh sách phát này trống.",
+		"kind_playlist": "Danh sách phát",
+		"kind_album": "Album",
+		"kind_artist": "Nghệ sĩ",
+		"create": "Tạo",
+		"open_full": "Mở trang Thư viện",
+		"clear_filter": "Bỏ lọc",
+		"search_library": "Tìm trong thư viện",
+		"sort_recent": "Gần đây",
+		"sort_alpha": "Theo tên",
+		"sort_by": "Sắp xếp theo",
+		"pinned": "Đã ghim",
+		"no_matches": "Không có mục nào khớp “{query}”",
+		"empty_title": "Thư viện đang trống",
+		"suggestions": "Gợi ý",
+		"suggestions_hint": "Những bài YouTube Music thấy hợp với playlist này.",
+		"suggestions_refresh": "Làm mới",
+		"suggestions_add": "Thêm",
+		"suggestions_add_to": "Thêm {title} vào playlist này",
 		"collab": "Cộng tác",
 		"collab_tooltip": "Người khác có thể thêm bài vào danh sách phát này",
 		"delete_playlist_confirm": "Xoá danh sách phát này?",
+		"delete_playlist_desc": "Thao tác này sẽ xoá {name} khỏi Thư viện của bạn.",
+		"saved_in": "Đã lưu trong",
 		"remove_from_library": "Gỡ khỏi thư viện",
 		"no_tracks_match_loading": "Không bài nào khớp “{query}”{loading}.",
 		"still_loading": ", vẫn đang tải",
@@ -241,7 +273,9 @@
 		"no_artists": "Chưa có nghệ sĩ nào. Họ sẽ xuất hiện khi bạn lưu bài hát hoặc album của họ.",
 		"on_repeat": "Nghe đi nghe lại",
 		"on_repeat_subtitle": "{count} bài bạn nghe nhiều nhất tháng này",
-		"songs_count": "{count} bài hát"
+		"songs_count": "{count} bài hát",
+		"saved_in_one": "Đã lưu trong {title}",
+		"saved_in_many": "Đã lưu trong {count} danh sách phát"
 	},
 	"local": {
 		"scanning": "Đang quét thư mục...",
@@ -355,7 +389,9 @@
 			"app_icon_hint": "Một tệp PNG sẽ thay biểu tượng trên thanh tác vụ, khay hệ thống và cửa sổ này. Lối tắt và trình quản lý tệp vẫn giữ biểu tượng đã cài.",
 			"app_icon_pick": "Chọn…",
 			"app_icon_dialog": "Chọn biểu tượng ứng dụng",
-			"app_icon_filter": "Ảnh PNG"
+			"app_icon_filter": "Ảnh PNG",
+			"reset_theme_title": "Đặt lại giao diện?",
+			"reset_theme_desc": "Màu, độ bo góc và font bạn đã chỉnh sẽ trở về mặc định."
 		},
 		"playback": {
 			"audio_quality": "Chất lượng âm thanh",
@@ -479,7 +515,9 @@
 			"title": "Điều chỉnh tốc độ & cao độ",
 			"desc": "Áp dụng cho mọi thứ bạn phát, cho tới khi bạn đổi lại hoặc khởi động lại app.",
 			"tempo": "Tốc độ",
-			"pitch": "Cao độ"
+			"pitch": "Cao độ",
+			"decrease": "Giảm {label}",
+			"increase": "Tăng {label}"
 		},
 		"link": {
 			"title": "Mở liên kết",
@@ -529,7 +567,8 @@
 		"collapse_sidebar": "Thu gọn thanh bên",
 		"show_artwork": "Hiện ảnh bìa",
 		"show_video": "Hiện video",
-		"resize_sidebar": "Kéo đổi rộng thanh bên"
+		"resize_sidebar": "Kéo đổi rộng thanh bên",
+		"play_track": "Phát {title}"
 	},
 	"lyrics": {
 		"title": "Lời bài hát",
@@ -698,7 +737,9 @@
 		"saved_all": "Đã tải",
 		"save_rest": "Tải thêm {count} bài",
 		"cancel": "Dừng tải",
-		"saved": "Đã tải"
+		"saved": "Đã tải",
+		"remove_all_title": "Xoá tất cả bài đã tải?",
+		"remove_all_desc": "Thao tác này sẽ xoá {size} nhạc đã tải khỏi máy. Bạn có thể tải lại sau."
 	},
 	"sponsorblock": {
 		"skipped": "Đã bỏ qua đoạn không phải nhạc",
@@ -710,7 +751,9 @@
 		"edit": "Sửa lại từ khoá này",
 		"remove": "Xoá khỏi lịch sử",
 		"filters": "Loại kết quả",
-		"browse_all": "Duyệt tất cả"
+		"browse_all": "Duyệt tất cả",
+		"clear_all_title": "Xoá các tìm kiếm gần đây?",
+		"clear_all_desc": "Thao tác này sẽ xoá toàn bộ các tìm kiếm gần đây của bạn."
 	},
 	"explore": {
 		"moods": "Tâm trạng và thể loại",

@@ -108,7 +108,8 @@
 
 	// The queue this tab builds. Not a `playFrom`: there is no page behind "the songs in your
 	// library", so it has no business landing in recents or the sidebar's last-played order.
-	const SOURCE = $derived(uploads ? 'Your uploads' : 'Your songs');
+	// Named after the tab it was started from, in the app's language: the queue shows it.
+	const SOURCE = $derived(uploads ? t('library.uploads_tab') : t('library.songs_tab'));
 
 	onMount(() => {
 		const cached = getCached<Cached>(KEY);
@@ -269,17 +270,19 @@
 				<p class="mt-0.5 text-sm text-muted-foreground">
 					{line}
 				</p>
+				<!-- Play first and primary, Shuffle beside it: the order every page header uses. -->
 				<div class="mt-3 flex flex-wrap items-center gap-2">
-					<Button class="gap-2 rounded-full" disabled={!songs.length} onclick={() => play(null, true)}>
-						<HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" /> {t('common.shuffle_all')}
+					<Button size="lg" class="gap-2" disabled={!songs.length} onclick={() => play(null)}>
+						<HugeiconsIcon icon={PlayIcon} class="h-4 w-4" /> {t('common.play_all')}
 					</Button>
 					<Button
-						variant="outline"
-						class="gap-2 rounded-full"
+						variant="secondary"
+						size="lg"
+						class="gap-2"
 						disabled={!songs.length}
-						onclick={() => play(null)}
+						onclick={() => play(null, true)}
 					>
-						<HugeiconsIcon icon={PlayIcon} class="h-4 w-4" /> {t('common.play_all')}
+						<HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" /> {t('common.shuffle_all')}
 					</Button>
 				</div>
 			</div>

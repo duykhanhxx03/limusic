@@ -35,12 +35,14 @@
 	>
 		<HugeiconsIcon icon={MinusSignIcon} class={size === 'sm' ? 'size-3' : 'size-3.5'} />
 	</button>
-	<!-- The number resets to zero on click: the one value anyone wants to get back to exactly. -->
+	<!-- The number resets to zero on click: the one value anyone wants to get back to exactly.
+	     The min-width fits the widest label ("+5.0 s"), so the pill never grows as the offset
+	     changes and the − button beside it never moves out from under the cursor. -->
 	<button
-		class="cursor-pointer rounded-full px-1.5 text-center tabular-nums transition-colors hover:text-foreground {size ===
+		class="cursor-pointer rounded-full px-1.5 text-center text-xs tabular-nums transition-colors hover:text-foreground {size ===
 		'sm'
-			? 'min-w-11 text-[11px]'
-			: 'min-w-14 text-xs'} {prefs.lyricsOffsetMs === 0 ? '' : 'text-primary'}"
+			? 'min-w-12'
+			: 'min-w-14'} {prefs.lyricsOffsetMs === 0 ? '' : 'text-primary'}"
 		onclick={() => setLyricsOffset(0)}
 		title={t('lyrics.offset_reset')}
 		aria-label="{t('lyrics.offset')}: {label}. {t('lyrics.offset_reset')}"

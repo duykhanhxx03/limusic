@@ -175,7 +175,7 @@
 				<button
 					class={artBtn}
 					onclick={toggleMute}
-					aria-label={playback.volume === 0 ? 'Unmute' : 'Mute'}
+					aria-label={playback.volume === 0 ? t('player.unmute') : t('player.mute')}
 				>
 					<!-- icon swap via altIcon/showAlt — `icon` is frozen at mount -->
 					<HugeiconsIcon
@@ -210,7 +210,7 @@
 		<div class="min-w-0">
 			<Marquee
 				text={now?.title ?? t('player.not_playing')}
-				class="font-heading text-[0.95rem] font-semibold leading-tight text-white"
+				class="font-heading text-sm font-bold leading-tight text-white"
 			/>
 			<Marquee text={now?.artists ?? ''} class="text-xs leading-snug text-white/75" />
 		</div>

@@ -40,6 +40,9 @@ export interface StageOptions {
 	host: HTMLElement;
 	clock: MediaClock;
 	expanded: boolean;
+	/** The lyrics page that covers the main panel: a left-aligned column of readable width, in
+	 *  the side panel's type rather than theater's. */
+	page?: boolean;
 	/** A line was clicked. */
 	onSeek: (index: number) => void;
 	/** The GPU went away (context lost). The owner should fall back to the DOM view. */
@@ -284,6 +287,7 @@ export class LyricStage {
 	private readonly onSeek: (index: number) => void;
 	private readonly onLost: () => void;
 	private expanded: boolean;
+	private page: boolean;
 
 	private lines: LyricLine[] = [];
 	private rows: Row[] = [];
@@ -316,6 +320,7 @@ export class LyricStage {
 		this.onSeek = opts.onSeek;
 		this.onLost = opts.onLost;
 		this.expanded = opts.expanded;
+		this.page = opts.page ?? false;
 
 		const canvas = app.canvas;
 		canvas.style.position = 'absolute';
@@ -429,17 +434,25 @@ export class LyricStage {
 	private metrics(): Metrics {
 		const dpr = window.devicePixelRatio || 1;
 		const expanded = this.expanded;
+		const page = this.page && !expanded;
 		const width = this.host.clientWidth;
-		const sidePad = expanded ? 40 : 20;
-		const colW = Math.max(120, Math.min(width - sidePad * 2, expanded ? 768 : Infinity));
+		const sidePad = expanded ? 40 : page ? 56 : 20;
+		const colW = Math.max(
+			120,
+			Math.min(width - sidePad * 2, expanded ? 768 : page ? 640 : Infinity)
+		);
 		// Expanded (theater, and the player view's enlarged lyrics) keeps the DOM view's type:
 		// `text-[clamp(1.75rem,3.2vw,2.75rem)]`. Everywhere else the type follows the column it is set
 		// in: 20px in the player view's lyrics column at a 900px window, 24px at 1280, 32px (the cap)
 		// at 1920 — well under theater's proportion (0.068 of its column), which wrapped most lines
 		// three deep at the player view's width. 20px is also the floor a 320px side panel sits on.
+		// The page keeps close to the side panel's 20px however wide the column is: lyrics to read
+		// along with, not a poster.
 		const size = expanded
 			? Math.min(44, Math.max(28, window.innerWidth * 0.032))
-			: Math.round(Math.min(32, Math.max(20, colW * 0.052)));
+			: page
+				? 22
+				: Math.round(Math.min(32, Math.max(20, colW * 0.052)));
 		const big = expanded || size >= 26;
 		const lineH = size * (big ? 1.18 : 1.375);
 
@@ -470,11 +483,12 @@ export class LyricStage {
 			transLineH: 20,
 			padY: big ? 12 : 8,
 			tracking: big ? -0.02 * size : 0,
-			colX: Math.round(((width - colW) / 2) * dpr) / dpr,
+			// The page sets its column from the left edge, as Spotify's does; the rest centre it.
+			colX: page ? sidePad : Math.round(((width - colW) / 2) * dpr) / dpr,
 			colW,
 			top: 24,
 			bottom: window.innerHeight * 0.55,
-			bias: expanded ? 0.38 : 0.5,
+			bias: expanded || page ? 0.38 : 0.5,
 			// Half-leading, as CSS places a glyph run in its line box.
 			ascent: (lineH - (asc + desc)) / 2 + asc,
 			transAscent: (20 - (tAsc + tDesc)) / 2 + tAsc,

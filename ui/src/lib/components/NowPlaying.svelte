@@ -15,7 +15,8 @@
 		Queue01Icon,
 		Video01Icon,
 		VideoOffIcon,
-		ArrowDown01Icon
+		ArrowDown01Icon,
+		FullScreenIcon
 	} from '@hugeicons/core-free-icons';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import * as api from '$lib/api';
@@ -236,14 +237,13 @@
      z-20 matches the highest a page uses for its own chrome (home's sticky mood chips) and wins the
      tie on DOM order, since <main> is static and its z-indexes land in the same stacking context.
      The player bar and the queue/lyrics panels come later/higher, so they still paint above.
-     ponytail: left offsets mirror Sidebar's w-16/lg:w-60 (and its manual collapse) — keep in sync
-     if those change. -->
+     It sits inside the page's panel (see +layout), so it covers exactly the page. -->
 <div
 	in:slideUp={{ duration: 460 }}
 	out:slideUp={{ duration: 340 }}
 	onintroend={() => (settled = true)}
-	style="left: var(--sidebar-w); bottom: calc(-1 * var(--bar-h, 0px)); padding-bottom: calc(var(--bar-h, 0px) + 1.5rem)"
-	class="absolute top-0 right-0 z-20 flex justify-center overflow-hidden bg-background px-4 py-4 sm:px-6 sm:py-6 lg:px-10 {inset} {ui.immersive
+	style="left: 0; bottom: calc(-1 * var(--bar-h, 0px) - 0.5rem); padding-bottom: calc(var(--bar-h, 0px) + 2rem)"
+	class="absolute top-0 right-0 z-20 flex justify-center overflow-hidden rounded-t-lg bg-background px-4 py-4 sm:px-6 sm:py-6 lg:px-10 {inset} {ui.immersive
 		? 'cursor-none'
 		: ''}"
 >
@@ -296,6 +296,17 @@
 		class="absolute left-4 top-4 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-foreground/8 text-muted-foreground transition-colors hover:bg-foreground/15 hover:text-foreground {chrome}"
 	>
 		<HugeiconsIcon icon={ArrowDown01Icon} class="h-5 w-5" />
+	</button>
+	<!-- Theater mode, beside the way out: this view grown to the whole screen. The top right is the
+	     tab strip's and the enlarge-lyrics toggle's, so it goes with the collapse. -->
+	<button
+		type="button"
+		onclick={() => (ui.theaterOpen = true)}
+		aria-label={t('player.theater_mode')}
+		title={t('player.theater_mode')}
+		class="absolute left-[3.75rem] top-4 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-foreground/8 text-muted-foreground transition-colors hover:bg-foreground/15 hover:text-foreground {chrome}"
+	>
+		<HugeiconsIcon icon={FullScreenIcon} class="h-[18px] w-[18px]" />
 	</button>
 
 	<!-- Capped and centred, so a wide window doesn't park the artwork in the middle of an empty half

@@ -12,6 +12,10 @@ const SIZE = 32;
 
 /** Cover URL -> accent (or `null` for "this cover has no colour"). */
 const cache = new Map<string, string | null>();
+/** Reads still in flight. A second ask for a cover that is already being read (home's header
+ *  hovering a shortcut whose warm-up has not finished, the grid re-deriving before its first
+ *  warm-up landed) waits for that read instead of fetching and decoding it again. */
+const pending = new Map<string, Promise<string | null>>();
 
 // How bright an accent has to be, per theme mode, as perceived brightness (`color.ts`). One band
 // cannot serve both: what reads on a light page is mud on a dark one, which is what #137 reported.
@@ -108,7 +112,13 @@ export function pickAccent(data: Uint8ClampedArray): string | null {
 export async function artworkAccent(url: string): Promise<string | null> {
 	const hit = cache.get(url);
 	if (hit !== undefined) return hit;
-	const accent = await read(url);
+	let reading = pending.get(url);
+	if (!reading) {
+		reading = read(url);
+		pending.set(url, reading);
+	}
+	const accent = await reading;
+	pending.delete(url);
 	// ponytail: a whole session's covers, one short string each. Dumped wholesale rather than kept
 	// in LRU order; swap in a real LRU if a cover ever costs more than a hex string to remember.
 	if (cache.size > 500) cache.clear();
@@ -122,7 +132,7 @@ export async function artworkAccent(url: string): Promise<string | null> {
  * on the main thread is exactly the sort of thing that shows up as a dropped frame.
  */
 export function warmAccent(url: string): void {
-	if (cache.has(url)) return;
+	if (cache.has(url) || pending.has(url)) return;
 	const run = () => artworkAccent(url);
 	if ('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 2000 });
 	else setTimeout(run, 500);

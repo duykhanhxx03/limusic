@@ -20,6 +20,7 @@
 	import { Slider } from '$lib/components/ui/slider';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import * as Dialog from '$lib/components/ui/dialog';
+	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import * as Select from '$lib/components/ui/select';
 	import { HELP_COMBO } from '$lib/shortcuts';
 	import { copyText } from '$lib/clipboard';
@@ -84,8 +85,7 @@
 	// Shared shapes for the settings rows. Kept as strings so the markup below stays readable and
 	// every group looks identical without a wrapper component per row.
 	const GROUP = 'mb-7 last:mb-1';
-	const LABEL =
-		'mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground';
+	const LABEL = 'mb-2 px-1 text-base font-bold text-muted-foreground';
 	const CARD = 'overflow-hidden rounded-xl bg-card';
 
 	const ACCENT_THEMES = THEMES.filter((t) => t.kind === 'accent');
@@ -153,6 +153,44 @@
 			await chooseAppIcon(null);
 		} catch (e) {
 			toast.error(String(e));
+		}
+	}
+
+	// Resetting the theme drops colours, roundness and fonts the user may have spent a while on, and
+	// there is no undo, so the button only opens a confirm and the reset itself runs from there.
+	let confirmResetTheme = $state(false);
+
+	function resetTheme() {
+		resetCustom();
+		isCustomFont = { fontSans: false, fontHeading: false };
+		fontName = { fontSans: '', fontHeading: '' };
+		// bits-ui's Action is a plain button (only Cancel closes the dialog), so close it here.
+		confirmResetTheme = false;
+	}
+
+	// Same for removing every download: it deletes files from disk that took real time and bandwidth
+	// to fetch. The confirm stays up, locked, until the last one is gone, so it can't be dismissed
+	// into a half-emptied list or fired a second time over the same files.
+	let confirmRemoveAll = $state(false);
+	let removingAll = $state(false);
+	// The size the confirm quotes, taken when it opens. Every removal re-reads the live total, so
+	// quoting that would count down while the loop runs and fade out on "0 B" as the dialog closes.
+	let removeAllSize = $state('');
+
+	function askRemoveAll() {
+		removeAllSize = formatBytes(dl.bytes);
+		confirmRemoveAll = true;
+	}
+
+	async function removeAllDownloads() {
+		removingAll = true;
+		try {
+			// One at a time through the same command the row-level delete uses, so there is one
+			// definition of "remove a download" rather than a bulk path that can drift from it.
+			for (const d of await api.downloads()) await removeDownload(d.videoId);
+		} finally {
+			removingAll = false;
+			confirmRemoveAll = false;
 		}
 	}
 
@@ -260,7 +298,7 @@
 		try {
 			const path = await save({
 				defaultPath: `limusic-diagnostics-${new Date().toISOString().slice(0, 10)}.txt`,
-				filters: [{ name: 'Text', extensions: ['txt'] }]
+				filters: [{ name: t('common.text_file'), extensions: ['txt'] }]
 			});
 			if (!path) return;
 			diagState = 'busy';
@@ -510,10 +548,10 @@
 		<div class="flex {o.tall ? 'items-start' : 'items-center'} justify-between gap-6">
 			<div class="min-w-0">
 				<div class="flex items-center gap-2">
-					<span class="text-sm font-medium">{o.title}</span>
+					<span class="text-sm">{o.title}</span>
 					{#if o.badge}
 						<span
-							class="rounded-full bg-primary/12 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary"
+							class="rounded-full bg-primary/12 px-1.5 py-0.5 text-xs font-bold uppercase tracking-wide text-primary"
 						>
 							{o.badge}
 						</span>
@@ -540,7 +578,10 @@
 		<div class="flex h-[min(34rem,72vh)]">
 			<!-- Tab rail -->
 			<nav class="flex w-52 shrink-0 flex-col bg-muted/40 p-3">
-				<Dialog.Title class="px-3 pt-1 pb-4 font-heading text-base font-semibold">
+				<!-- 16px, not the 24px dialog-title default: the rail leaves the title ~160px, and at 24px
+				     "Configuración" or "Налаштування" wraps onto a second line. At 16px the title's band
+				     also ends exactly where the pane header does, so the tabs line up with the content. -->
+				<Dialog.Title class="px-3 pt-1 pb-4 text-base font-bold">
 					{t('settings.title')}
 				</Dialog.Title>
 				<div class="flex flex-col gap-0.5">
@@ -548,7 +589,7 @@
 						<button
 							onclick={() => (tab = tb.id)}
 							aria-current={tab === tb.id}
-							class="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors {tab ===
+							class="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-bold transition-colors {tab ===
 							tb.id
 								? 'bg-foreground/10 text-foreground'
 								: 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground'}"
@@ -564,7 +605,7 @@
 					{/each}
 				</div>
 				{#if version}
-					<span class="mt-auto px-3 pb-1 text-[11px] text-muted-foreground">v{version}</span>
+					<span class="mt-auto px-3 pb-1 text-xs text-muted-foreground">v{version}</span>
 				{/if}
 			</nav>
 
@@ -573,7 +614,7 @@
 			<div class="flex min-w-0 flex-1 flex-col">
 				<!-- h-14 also keeps the dialog's close button clear of the first row. -->
 				<header class="flex h-14 shrink-0 flex-col justify-center px-6 pr-14">
-					<h2 class="text-sm font-semibold">{currentTab.label}</h2>
+					<h2 class="text-base font-bold">{currentTab.label}</h2>
 					<p class="truncate text-xs text-muted-foreground">{currentTab.hint}</p>
 				</header>
 
@@ -585,7 +626,7 @@
 						     first: two stacked dialogs would trap focus in the wrong one. -->
 						<button
 							type="button"
-							class="mb-5 inline-flex items-center gap-2 rounded-full bg-muted/60 px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+							class="mb-5 inline-flex items-center gap-2 rounded-full bg-muted/60 px-3 py-1 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 							onclick={() => {
 								ui.settingsOpen = false;
 								ui.shortcutsOpen = true;
@@ -902,10 +943,10 @@
 							class="mb-7 rounded-xl bg-gradient-to-br from-primary/8 to-transparent px-4 py-4"
 						>
 							<div class="flex items-center gap-2">
-								<span class="font-heading text-lg font-bold">YouTube Music ++</span>
+								<span class="font-heading text-2xl font-bold">YouTube Music ++</span>
 								{#if version}
 									<span
-										class="rounded-full bg-primary/12 px-2 py-0.5 text-[11px] font-semibold text-primary"
+										class="rounded-full bg-primary/12 px-2 py-0.5 text-xs font-bold text-primary"
 									>
 										v{version}
 									</span>
@@ -981,6 +1022,43 @@
 		</div>
 	</Dialog.Content>
 </Dialog.Root>
+
+<!-- The two confirms for the settings that can't be taken back. They portal above the settings
+     dialog, which stays open underneath, so answering either one lands back on the same row. -->
+<AlertDialog.Root bind:open={confirmResetTheme}>
+	<AlertDialog.Content>
+		<AlertDialog.Header>
+			<AlertDialog.Title>{t('settings.themes.reset_theme_title')}</AlertDialog.Title>
+			<AlertDialog.Description>{t('settings.themes.reset_theme_desc')}</AlertDialog.Description>
+		</AlertDialog.Header>
+		<AlertDialog.Footer>
+			<AlertDialog.Cancel>{t('common.cancel')}</AlertDialog.Cancel>
+			<AlertDialog.Action onclick={resetTheme}>{t('common.reset')}</AlertDialog.Action>
+		</AlertDialog.Footer>
+	</AlertDialog.Content>
+</AlertDialog.Root>
+
+<!-- Escape and a click outside are the Cancel, except while the files are being removed. -->
+<AlertDialog.Root
+	bind:open={() => confirmRemoveAll, (v) => {
+		if (!removingAll) confirmRemoveAll = v;
+	}}
+>
+	<AlertDialog.Content>
+		<AlertDialog.Header>
+			<AlertDialog.Title>{t('downloads.remove_all_title')}</AlertDialog.Title>
+			<AlertDialog.Description>
+				{t('downloads.remove_all_desc', { size: removeAllSize })}
+			</AlertDialog.Description>
+		</AlertDialog.Header>
+		<AlertDialog.Footer>
+			<AlertDialog.Cancel disabled={removingAll}>{t('common.cancel')}</AlertDialog.Cancel>
+			<AlertDialog.Action onclick={removeAllDownloads} disabled={removingAll}>
+				{t('common.remove')}
+			</AlertDialog.Action>
+		</AlertDialog.Footer>
+	</AlertDialog.Content>
+</AlertDialog.Root>
 
 <!-- Controls. Split out so the rows above read as a list of settings rather than a wall of markup. -->
 {#snippet languagePicker()}
@@ -1199,7 +1277,7 @@
 	>
 		<Select.Trigger class="w-44 shrink-0" aria-label={label}>
 			<span class="min-w-0 flex-1 truncate text-left" style="font-family:{effective[key]}">
-				{isCustomFont[key] ? 'Custom' : familyName(effective[key])}
+				{isCustomFont[key] ? t('common.custom') : familyName(effective[key])}
 			</span>
 		</Select.Trigger>
 		<!-- max-w: a loaded font's name is whatever the file was called, and the dropdown grows to
@@ -1282,11 +1360,7 @@
 		variant="outline"
 		size="sm"
 		disabled={isDefaultCustom()}
-		onclick={() => {
-			resetCustom();
-			isCustomFont = { fontSans: false, fontHeading: false };
-			fontName = { fontSans: '', fontHeading: '' };
-		}}
+		onclick={() => (confirmResetTheme = true)}
 	>
 		{t('common.reset')}
 	</Button>
@@ -1300,7 +1374,7 @@
 				type="button"
 				onclick={() => setQuality(q.id)}
 				aria-pressed={quality === q.id}
-				class="cursor-pointer rounded-md px-3.5 py-1.5 text-xs font-medium transition-colors {quality ===
+				class="cursor-pointer rounded-md px-3.5 py-1.5 text-sm font-bold transition-colors {quality ===
 				q.id
 					? 'bg-background text-foreground '
 					: 'text-muted-foreground hover:text-foreground'}"
@@ -1387,12 +1461,8 @@
 		<Button
 			variant="destructive"
 			size="sm"
-			disabled={!dl.bytes}
-			onclick={async () => {
-				// One at a time through the same command the row-level delete uses, so there is one
-				// definition of "remove a download" rather than a bulk path that can drift from it.
-				for (const d of await api.downloads()) await removeDownload(d.videoId);
-			}}
+			disabled={!dl.bytes || removingAll}
+			onclick={askRemoveAll}
 		>
 			{t('downloads.remove_all')}
 		</Button>
@@ -1400,7 +1470,9 @@
 {/snippet}
 
 {#snippet clearButton()}
-	<Button variant="destructive" size="sm" onclick={doClearCaches} disabled={clearing}>
+	<!-- Secondary, not destructive: the cache is refetched on demand, so nothing is lost. The red
+	     is kept for "Remove all downloads" below it, which does delete something. -->
+	<Button variant="secondary" size="sm" onclick={doClearCaches} disabled={clearing}>
 		{clearing ? t('common.loading') : t('settings.data.clear_cache_button')}
 	</Button>
 {/snippet}

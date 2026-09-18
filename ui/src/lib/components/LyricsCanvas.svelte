@@ -14,6 +14,7 @@
 		interlude,
 		clock,
 		expanded,
+		page = false,
 		onseek,
 		onfail
 	}: {
@@ -22,6 +23,8 @@
 		interlude: Interlude | null;
 		clock: MediaClock;
 		expanded: boolean;
+		/** Set once, at mount: the lyrics page's column (see `StageOptions.page`). */
+		page?: boolean;
 		onseek: (line: api.LyricLine) => void;
 		onfail: () => void;
 	} = $props();
@@ -35,6 +38,7 @@
 			host,
 			clock,
 			expanded,
+			page,
 			onSeek: (i) => {
 				const line = untrack(() => lines[i]);
 				if (line) onseek(line);

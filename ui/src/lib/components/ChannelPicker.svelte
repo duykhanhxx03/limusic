@@ -88,8 +88,8 @@
 		interactOutsideBehavior={dismissable}
 	>
 		<div class="px-5 py-4">
-			<Dialog.Title class="text-lg font-semibold">{t('nav.choose_channel')}</Dialog.Title>
-			<Dialog.Description class="mt-1 text-xs text-muted-foreground">
+			<Dialog.Title>{t('nav.choose_channel')}</Dialog.Title>
+			<Dialog.Description class="mt-1">
 				{t('nav.choose_channel_desc')}
 			</Dialog.Description>
 		</div>
@@ -124,7 +124,7 @@
 							</span>
 						{/if}
 						<span class="min-w-0 flex-1">
-							<span class="block truncate text-sm font-medium">{identity.name}</span>
+							<span class="block truncate text-base">{identity.name}</span>
 							{#if identity.handle || identity.email}
 								<span class="block truncate text-xs text-muted-foreground">
 									{identity.handle ?? identity.email}
@@ -134,7 +134,7 @@
 						{#if identity.selected}
 							<span class="flex shrink-0 items-center gap-1 text-xs text-primary">
 								<HugeiconsIcon icon={CheckmarkCircle02Icon} class="h-4 w-4" />
-								{t('library.in_library')}
+								{t('selection.selected')}
 							</span>
 						{/if}
 					</button>
@@ -142,16 +142,16 @@
 			{/if}
 		</div>
 
-		<div class="flex justify-end px-5 py-3">
+		<Dialog.Footer class="px-5 py-3">
 			{#if ui.channelPickerRequired}
-				<Button variant="outline" size="sm" onclick={cancelSignIn} disabled={cancelling || switching !== null}>
+				<Button variant="ghost" size="lg" onclick={cancelSignIn} disabled={cancelling || switching !== null}>
 					{cancelling ? t('common.loading') : t('nav.cancel_sign_in')}
 				</Button>
 			{:else}
-				<Button variant="outline" size="sm" onclick={() => (ui.channelPickerOpen = false)}>
+				<Button variant="ghost" size="lg" onclick={() => (ui.channelPickerOpen = false)}>
 					{t('common.cancel')}
 				</Button>
 			{/if}
-		</div>
+		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

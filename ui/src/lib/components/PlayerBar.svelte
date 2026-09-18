@@ -15,7 +15,8 @@
 		FavouriteIcon,
 		Add01Icon,
 		InfinityIcon,
-		MinimizeScreenIcon,
+		AlarmClockIcon,
+		PanelRightIcon,
 		MusicNote01Icon,
 		ArrowUp01Icon,
 		ArrowDown01Icon,
@@ -34,7 +35,6 @@
 		cycleRepeat,
 		dragVolume,
 		openAddToPlaylist,
-		openMiniPlayer,
 		toggleMute,
 		toggleNowPlayingLike,
 		wheelVolume
@@ -51,18 +51,25 @@
 	} from '$lib/downloads.svelte';
 	import Marquee from './Marquee.svelte';
 	import TrackMenu from './TrackMenu.svelte';
+	import SleepTimer, { sleepLeft } from './SleepTimer.svelte';
+	import { anchorMenu, NO_ANCHOR } from '$lib/menu';
 	import { t } from '$lib/i18n.svelte';
 
 	let {
 		onToggleQueue,
 		queueOpen,
 		onToggleLyrics,
-		lyricsOpen
+		lyricsOpen,
+		onTogglePanel,
+		panelOpen = false
 	}: {
 		onToggleQueue: () => void;
 		queueOpen: boolean;
 		onToggleLyrics: () => void;
 		lyricsOpen: boolean;
+		/** The right column's "now playing" view; absent where that column can't dock. */
+		onTogglePanel?: () => void;
+		panelOpen?: boolean;
 	} = $props();
 
 	// Pop the heart once when the user favourites (not when un-favouriting). Reset on animation end
@@ -166,6 +173,10 @@
 	const nowSaved = $derived(
 		!!playback.now && !api.isLocalId(playback.now.videoId) && dl.saved.has(playback.now.videoId)
 	);
+
+	// The sleep timer's menu, opened from the countdown chip (the ⋮ menu opens its own).
+	let sleepOpen = $state(false);
+	let sleepAnchor = $state(NO_ANCHOR);
 </script>
 
 <!-- The chevron button below is the keyboard equivalent of clicking the bar, so the bar itself
@@ -174,7 +185,7 @@
 <footer
 	onpointerdown={(e) => (pressedControl = isControl(e.target))}
 	onclick={onBarClick}
-	class="flex items-center gap-2 bg-card px-2 py-2.5 sm:gap-4 sm:px-4 sm:py-3"
+	class="app-canvas flex items-center gap-2 px-2 py-2.5 sm:gap-4 sm:px-4 sm:py-3"
 >
 	<!-- Now playing. data-ctx: right-clicking the cover or the title opens the ⋮ menu for the track
 	     that's playing (not the buttons beside them — those keep their own meaning). -->
@@ -204,7 +215,7 @@
 					{#snippet title()}
 						<Marquee
 							text={playback.now?.title ?? t('player.not_playing')}
-							class="text-sm font-medium"
+							class="text-sm"
 						/>
 					{/snippet}
 					<!-- The button wraps the whole marquee rather than the text inside it: mid-scroll the
@@ -414,6 +425,23 @@
 
 	<!-- Volume + queue -->
 	<div class="flex flex-1 items-center justify-end gap-2">
+		<!-- A sleep timer is running: what is left, and the way back into its menu (the ⋮ beside the
+		     track is the other). Only while one is armed, so the bar carries nothing for it otherwise. -->
+		{#if sleepLeft()}
+			<button
+				class="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-xs font-bold tabular-nums text-primary transition-colors hover:bg-primary/10"
+				onclick={(e) => {
+					sleepAnchor = anchorMenu(e, { align: 'right' });
+					sleepOpen = true;
+				}}
+				title={t('sleep.title')}
+				aria-label="{t('sleep.title')}: {sleepLeft()}"
+			>
+				<HugeiconsIcon icon={AlarmClockIcon} class="h-4 w-4" />
+				{sleepLeft()}
+			</button>
+			<SleepTimer bind:open={sleepOpen} anchor={sleepAnchor} />
+		{/if}
 		<!-- Volume is the first control to drop on a narrow window (OS volume still works). -->
 		<div class="hidden items-center gap-1 md:flex">
 			<Button
@@ -446,9 +474,20 @@
 		</div>
 		<!-- One cluster, so they sit tighter to each other than to the volume slider. -->
 		<div class="flex items-center gap-0.5">
-			<Button variant="ghost" size="icon-sm" onclick={openMiniPlayer} aria-label={t('player.mini_player')}>
-				<HugeiconsIcon icon={MinimizeScreenIcon} class="h-5 w-5" />
-			</Button>
+			{#if onTogglePanel}
+				<!-- Spotify's "Now playing view": the right column with the cover, the artist and
+				     what comes next. -->
+				<Button
+					variant={panelOpen ? 'secondary' : 'ghost'}
+					size="icon-sm"
+					onclick={onTogglePanel}
+					aria-label={t('player.now_playing_view')}
+					title={t('player.now_playing_view')}
+					aria-pressed={panelOpen}
+				>
+					<HugeiconsIcon icon={PanelRightIcon} class="h-5 w-5" />
+				</Button>
+			{/if}
 			<Button
 				variant={lyricsOpen ? 'secondary' : 'ghost'}
 				size="icon-sm"

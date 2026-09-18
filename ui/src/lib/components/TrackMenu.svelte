@@ -27,7 +27,8 @@
 		PreferenceVerticalIcon,
 		SlidersVerticalIcon,
 		Download04Icon,
-		Tick02Icon
+		Tick02Icon,
+		AlarmClockIcon
 	} from '@hugeicons/core-free-icons';
 	import * as api from '$lib/api';
 	import type { SongItem } from '$lib/api';
@@ -48,6 +49,7 @@
 	} from '$lib/player.svelte';
 	import { t } from '$lib/i18n.svelte';
 	import TempoPitchDialog from './TempoPitchDialog.svelte';
+	import SleepTimer, { sleepLeft } from './SleepTimer.svelte';
 	import EqualizerDialog from './EqualizerDialog.svelte';
 	import { download, isDownloading, isSaved, remove as removeDownload } from '$lib/downloads.svelte';
 
@@ -86,6 +88,7 @@
 	// Player-bar only: tempo/pitch belong to playback, not to a row you happen to be pointing at.
 	let advancedOpen = $state(false);
 	let eqOpen = $state(false);
+	let sleepOpen = $state(false);
 	let anchor = $state(NO_ANCHOR);
 
 	// Click on the ⋯ opens under the button; right-click on the host row opens at the pointer.
@@ -154,30 +157,31 @@
 	></button>
 	<div
 		data-menu
-		class="pointer-events-auto fixed z-[70] min-w-44 animate-in rounded-lg glass p-1 text-popover-foreground duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] fade-in-0 zoom-in-[0.97]"
+		class="pointer-events-auto fixed z-[70] min-w-56 animate-in rounded-lg glass p-1 text-popover-foreground duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] fade-in-0 zoom-in-[0.97]"
 		style={anchor.style}
 		{@attach toBody}
 		{@attach fitMenu(anchor)}
 	>
 		{#if !linksOnly}
 			<button
-				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				class="menu-item"
 				onclick={(e) => run(e, () => enqueue([song], true))}
 			>
 				<HugeiconsIcon icon={ArrowUpNarrowWideIcon} class="h-4 w-4" /> {t('player.play_next')}
 			</button>
 			<button
-				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				class="menu-item"
 				onclick={(e) => run(e, () => enqueue([song], false))}
 			>
 				<HugeiconsIcon icon={ArrowDownWideNarrowIcon} class="h-4 w-4" /> {t('player.add_to_queue')}
 			</button>
 		{/if}
+		<div class="menu-sep"></div>
 		<!-- Radio is the one action worth having in the player bar too (`linksOnly`): it's how you
 		     say "keep going with more like this" about the song that's playing. -->
 		{#if !isLocal}
 			<button
-				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				class="menu-item"
 				onclick={(e) => run(e, () => startRadio('song', song.video_id, song.title))}
 			>
 				<HugeiconsIcon icon={Radio02Icon} class="h-4 w-4" /> {t('player.start_radio')}
@@ -188,9 +192,7 @@
 		     anywhere, so it stays visible at every width. -->
 		{#if !isLocal}
 			<button
-				class="w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10 {linksOnly
-					? 'flex lg:hidden'
-					: 'flex'}"
+				class="menu-item {linksOnly ? 'lg:hidden' : ''}"
 				onclick={(e) => run(e, () => toggleRating(song, 'like'))}
 			>
 				<HugeiconsIcon
@@ -200,7 +202,7 @@
 				{rated === 'like' ? t('player.remove_from_liked') : t('player.save_to_liked')}
 			</button>
 			<button
-				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				class="menu-item"
 				onclick={(e) => run(e, () => toggleRating(song, 'dislike'))}
 			>
 				<HugeiconsIcon
@@ -212,7 +214,7 @@
 		{/if}
 		{#if libraryToken && !inLibraryList}
 			<button
-				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				class="menu-item"
 				onclick={(e) => run(e, () => toggleSongLibrary(song))}
 			>
 				<!-- altIcon/showAlt, not a ternary: `icon` is read once at mount. -->
@@ -225,9 +227,10 @@
 				{inLib ? t('library.remove_from_library') : t('library.save_to_library')}
 			</button>
 		{/if}
+		<div class="menu-sep"></div>
 		{#if song.artist_id}
 			<button
-				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				class="menu-item"
 				onclick={(e) => run(e, () => goto(`/artist/${encodeURIComponent(song.artist_id!)}`))}
 			>
 				<HugeiconsIcon icon={UserListIcon} class="h-4 w-4" /> {t('player.go_to_artist')}
@@ -237,7 +240,7 @@
 		     exists for, and the name is a key in its own right. -->
 		{#if !isLocal && song.artists?.trim()}
 			<button
-				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				class="menu-item"
 				onclick={(e) =>
 					run(e, () => {
 						// The first run when the byline has any, id and text together: pairing run[0]'s
@@ -255,14 +258,15 @@
 		     that changed still has one on its rows, and it would open a page this menu shouldn't offer. -->
 		{#if song.album_id && !isLocal}
 			<button
-				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				class="menu-item"
 				onclick={(e) => run(e, () => goto(`/album/${encodeURIComponent(song.album_id!)}`))}
 			>
 				<HugeiconsIcon icon={Vynil02Icon} class="h-4 w-4" /> {t('player.go_to_album')}
 			</button>
 		{/if}
+		<div class="menu-sep"></div>
 		<button
-			class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+			class="menu-item"
 			onclick={(e) =>
 				run(e, () =>
 					isPick
@@ -281,7 +285,7 @@
 		</button>
 		{#if !isLocal}
 			<button
-				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				class="menu-item"
 				onclick={(e) =>
 					run(e, () =>
 						openShare({
@@ -296,9 +300,10 @@
 				<HugeiconsIcon icon={Share08Icon} class="h-4 w-4" /> {t('player.share')}
 			</button>
 		{/if}
+		<div class="menu-sep"></div>
 		{#if linksOnly}
 			<button
-				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				class="menu-item"
 				onclick={(e) => run(e, () => (advancedOpen = true))}
 			>
 				<HugeiconsIcon icon={PreferenceVerticalIcon} class="h-4 w-4" /> {t('dialogs.tempo_pitch.title')}
@@ -307,7 +312,7 @@
 			     is played. Hidden for a local file, which is already on this machine. -->
 			{#if !api.isLocalId(song.video_id)}
 				<button
-					class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+					class="menu-item"
 					onclick={(e) =>
 						run(e, () => (isSaved(song.video_id) ? removeDownload(song.video_id) : download([song])))}
 				>
@@ -326,17 +331,30 @@
 			{/if}
 			<!-- Beside Tempo & Pitch: both are "how this sounds", not "what this is". -->
 			<button
-				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				class="menu-item"
 				onclick={(e) => run(e, () => (eqOpen = true))}
 			>
 				<HugeiconsIcon icon={SlidersVerticalIcon} class="h-4 w-4" /> {t('eq.title')}
 			</button>
+			<!-- Stop the music after a while: a property of what is playing, so it lives with the
+			     player's own controls. Opens where this menu was. -->
+			<button
+				class="menu-item"
+				onclick={(e) => run(e, () => (sleepOpen = true))}
+			>
+				<HugeiconsIcon icon={AlarmClockIcon} class="h-4 w-4" />
+				<span class="flex-1">{t('sleep.title')}</span>
+				{#if sleepLeft()}
+					<span class="text-xs tabular-nums text-primary">{sleepLeft()}</span>
+				{/if}
+			</button>
 		{/if}
+		<div class="menu-sep"></div>
 		<!-- Always here, including the player bar at full width where the + button is right there:
 		     people look for this in the menu and miss the icon. -->
 		{#if onAdd && !isLocal}
 			<button
-				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				class="menu-item"
 				onclick={(e) => run(e, onAdd)}
 			>
 				<HugeiconsIcon icon={PlayListAddIcon} class="h-4 w-4" /> {t('player.save_to_playlist')}
@@ -344,7 +362,7 @@
 		{/if}
 		{#if onRemove}
 			<button
-				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
+				class="menu-item text-destructive"
 				onclick={(e) => run(e, onRemove)}
 			>
 				<HugeiconsIcon icon={PlayListRemoveIcon} class="h-4 w-4" /> {removeLabel}
@@ -356,4 +374,5 @@
 {#if linksOnly}
 	<TempoPitchDialog bind:open={advancedOpen} />
 	<EqualizerDialog bind:open={eqOpen} />
+	<SleepTimer bind:open={sleepOpen} {anchor} />
 {/if}

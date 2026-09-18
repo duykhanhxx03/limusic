@@ -9,7 +9,7 @@
  * chip was really being drawn by its label either way.
  */
 export const chipClass = (active = false) =>
-	`shrink-0 cursor-pointer rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
+	`shrink-0 cursor-pointer rounded-full px-3.5 py-1.5 text-sm transition-colors ${
 		active
 			? 'bg-primary text-primary-foreground'
 			: 'bg-foreground/8 text-muted-foreground hover:bg-foreground/15 hover:text-foreground'

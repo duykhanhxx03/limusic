@@ -16,8 +16,10 @@
 </script>
 
 {#if q}
+	<!-- 12px on the scale still fits the player bar: leading-none plus py-0.5 is 16px tall, the same
+	     line box as the text-xs artist name beside it, so the row does not grow. -->
 	<span
-		class="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none tracking-wide tabular-nums {q.tier ===
+		class="shrink-0 rounded-md px-1.5 py-0.5 text-xs font-bold uppercase leading-none tracking-wide tabular-nums {q.tier ===
 		'high'
 			? 'bg-primary/15 text-primary'
 			: q.tier === 'low'

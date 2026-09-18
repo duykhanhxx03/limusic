@@ -6,21 +6,25 @@
 	// section a measurable width and an end, which a bare <h2> floating over a row of cards never
 	// had. It fades out rather than reaching the edge — a hard line all the way across would read as
 	// a divider between sections, and these sit above their content, not between them.
-	import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/svelte';
-	import { ArrowRight01Icon } from '@hugeicons/core-free-icons';
+	//
+	// Spotify's proportions: a bold title a size up from the cards under it, and "See all" as a quiet
+	// link at the far end. No icon beside the title any more — at that size the title says what the
+	// section is, and a glyph in front of every heading was the busiest thing on home.
+	import type { IconSvgElement } from '@hugeicons/svelte';
 	import type { Snippet } from 'svelte';
+	import { t } from '$lib/i18n.svelte';
 
 	let {
 		title,
 		icon,
 		onMore,
-		moreLabel = 'See all',
-		headingClass = 'font-heading text-lg font-semibold',
+		moreLabel = t('common.see_all'),
+		headingClass = 'font-heading text-2xl font-bold tracking-tight',
 		lead,
 		children
 	}: {
 		title: string;
-		/** Says what the section holds at a glance. Optional: not every section has a kind. */
+		/** Kept for callers; no longer drawn (see above). */
 		icon?: IconSvgElement;
 		/** Renders the trailing "See all"; the title becomes a second way to click it. */
 		onMore?: () => void;
@@ -34,14 +38,7 @@
 	} = $props();
 </script>
 
-<div class="mb-3 flex items-center gap-3">
-	{#if icon}
-		<!-- Keyed: HugeiconsIcon freezes `icon` at mount, and a shelf can settle on a different kind
-		     once its items arrive. -->
-		{#key icon}
-			<HugeiconsIcon {icon} class="h-4 w-4 shrink-0 text-primary/60" />
-		{/key}
-	{/if}
+<div class="mb-3 flex items-end gap-3" data-icon={icon ? '' : undefined}>
 	{#if onMore}
 		<button class="min-w-0 cursor-pointer text-left" onclick={onMore} title="{moreLabel} {title}">
 			<h2 class="{headingClass} truncate hover:underline">{title}</h2>
@@ -55,11 +52,10 @@
 	{@render children?.()}
 	{#if onMore}
 		<button
-			class="flex shrink-0 cursor-pointer items-center gap-0.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+			class="shrink-0 cursor-pointer pb-1 text-sm font-bold text-muted-foreground transition-colors hover:text-foreground hover:underline"
 			onclick={onMore}
 		>
 			{moreLabel}
-			<HugeiconsIcon icon={ArrowRight01Icon} class="h-3.5 w-3.5" />
 		</button>
 	{/if}
 </div>

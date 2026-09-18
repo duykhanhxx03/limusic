@@ -80,8 +80,9 @@
 	const nowId = $derived(playback.now?.videoId);
 	// The song list as one queue — what the Play/Shuffle buttons above it do, and what the queue
 	// panel calls it. Not a `playFrom`: there's no page behind "the music on this disk", so it has
-	// no business landing in recents or the sidebar's last-played order.
-	const SOURCE = 'Local music';
+	// no business landing in recents or the sidebar's last-played order. Named after the tab, in the
+	// app's language, since the queue panel shows it.
+	const SOURCE = $derived(t('library.local_tab'));
 
 	async function pickFolder() {
 		const picked = await open({ directory: true, multiple: false, title: t('local.pick_folder_dialog') });
@@ -106,7 +107,7 @@
 	<div class="rounded-xl bg-card/40 p-4">
 		<div class="mb-3 flex items-center justify-between gap-3">
 			<div class="min-w-0">
-				<div class="flex items-center gap-2 font-medium">
+				<div class="flex items-center gap-2 font-bold">
 					<HugeiconsIcon icon={DriveIcon} class="h-4 w-4" /> {t('local.folders')}
 				</div>
 				<p class="mt-0.5 text-xs text-muted-foreground">{t('local.folders_hint')}</p>
@@ -195,17 +196,17 @@
 				{#if view === 'songs'}
 					<div class="mb-3 flex gap-2">
 						<Button
-							size="sm"
-							class="gap-2 rounded-full"
+							size="lg"
+							class="gap-2"
 							disabled={!songs.length}
 							onclick={() => playAll(false)}
 						>
 							<HugeiconsIcon icon={PlayIcon} class="h-4 w-4" /> {t('common.play_all')}
 						</Button>
 						<Button
-							size="sm"
-							variant="outline"
-							class="gap-2 rounded-full"
+							variant="secondary"
+							size="lg"
+							class="gap-2"
 							disabled={!songs.length}
 							onclick={() => playAll(true)}
 						>

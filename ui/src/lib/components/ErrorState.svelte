@@ -27,7 +27,7 @@
 			<HugeiconsIcon icon={offline ? WifiOff01Icon : Alert02Icon} class="size-4.5" />
 		</span>
 		<div>
-			<p class="text-sm font-medium">
+			<p class="text-sm font-bold">
 				{offline ? t('errors.offline_title') : t('errors.generic_title')}
 			</p>
 			<p class="text-xs text-muted-foreground">

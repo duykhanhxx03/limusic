@@ -8,7 +8,6 @@
 	import {
 		UserCircleIcon,
 		Logout01Icon,
-		ArrowDown01Icon,
 		Add01Icon,
 		Cancel01Icon,
 		UserMinus01Icon
@@ -118,34 +117,32 @@
 	}
 </script>
 
+<!-- The avatar alone, as Spotify has it: the name is in the menu it opens and in the tooltip, and
+     beside the search bar it only pushed the window controls around. -->
 <button
 	onclick={openMenu}
 	title={auth.account?.signedIn ? (auth.account.name ?? t('nav.account')) : t('nav.sign_in')}
+	aria-label={auth.account?.signedIn ? (auth.account.name ?? t('nav.account')) : t('nav.sign_in')}
 	aria-expanded={menuOpen}
-	class="flex h-full cursor-pointer items-center gap-2 px-2.5 text-xs transition-colors hover:bg-muted aria-expanded:bg-muted"
+	class="group flex h-full cursor-pointer items-center px-2"
 >
-	{#if auth.account?.signedIn && auth.account.thumbnail}
-		<!-- max-width:none defeats Tailwind Preflight's `img{max-width:100%}`, which in a tight box
-		     clamps width to the content-box while height stays fixed → a vertical oval. Inline so it's
-		     immune to Preflight and to stale dev CSS. -->
-		<img
-			src={thumb(auth.account.thumbnail, 64)}
-			alt=""
-			style="width:1.25rem;height:1.25rem;max-width:none"
-			class="shrink-0 rounded-full object-cover"
-		/>
-	{:else}
-		<HugeiconsIcon icon={UserCircleIcon} class="h-5 w-5 shrink-0 text-muted-foreground" />
-	{/if}
-	<span class="hidden max-w-28 truncate font-medium lg:block">
-		{auth.account?.signedIn ? (auth.account.name ?? t('nav.account')) : t('nav.sign_in')}
+	<span
+		class="flex size-10 items-center justify-center rounded-full bg-foreground/[0.08] transition-[background-color,scale] group-hover:scale-[1.04] group-hover:bg-foreground/[0.14] group-aria-expanded:bg-foreground/[0.14]"
+	>
+		{#if auth.account?.signedIn && auth.account.thumbnail}
+			<!-- max-width:none defeats Tailwind Preflight's `img{max-width:100%}`, which in a tight box
+			     clamps width to the content-box while height stays fixed → a vertical oval. Inline so
+			     it's immune to Preflight and to stale dev CSS. -->
+			<img
+				src={thumb(auth.account.thumbnail, 64)}
+				alt=""
+				style="width:1.75rem;height:1.75rem;max-width:none"
+				class="shrink-0 rounded-full object-cover"
+			/>
+		{:else}
+			<HugeiconsIcon icon={UserCircleIcon} class="h-5 w-5 shrink-0 text-muted-foreground" />
+		{/if}
 	</span>
-	<HugeiconsIcon
-		icon={ArrowDown01Icon}
-		class="hidden h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200 lg:block {menuOpen
-			? 'rotate-180'
-			: ''}"
-	/>
 </button>
 
 {#if menuOpen}
@@ -155,13 +152,13 @@
 		aria-label={t('common.close')}
 	></button>
 	<div
-		class="fixed z-50 w-72 animate-in rounded-xl glass p-4 text-popover-foreground duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] fade-in-0 zoom-in-[0.97]"
+		class="fixed z-50 min-w-56 w-72 animate-in rounded-lg glass p-1 text-popover-foreground duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] fade-in-0 zoom-in-[0.97]"
 		style={anchor.style}
 		{@attach fitMenu(anchor)}
 	>
 		{#if auth.account?.signedIn}
-			<div class="mb-3">
-				<div class="truncate text-sm font-medium">{auth.account.name ?? t('nav.account')}</div>
+			<div class="px-3 pt-2 pb-2">
+				<div class="truncate text-base font-bold">{auth.account.name ?? t('nav.account')}</div>
 				{#if auth.account.handle || auth.account.email}
 					<div class="truncate text-xs text-muted-foreground">
 						{auth.account.handle ?? auth.account.email}
@@ -171,92 +168,102 @@
 		{/if}
 
 		{#if others.length > 0}
-			<div class="mb-2 space-y-0.5">
-				{#each others as account (account.id)}
-					<div class="flex items-center gap-2 rounded-md px-3 py-1 hover:bg-muted">
-						<button
-							type="button"
-							onclick={() => chooseAccount(account)}
-							disabled={busy}
-							class="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left disabled:cursor-wait"
-						>
-							{#if account.thumbnail}
-								<img
-									src={thumb(account.thumbnail, 48)}
-									alt=""
-									style="width:1.25rem;height:1.25rem;max-width:none"
-									class="shrink-0 rounded-full object-cover"
-								/>
-							{:else}
-								<HugeiconsIcon
-									icon={UserCircleIcon}
-									class="h-5 w-5 shrink-0 text-muted-foreground"
-								/>
-							{/if}
-							<span class="min-w-0 flex-1">
-								<span class="block truncate text-xs font-medium">
-									{account.name ?? t('nav.account')}
+			{#each others as account (account.id)}
+				<!-- One row, two targets, like PlaylistMenu's play/shuffle row: the row switches, the ✕
+				     on its end removes. Siblings in a flex wrapper rather than a nested button (invalid
+				     HTML), with the hover tint on the wrapper so it still reads as a single item. -->
+				<div class="flex items-center rounded-[0.25rem] hover:bg-foreground/10">
+					<button
+						type="button"
+						onclick={() => chooseAccount(account)}
+						disabled={busy}
+						class="menu-item w-auto min-w-0 flex-1 hover:bg-transparent disabled:cursor-wait"
+					>
+						{#if account.thumbnail}
+							<img
+								src={thumb(account.thumbnail, 48)}
+								alt=""
+								style="width:1.25rem;height:1.25rem;max-width:none"
+								class="shrink-0 rounded-full object-cover"
+							/>
+						{:else}
+							<HugeiconsIcon
+								icon={UserCircleIcon}
+								class="h-5 w-5 shrink-0 text-muted-foreground"
+							/>
+						{/if}
+						<span class="min-w-0 flex-1">
+							<span class="block truncate">{account.name ?? t('nav.account')}</span>
+							{#if account.handle || account.email}
+								<span class="block truncate text-xs text-muted-foreground">
+									{account.handle ?? account.email}
 								</span>
-								{#if account.handle || account.email}
-									<span class="block truncate text-[11px] text-muted-foreground">
-										{account.handle ?? account.email}
-									</span>
-								{/if}
-							</span>
-						</button>
-						<button
-							type="button"
-							onclick={() => askRemove(account)}
-							disabled={busy}
-							title={t('nav.remove_account')}
-							aria-label={t('nav.remove_account')}
-							class="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground transition-colors hover:text-destructive disabled:cursor-wait"
-						>
-							<HugeiconsIcon icon={Cancel01Icon} class="h-3.5 w-3.5" />
-						</button>
-					</div>
-				{/each}
-			</div>
+							{/if}
+						</span>
+					</button>
+					<button
+						type="button"
+						onclick={() => askRemove(account)}
+						disabled={busy}
+						title={t('nav.remove_account')}
+						aria-label={t('nav.remove_account')}
+						class="mr-1 flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-destructive disabled:cursor-wait"
+					>
+						<HugeiconsIcon icon={Cancel01Icon} class="h-3.5 w-3.5" />
+					</button>
+				</div>
+			{/each}
+			<div class="menu-sep"></div>
 		{/if}
 
 		{#if auth.account?.signedIn}
-			<!-- justify-start on all three: centred content puts each icon at a different x, because
-			     the labels are different widths. Left-aligned, the icons share a column and so do
-			     the labels, lining up with the saved-account rows above. -->
-			<Button variant="outline" size="sm" class="mb-2 w-full justify-start gap-2" onclick={addAccount}>
-				<HugeiconsIcon icon={Add01Icon} class="size-5 shrink-0" />
+			<!-- Each icon sits in a box as wide as an avatar, so these labels share a column with the
+			     saved-account names above instead of starting 4px short of them. -->
+			<button type="button" class="menu-item" onclick={addAccount}>
+				<span class="flex w-5 shrink-0 justify-center">
+					<HugeiconsIcon icon={Add01Icon} class="size-4" />
+				</span>
 				{t('nav.add_account')}
-			</Button>
+			</button>
 			<!-- Always offered, never gated on a stored "you have one channel": that answer comes from
 			     a single accounts_list call at sign-in, and when it fails the switcher used to vanish
 			     for good. The picker fetches the list live and shows its own error. -->
-			<Button variant="outline" size="sm" class="mb-2 w-full justify-start gap-2" onclick={switchChannel}>
-				<HugeiconsIcon icon={UserCircleIcon} class="size-5 shrink-0" />
+			<button type="button" class="menu-item" onclick={switchChannel}>
+				<span class="flex w-5 shrink-0 justify-center">
+					<HugeiconsIcon icon={UserCircleIcon} class="size-4" />
+				</span>
 				{t('nav.switch_channel')}
-			</Button>
-			<Button variant="outline" size="sm" class="w-full justify-start gap-2" onclick={doSignOut}>
-				<HugeiconsIcon icon={Logout01Icon} class="size-5 shrink-0" />
+			</button>
+			<button type="button" class="menu-item" onclick={doSignOut}>
+				<span class="flex w-5 shrink-0 justify-center">
+					<HugeiconsIcon icon={Logout01Icon} class="size-4" />
+				</span>
 				{t('nav.sign_out')}
-			</Button>
+			</button>
 		{:else}
-			{#if others.length === 0}
-				<p class="text-sm font-medium">{t('nav.sign_in')}</p>
-				<p class="mt-1 text-xs text-muted-foreground">
-					{t('nav.sign_in_hint')}
-				</p>
-			{:else}
-				<p class="text-xs text-muted-foreground">{t('nav.saved_accounts_hint')}</p>
-			{/if}
-			<!-- Signed out with saved accounts: the plain sign-in reuses the login webview's own
-			     Google session, which is the fast path back into whichever account it last held.
-			     Add account is the one that clears it first, so it is the way to reach a different
-			     one. Both are offered rather than guessing which the user meant. -->
-			<Button class="mt-3 w-full" onclick={signInGoogle}>{t('common.sign_in_google')}</Button>
+			<div class="px-3 pt-2 pb-2">
+				{#if others.length === 0}
+					<p class="text-sm font-bold">{t('nav.sign_in')}</p>
+					<p class="mt-1 text-xs text-muted-foreground">
+						{t('nav.sign_in_hint')}
+					</p>
+				{:else}
+					<p class="text-xs text-muted-foreground">{t('nav.saved_accounts_hint')}</p>
+				{/if}
+				<!-- Signed out with saved accounts: the plain sign-in reuses the login webview's own
+				     Google session, which is the fast path back into whichever account it last held.
+				     Add account is the one that clears it first, so it is the way to reach a different
+				     one. Both are offered rather than guessing which the user meant. The sign-in stays
+				     a real button, not a menu row: signed out, it is the one thing this menu is for. -->
+				<Button class="mt-3 w-full" onclick={signInGoogle}>{t('common.sign_in_google')}</Button>
+			</div>
 			{#if others.length > 0}
-				<Button variant="outline" size="sm" class="mt-2 w-full justify-start gap-2" onclick={addAccount}>
-					<HugeiconsIcon icon={Add01Icon} class="size-5 shrink-0" />
+				<button type="button" class="menu-item" onclick={addAccount}>
+					<span class="flex w-5 shrink-0 justify-center">
+						<HugeiconsIcon icon={Add01Icon} class="size-4" />
+					</span>
 					{t('nav.add_account')}
-				</Button>
+				</button>
 			{/if}
 		{/if}
 	</div>

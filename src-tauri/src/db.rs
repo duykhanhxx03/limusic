@@ -263,7 +263,9 @@ impl Db {
         //   4 — SimpMusic lyrics timed on another cut of the song are moved onto the video, or
         //       passed over. Music videos had been cached with words 16 s ahead of the singing.
         //   5 — the same for music videos SponsorBlock knows nothing about.
-        const LYRICS_CACHE_EPOCH: &str = "5";
+        //   6 — syllables a SimpMusic entry set down as words of their own are joined back into
+        //       the word YouTube's lyrics spell. "the cure" had been cached reading "e nough".
+        const LYRICS_CACHE_EPOCH: &str = "6";
         let epoch: Option<String> = conn
             .query_row("SELECT value FROM settings WHERE key = 'lyrics_cache_epoch'", [], |r| {
                 r.get(0)

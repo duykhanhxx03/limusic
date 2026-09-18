@@ -1102,6 +1102,10 @@ export async function startRadio(
 	}
 }
 
+/** Where the library panel's dragged width is kept. Not the old `sidebar_width`: that was sized for
+ *  a column of nav links, and carrying it over would open the library at a width it never had. */
+const SIDEBAR_WIDTH_KEY = 'library_width';
+
 // Transient UI state for write actions.
 export const ui = $state({
 	addSongs: null as SongItem[] | null, // add-to-playlist picker target(s), full items for optimistic appends
@@ -1125,8 +1129,48 @@ export const ui = $state({
 	sidebarCollapsed: browser && localStorage.getItem('sidebar_collapsed') === '1',
 	/** The sidebar's open width in px, dragged by its right edge. Clamped on read as well as on
 	 *  write: localStorage is user-writable, and a width of 4000 would leave no page. */
-	sidebarWidth: browser ? clampSidebar(Number(localStorage.getItem('sidebar_width'))) : 264
+	sidebarWidth: browser ? clampSidebar(Number(localStorage.getItem(SIDEBAR_WIDTH_KEY))) : 340,
+	/** The column to the right of the page: the track that is playing, or the queue — or closed.
+	 *  Open at every launch, on whichever of the two it showed last. */
+	rightPanel: storedRightPanel(),
+	/** The right column's dragged width in px. The layout also caps it at 28vw, so a width picked on
+	 *  a wide window never squeezes the page on a narrower one. */
+	rightPanelWidth: browser ? clampRightPanel(Number(localStorage.getItem('right_panel_width'))) : 420
 });
+
+/** 18.75rem to 35rem, 26.25rem (Spotify's) by default. */
+export function clampRightPanel(px: number): number {
+	return Number.isFinite(px) && px > 0 ? Math.min(560, Math.max(300, px)) : 420;
+}
+
+export function setRightPanelWidth(px: number) {
+	ui.rightPanelWidth = clampRightPanel(px);
+	localStorage.setItem('right_panel_width', String(ui.rightPanelWidth));
+}
+
+export type RightPanel = 'playing' | 'queue' | null;
+
+// Closing the column lasts for the session only: it is where the playing track lives, so a
+// launch that opens without it looks like a launch that lost it.
+function storedRightPanel(): RightPanel {
+	if (!browser) return null;
+	try {
+		return localStorage.getItem('right_panel') === 'queue' ? 'queue' : 'playing';
+	} catch {
+		return 'playing';
+	}
+}
+
+/** Show `view` in the right column, or close it when it is already what is shown there. */
+export function toggleRightPanel(view: Exclude<RightPanel, null>) {
+	ui.rightPanel = ui.rightPanel === view ? null : view;
+	if (!ui.rightPanel) return;
+	try {
+		localStorage.setItem('right_panel', ui.rightPanel);
+	} catch {
+		/* a convenience, not state */
+	}
+}
 
 export function openChannelPicker(required = false) {
 	ui.channelPickerRequired = required;
@@ -1134,15 +1178,16 @@ export function openChannelPicker(required = false) {
 	ui.channelPickerOpen = true;
 }
 
-/** 12rem to 26rem. Below the floor the playlist names are unreadable; above the ceiling the feed
- *  starts losing a card column, which is a worse trade than a truncated name. */
+/** 17.5rem to 30rem, 21.25rem by default — the width Spotify opens its library at. Below the floor
+ *  a library row can't hold a name beside its cover; above the ceiling the feed starts losing card
+ *  columns, which is a worse trade than a truncated name. */
 export function clampSidebar(px: number): number {
-	return Number.isFinite(px) && px > 0 ? Math.min(416, Math.max(192, px)) : 264;
+	return Number.isFinite(px) && px > 0 ? Math.min(480, Math.max(280, px)) : 340;
 }
 
 export function setSidebarWidth(px: number) {
 	ui.sidebarWidth = clampSidebar(px);
-	localStorage.setItem('sidebar_width', String(ui.sidebarWidth));
+	localStorage.setItem(SIDEBAR_WIDTH_KEY, String(ui.sidebarWidth));
 }
 
 export function toggleSidebar() {

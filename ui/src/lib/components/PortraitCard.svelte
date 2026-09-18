@@ -65,11 +65,11 @@
 			class="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent"
 		></div>
 		<div class="pointer-events-none absolute inset-x-0 bottom-0 p-3">
-			<div class="line-clamp-2 font-heading text-sm font-semibold leading-tight text-white">
+			<div class="line-clamp-2 font-heading text-sm font-bold leading-tight text-white">
 				{item.title}
 			</div>
 			{#if item.subtitle}
-				<div class="mt-0.5 truncate text-[0.6875rem] text-white/65">{item.subtitle}</div>
+				<div class="mt-0.5 truncate text-xs text-white/65">{item.subtitle}</div>
 			{/if}
 		</div>
 	</div>

@@ -1,17 +1,18 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fade } from 'svelte/transition';
-	import { goto } from '$app/navigation';
+	import { afterNavigate, goto } from '$app/navigation';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
-	import { ArrowUpBigIcon, MusicNote01Icon } from '@hugeicons/core-free-icons';
+	import { ArrowUpBigIcon, MusicNote01Icon, Edit01Icon, Add01Icon } from '@hugeicons/core-free-icons';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Button } from '$lib/components/ui/button';
 	import MediaCardSkeleton from '$lib/components/MediaCardSkeleton.svelte';
 	import ErrorState from '$lib/components/ErrorState.svelte';
 	import HomeHero from '$lib/components/HomeHero.svelte';
-	import Shortcuts from '$lib/components/Shortcuts.svelte';
+	import Shortcuts, { tileArt } from '$lib/components/Shortcuts.svelte';
 	import RecentRail from '$lib/components/RecentRail.svelte';
 	import Shelf from '$lib/components/Shelf.svelte';
+	import ChipRail from '$lib/components/ChipRail.svelte';
 	import ForgottenFavourites from '$lib/components/ForgottenFavourites.svelte';
 	import FamiliarArtists from '$lib/components/FamiliarArtists.svelte';
 	import HomeLayoutDialog from '$lib/components/HomeLayoutDialog.svelte';
@@ -40,6 +41,7 @@
 	import { reveal } from '$lib/reveal.svelte';
 	import { moreHref } from '$lib/browse';
 	import { chipClass } from '$lib/chip';
+	import { artworkAccent } from '$lib/artcolor';
 
 	const FORGOTTEN_KEY = 'home:forgotten';
 
@@ -59,12 +61,41 @@
 	const pinned = $derived(new Set(personal.picks.map((p) => p.id)));
 	// Same snapshot problem as the Shortcuts tiles: the stored card is what it looked like when it
 	// was last played from, so the live library row wins where there is one (#67).
-	const recent = $derived(
+	const recents = $derived(
 		recentItems(personal, 100)
 			.filter((r) => !pinned.has(r.id))
-			.slice(0, 9)
+			.slice(0, 17)
 			.map((r) => freshen(r, library.items))
 	);
+	// The top of the list tops the shortcuts grid up to eight tiles (Spotify's quick-access grid);
+	// "Jump back in" carries on from where the grid stopped.
+	const quick = $derived(recents.slice(0, Math.max(0, 8 - personal.picks.length)));
+	const recent = $derived(recents.slice(quick.length, quick.length + 9));
+	let picking = $state(false);
+
+	// Point at a shortcut and the top of the page takes on its cover's colour, as Spotify's home
+	// does: Shortcuts says which tile, this reads the colour, HomeHero paints it. A cover with no
+	// colour to give (greyscale, unreadable, On Repeat's icon) gives the page back its own header
+	// rather than leaving the last tile's colour up.
+	let tint = $state<string | null>(null);
+	// Bumped on every hover, so a cover still decoding when the pointer moves on can't land late
+	// and paint the header in the colour of a tile that is no longer under it.
+	let hoverSeq = 0;
+	function hoverShortcut(item: BrowseItem | null) {
+		const seq = ++hoverSeq;
+		const art = item ? tileArt(item) : undefined;
+		if (!art) {
+			tint = null;
+			return;
+		}
+		artworkAccent(art).then((hex) => {
+			if (seq === hoverSeq) tint = hex;
+		});
+	}
+	// Opening a tile leaves with the pointer still on it, and home is hidden rather than torn down
+	// (the layout keeps it alive), so no leave is sure to follow. Let go of the colour once the next
+	// page is up, where it can't be seen going, or the next visit to home opens in it.
+	afterNavigate(() => hoverShortcut(null));
 
 	// "Forgotten favourites" is pulled out of the feed and rendered as a list above it (see the
 	// markup) — the shelf's cards say nothing about a song, and this one is meant to be read.
@@ -286,11 +317,17 @@
 	// has to watch the ancestor rather than the window.
 	let scroller = $state<HTMLElement | null>(null);
 	let scrolled = $state(false);
+	// The chip row is see-through over the wash at the top of the page, and takes the page colour
+	// once it is stuck and the feed scrolls under it.
+	let stuck = $state(false);
 	function watchScroll(node: HTMLElement) {
 		const el = node.closest('main');
 		if (!el) return;
 		scroller = el;
-		const onScroll = () => (scrolled = el.scrollTop > 400);
+		const onScroll = () => {
+			scrolled = el.scrollTop > 400;
+			stuck = el.scrollTop > 64;
+		};
 		el.addEventListener('scroll', onScroll, { passive: true });
 		return () => el.removeEventListener('scroll', onScroll);
 	}
@@ -363,15 +400,42 @@
 	});
 </script>
 
-<div {@attach watchScroll}>
-	<HomeHero />
+<!-- isolate: the wash at the top of the page (HomeHero) sits at -z-10 against this, under the feed
+     but over the panel's own background. -->
+<div class="relative isolate" {@attach watchScroll}>
+	<HomeHero {tint}>
+		{#snippet actions()}
+			<!-- Home's own controls: add a shortcut, rearrange the page. They lived on the Shortcuts
+			     heading, which the grid no longer has. -->
+			<button
+				onclick={() => (picking = true)}
+				title={t('home.add_shortcut')}
+				class="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full bg-foreground/10 px-3 py-1.5 text-sm font-bold text-muted-foreground transition-colors hover:bg-foreground/15 hover:text-foreground"
+			>
+				<HugeiconsIcon icon={Add01Icon} class="h-4 w-4" />
+				<span class="hidden md:inline">{t('home.shortcuts')}</span>
+			</button>
+			<button
+				onclick={() => (editing = true)}
+				title={t('home.edit_home')}
+				class="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full bg-foreground/10 px-3 py-1.5 text-sm font-bold text-muted-foreground transition-colors hover:bg-foreground/15 hover:text-foreground"
+			>
+				<HugeiconsIcon icon={Edit01Icon} class="h-4 w-4" />
+				<span class="hidden md:inline">{t('home.edit_home')}</span>
+			</button>
+		{/snippet}
+	</HomeHero>
 	<!-- Mood chips filter the whole feed, so they're page-level controls: sticky, they stay reachable
 	     while the feed scrolls under them instead of leaving with the header they were pinned to.
 	     Opaque rather than blurred — a backdrop-filter repainting on every scroll frame is the one
 	     thing WebKitGTK reliably chokes on. -->
 	{#if chips.length}
-		<div class="sticky top-0 z-20 bg-background px-6 pt-2.5">
-			<div class="flex gap-2 overflow-x-auto pb-2">
+		<div
+			class="sticky top-0 z-20 px-6 pt-2.5 transition-colors duration-[var(--duration-quick)] {stuck
+				? 'bg-background'
+				: ''}"
+		>
+			<ChipRail class="gap-2 pb-2.5">
 				<!-- An explicit "All" is the way out of a filter. Clicking the active chip again also
 				     clears it, but nobody discovers that, and nothing else on screen says you're filtered. -->
 				<button onclick={() => load(null)} class={chipClass(!selected)}>{t('common.all')}</button>
@@ -383,12 +447,12 @@
 						{chip.title}
 					</button>
 				{/each}
-			</div>
+			</ChipRail>
 		</div>
 	{:else if loading}
 		<!-- Hold the bar's height on a cold load: chips arrive with the feed, and popping them in
 		     afterwards shoves the whole page down under the cursor. -->
-		<div class="sticky top-0 z-20 bg-background px-6 pt-2.5" aria-hidden="true">
+		<div class="sticky top-0 z-20 px-6 pt-2.5" aria-hidden="true">
 			<div class="flex gap-2 overflow-hidden pb-2">
 				{#each ['w-10', 'w-16', 'w-20', 'w-14', 'w-24', 'w-16'] as w, i (i)}
 					<Skeleton class="h-8 shrink-0 rounded-full {w}" />
@@ -396,13 +460,13 @@
 			</div>
 		</div>
 	{/if}
-	<div class="px-6 pb-6 pt-6">
+	<div class="px-6 pb-6 pt-4">
 		<!-- Zone one: what's yours. The grid you arranged, above the rule that separates it from
 		     everything the app or YouTube chose. It steps aside entirely while a mood filter is
 		     active: none of it is filterable, and neither is the arrangement it edits. -->
 		{#if !rendered}
-			<div class="mb-10 pb-8">
-				<Shortcuts onEdit={() => (editing = true)} />
+			<div class="mb-10">
+				<Shortcuts fill={quick} bind:picking onhover={hoverShortcut} />
 			</div>
 		{/if}
 		{#snippet shelfSkeletons(n: number)}

@@ -111,9 +111,9 @@
 			</div>
 		</div>
 		<div class="mt-2.5 min-w-0">
-			<div class="truncate text-sm font-medium">{item.title}</div>
+			<div class="truncate text-base">{item.title}</div>
 			{#if item.subtitle}
-				<div class="truncate text-xs text-muted-foreground">{item.subtitle}</div>
+				<div class="truncate text-sm text-muted-foreground">{item.subtitle}</div>
 			{/if}
 		</div>
 	</div>

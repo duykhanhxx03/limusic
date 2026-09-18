@@ -1,5 +1,6 @@
 <script lang="ts">
-	// The sidebar's draggable right edge.
+	// A panel's draggable edge: the library's right edge, or (`edge="left"`) the right column's
+	// left one.
 	//
 	// Pointer events with capture, not mouse events: capture means the drag keeps receiving moves
 	// after the pointer leaves the 4px strip, which at drag speed it does immediately. Without it a
@@ -7,8 +8,13 @@
 	//
 	// Writes go straight to the store (which clamps and persists); nothing is buffered until
 	// release, so the sidebar tracks the pointer rather than jumping at the end.
-	import { setSidebarWidth, ui } from '$lib/player.svelte';
+	import { setRightPanelWidth, setSidebarWidth, ui } from '$lib/player.svelte';
 	import { t } from '$lib/i18n.svelte';
+
+	let { edge = 'right' }: { edge?: 'left' | 'right' } = $props();
+	const left = $derived(edge === 'left');
+	const width = $derived(left ? ui.rightPanelWidth : ui.sidebarWidth);
+	const setWidth = (px: number) => (left ? setRightPanelWidth(px) : setSidebarWidth(px));
 
 	let dragging = $state(false);
 
@@ -22,11 +28,12 @@
 
 	function move(e: PointerEvent) {
 		if (!dragging) return;
-		// Measured from the shell's left edge, not from a delta: a delta accumulates rounding over a
+		// Measured from the panel's fixed edge, not from a delta: a delta accumulates rounding over a
 		// long drag and drifts away from the pointer.
-		const shell = (e.currentTarget as HTMLElement).closest('.app-shell');
-		if (!shell) return;
-		setSidebarWidth(e.clientX - shell.getBoundingClientRect().left);
+		const panel = (e.currentTarget as HTMLElement).parentElement;
+		if (!panel) return;
+		const box = panel.getBoundingClientRect();
+		setWidth(left ? box.right - e.clientX : e.clientX - box.left);
 	}
 
 	function up(e: PointerEvent) {
@@ -37,8 +44,11 @@
 	/** Keyboard: the handle is focusable, so the width is reachable without a pointer. */
 	function key(e: KeyboardEvent) {
 		const step = e.shiftKey ? 32 : 8;
-		if (e.key === 'ArrowLeft') setSidebarWidth(ui.sidebarWidth - step);
-		else if (e.key === 'ArrowRight') setSidebarWidth(ui.sidebarWidth + step);
+		// Arrows move the edge: on the right column's left edge, left makes it wider.
+		const grow = left ? 'ArrowLeft' : 'ArrowRight';
+		const shrink = left ? 'ArrowRight' : 'ArrowLeft';
+		if (e.key === grow) setWidth(width + step);
+		else if (e.key === shrink) setWidth(width - step);
 		else return;
 		e.preventDefault();
 	}
@@ -53,11 +63,11 @@
      rule only knows the static separator, so it flags the correct markup. Changing the role to
      something the linter likes (`button`, `slider`) would describe this worse, not better. -->
 <div
-	class="resizer absolute inset-y-0 -right-1 z-20 w-2 cursor-col-resize"
+	class="resizer absolute inset-y-0 z-20 w-2 cursor-col-resize {left ? '-left-1' : '-right-1'}"
 	role="separator"
 	aria-orientation="vertical"
 	aria-label={t('a11y.resize_sidebar')}
-	aria-valuenow={ui.sidebarWidth}
+	aria-valuenow={width}
 	tabindex="0"
 	onpointerdown={down}
 	onpointermove={move}

@@ -20,10 +20,13 @@
 		BookmarkMinus02Icon,
 		ListRestartIcon,
 		Sorting01Icon,
-		ArrowUpDownIcon
+		ArrowUpDownIcon,
+		Add01Icon,
+		RefreshIcon
 	} from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
 	import * as RadioGroup from '$lib/components/ui/radio-group';
+	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import TrackRow from '$lib/components/TrackRow.svelte';
 	import TrackSelectionBar from '$lib/components/TrackSelectionBar.svelte';
@@ -72,7 +75,10 @@
 		bumpLibraryTrackCount,
 		noteUnsavedFrom,
 		patchLibraryPlaylist,
-		lastPlaylistAdd
+		lastPlaylistAdd,
+		notePlaylistAdd,
+		noteSavedIn,
+		playSong
 	} from '$lib/player.svelte';
 
 	// `$state.raw`, not `$state`: a deep proxy makes every read of a row go through a trap and
@@ -165,9 +171,13 @@
 	// YouTube's header count includes rows that never make it into the list (unavailable or
 	// region-blocked tracks), so it reads high. Once every page is in, we know the real number, so
 	// swap it in. Until then the header's own count is the only estimate of the total there is.
+	// The swapped-in count is ours, so it is said in the app's language, not YouTube's English.
 	const subtitle = $derived(
 		pl && !pl.continuation && pl.items.length
-			? (pl.subtitle ?? '').replace(/^[\d,.]+ songs?/i, `${pl.items.length} songs`)
+			? (pl.subtitle ?? '').replace(
+					/^[\d,.]+ songs?/i,
+					t('library.songs_count', { count: pl.items.length })
+				)
 			: pl?.subtitle
 	);
 	// --- sorting (`$lib/sort`) ---------------------------------------------------------------
@@ -402,6 +412,9 @@
 		// A page that failed on the last playlist would otherwise keep this one's retry state
 		// showing, and block the filter's own walk (`loadAll` bails while it's set).
 		moreError = false;
+		suggested = [];
+		suggestRefresh = undefined;
+		suggestAsked = '';
 		if (hit) {
 			pl = hit;
 			if (!saved) sort = hit.sortMenu?.selected ?? 'default';
@@ -522,6 +535,59 @@
 			moreError = true;
 		} finally {
 			loadingMore = false;
+		}
+	}
+
+	// YouTube Music's "Suggestions" under a playlist you own: songs it thinks belong here, each one
+	// click from joining. They sit below the tracks, so they are asked for once the whole list is on
+	// screen, and a batch that runs out is replaced by the next.
+	let suggested = $state.raw<SongItem[]>([]);
+	let suggestRefresh = $state<string | undefined>(undefined);
+	let suggestLoading = $state(false);
+	let suggestAsked = '';
+	let adding = $state<string | null>(null);
+	const suggestable = $derived(editable && !!pl?.suggestions && !pl?.continuation);
+	$effect(() => {
+		const token = suggestable ? pl?.suggestions : undefined;
+		const pid = id;
+		if (!token || suggestAsked === pid) return;
+		suggestAsked = pid;
+		untrack(() => loadSuggestions(pid, token));
+	});
+
+	async function loadSuggestions(pid: string, token: string) {
+		suggestLoading = true;
+		try {
+			const batch = await api.getPlaylistSuggestions(token);
+			if (pid !== id) return;
+			// YouTube leaves out what the playlist holds, but not what was added a moment ago.
+			const have = new Set(pl?.items.map((t) => t.video_id));
+			suggested = batch.items.filter((t) => !have.has(t.video_id));
+			suggestRefresh = batch.refresh;
+		} catch {
+			// Suggestions are extra: a failure leaves the page as it would be without them.
+		} finally {
+			if (pid === id) suggestLoading = false;
+		}
+	}
+
+	async function addSuggestion(song: SongItem) {
+		const pid = id;
+		adding = song.video_id;
+		try {
+			const added = await api.addToPlaylist(pid, song.video_id);
+			noteSavedIn(pid, [song.video_id]);
+			if (added) {
+				bumpLibraryTrackCount(pid, 1);
+				notePlaylistAdd(pid, [song]); // lands at the end of the list above, like any add
+			}
+			if (pid !== id) return;
+			suggested = suggested.filter((t) => t.video_id !== song.video_id);
+			if (!suggested.length && suggestRefresh) loadSuggestions(pid, suggestRefresh);
+		} catch (e) {
+			toast.error(String(e));
+		} finally {
+			adding = null;
 		}
 	}
 
@@ -773,15 +839,34 @@
 		}
 	}
 
+	/** The request is in flight: the dialog stays up, its buttons locked, until YouTube answers. */
+	let deleting = $state(false);
+	// The playlist's name in bold inside the sentence, wherever the language puts it. A catalog
+	// without the placeholder gets its sentence as it is.
+	const deleteDesc = $derived(t('library.delete_playlist_desc', { name: '\u0000' }).split('\u0000'));
+
+	// The header's round buttons that are components of their own (DownloadButton,
+	// TrackSelectButton) take a class, not a variant, so the secondary icon-lg look is spelled out
+	// here, the same as on the album page. The icon stays muted rather than taking the variant's
+	// text colour: both components add `text-primary` for their "on" state, and a second text colour
+	// in the same list would win or lose on stylesheet order instead of on purpose.
+	const roundIcon =
+		'flex size-10 cursor-pointer items-center justify-center rounded-full bg-secondary text-muted-foreground transition hover:bg-secondary/80 hover:text-foreground disabled:opacity-50';
+
 	async function deleteThisPlaylist() {
+		// bits-ui's Action is a plain button (only Cancel closes the dialog), so it closes here.
+		deleting = true;
 		try {
 			await api.deletePlaylist(id);
 			invalidateCached(`playlist:${id}`);
 			toast.success(t('toasts.playlist_deleted'));
+			confirmingDelete = false;
 			goto('/library');
 		} catch (e) {
 			toast.error(String(e));
 			confirmingDelete = false;
+		} finally {
+			deleting = false;
 		}
 	}
 </script>
@@ -846,16 +931,16 @@
 					<div class="relative h-40 w-40 rounded-xl bg-muted"></div>
 				{/if}
 				<div class="relative min-w-0 flex-1">
-					<div class="flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground">
-						Playlist
+					<div class="flex items-center gap-2 text-sm text-muted-foreground">
+						{t('common.playlist_singular')}
 						{#if pl.collaborative}
 							<span
-								class="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary"
+								class="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-primary"
 								title={t('library.collab_tooltip')}>{t('library.collab')}</span
 							>
 						{/if}
 					</div>
-					<h1 class="mt-1 font-heading text-4xl font-bold tracking-tight">
+					<h1 class="mt-1 font-heading text-4xl font-extrabold tracking-tight">
 						{pl.title ?? t('common.playlist_singular')}
 					</h1>
 					{#if subtitle}<p class="mt-2 text-sm text-muted-foreground">{subtitle}</p>{/if}
@@ -867,7 +952,7 @@
 							</p>
 							{#if longDescription}
 								<button
-									class="mt-1 cursor-pointer text-xs font-semibold uppercase text-muted-foreground hover:text-foreground"
+									class="mt-1 cursor-pointer text-sm font-bold text-muted-foreground transition-colors hover:text-foreground hover:underline"
 									onclick={() => (expanded = !expanded)}
 								>
 									{expanded ? t('common.less') : t('common.more')}
@@ -876,8 +961,9 @@
 						</div>
 					{/if}
 					<div class="mt-4 flex items-center justify-between gap-2">
-						<div class="flex items-center gap-2">
+						<div class="flex items-center gap-3">
 							<Button
+								size="lg"
 								class="gap-2"
 								onclick={() => playAll(null)}
 								disabled={!pl.items.length || preparing || resorting}
@@ -891,30 +977,20 @@
 								items={pl.items}
 								ondownload={downloadAll}
 								disabled={!pl.items.length || preparing}
-								class="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-50"
+								class={roundIcon}
 							/>
-							{#if confirmingDelete}
-								<div class="flex items-center gap-2 rounded-lg bg-destructive/10 px-2 py-1">
-									<span class="text-xs text-muted-foreground">{t('library.delete_playlist_confirm')}</span>
-									<Button variant="destructive" size="sm" onclick={deleteThisPlaylist}>{t('common.delete')}</Button>
-									<Button variant="ghost" size="sm" onclick={() => (confirmingDelete = false)}>
-										Cancel
-									</Button>
-								</div>
-							{:else}
-								<Button
-									variant="ghost"
-									size="icon"
-									aria-label={t('a11y.playlist_options')}
-									onclick={openMenu}
-								>
-									<HugeiconsIcon icon={MoreVerticalIcon} class="h-5 w-5 text-muted-foreground" />
-								</Button>
-							{/if}
-							<TrackSelectButton
-								{selection}
-								class="-ml-2 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full transition hover:bg-muted hover:text-foreground"
-							/>
+							<!-- `size-5`, not h-5 w-5: Button sizes any svg without a size-* class to
+							     16px, and this glyph sits between two 20px ones. -->
+							<Button
+								variant="secondary"
+								size="icon-lg"
+								class="text-muted-foreground hover:text-foreground"
+								aria-label={t('a11y.playlist_options')}
+								onclick={openMenu}
+							>
+								<HugeiconsIcon icon={MoreVerticalIcon} class="size-5" />
+							</Button>
+							<TrackSelectButton {selection} class={roundIcon} />
 						</div>
 						<!-- Pushed to the far end of the header, away from the play controls. -->
 						<div class="flex items-center gap-1">
@@ -1005,6 +1081,60 @@
 						</div>
 					{/if}
 				{/if}
+				{#if suggestable && !filtering && (suggested.length || suggestLoading)}
+					<section class="mt-10" aria-busy={suggestLoading}>
+						<div class="mb-2 flex items-end justify-between gap-4 px-2">
+							<div class="min-w-0">
+								<h2 class="font-heading text-2xl font-bold tracking-tight">{t('library.suggestions')}</h2>
+								<p class="text-xs text-muted-foreground">{t('library.suggestions_hint')}</p>
+							</div>
+							{#if suggestRefresh}
+								<Button
+									variant="ghost"
+									size="sm"
+									class="shrink-0 text-muted-foreground"
+									disabled={suggestLoading}
+									onclick={() => suggestRefresh && loadSuggestions(id, suggestRefresh)}
+								>
+									<HugeiconsIcon
+										icon={RefreshIcon}
+										class="h-4 w-4 {suggestLoading ? 'animate-spin' : ''}"
+									/>
+									{t('library.suggestions_refresh')}
+								</Button>
+							{/if}
+						</div>
+						<div class="transition-opacity {suggestLoading ? 'opacity-50' : ''}">
+							{#if !suggested.length}
+								{#each Array(5) as _, i (i)}
+									<TrackRowSkeleton />
+								{/each}
+							{/if}
+							{#each suggested as song (song.video_id)}
+								<div class="flex items-center gap-2">
+									<div class="min-w-0 flex-1">
+										<TrackRow
+											{song}
+											active={song.video_id === nowId}
+											onplay={() => playSong(song)}
+										/>
+									</div>
+									<Button
+										variant="outline"
+										size="sm"
+										class="mr-2 shrink-0"
+										disabled={adding !== null}
+										aria-label={t('library.suggestions_add_to', { title: song.title })}
+										onclick={() => addSuggestion(song)}
+									>
+										<HugeiconsIcon icon={Add01Icon} class="h-4 w-4" />
+										{t('library.suggestions_add')}
+									</Button>
+								</div>
+							{/each}
+						</div>
+					</section>
+				{/if}
 			</div>
 		</div>
 	{/if}
@@ -1017,7 +1147,7 @@
 		aria-label={t('a11y.close_menu')}
 	></button>
 	<div
-		class="fixed z-50 min-w-44 animate-in rounded-lg glass p-1 text-popover-foreground duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] fade-in-0 zoom-in-[0.97]"
+		class="fixed z-50 min-w-56 animate-in rounded-lg glass p-1 text-popover-foreground duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] fade-in-0 zoom-in-[0.97]"
 		style={sortAnchor.style}
 		{@attach fitMenu(sortAnchor)}
 	>
@@ -1028,7 +1158,7 @@
 		>
 			{#each SORTS as key (key)}
 				<label
-					class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+					class="menu-item"
 				>
 					<RadioGroup.Item value={key} />
 					{t(`sort.${key}`)}
@@ -1049,26 +1179,26 @@
 		aria-label={t('a11y.close_menu')}
 	></button>
 	<div
-		class="fixed z-50 min-w-52 animate-in rounded-lg glass p-1 text-popover-foreground duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] fade-in-0 zoom-in-[0.97]"
+		class="fixed z-50 min-w-56 animate-in rounded-lg glass p-1 text-popover-foreground duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] fade-in-0 zoom-in-[0.97]"
 		style={anchor.style}
 		{@attach fitMenu(anchor)}
 	>
 		<button
-			class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+			class="menu-item"
 			onclick={() => run(shufflePlay)}
 			disabled={!pl?.items.length}
 		>
 			<HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" /> {t('player.shuffle_play')}
 		</button>
 		<button
-			class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+			class="menu-item"
 			onclick={() => run(() => queue(true))}
 			disabled={!pl?.items.length}
 		>
 			<HugeiconsIcon icon={ArrowUpNarrowWideIcon} class="h-4 w-4" /> {t('player.play_next')}
 		</button>
 		<button
-			class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+			class="menu-item"
 			onclick={() => run(() => queue(false))}
 			disabled={!pl?.items.length}
 		>
@@ -1078,29 +1208,31 @@
 		     radio from. -->
 		{#if !isOnRepeat}
 			<button
-				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				class="menu-item"
 				onclick={() => run(() => startRadio('playlist', id, pl?.title))}
 			>
 				<HugeiconsIcon icon={Radio02Icon} class="h-4 w-4" /> {t('player.start_radio')}
 			</button>
 		{/if}
+		<div class="menu-sep"></div>
 		<button
-			class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+			class="menu-item"
 			onclick={() => run(() => addPick(asItem()))}
 		>
 			<HugeiconsIcon icon={DashboardSquare02Icon} class="h-4 w-4" /> {t('player.add_to_shortcuts')}
 		</button>
 		{#if !isOnRepeat}
 			<button
-				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				class="menu-item"
 				onclick={() => run(() => openShare(asItem()))}
 			>
 				<HugeiconsIcon icon={Share08Icon} class="h-4 w-4" /> {t('player.share')}
 			</button>
 		{/if}
+		<div class="menu-sep"></div>
 		{#if savable}
 			<button
-				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				class="menu-item"
 				onclick={() => run(saveToLibrary)}
 			>
 				<!-- altIcon/showAlt, not a ternary: `icon` is read once at mount. -->
@@ -1114,12 +1246,12 @@
 			</button>
 		{:else if inAccount && !isOnRepeat && !isLiked && !editable}
 			{#if ownedByUser(asItem())}
-				<div class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground">
+				<div class="menu-item cursor-default text-muted-foreground hover:bg-transparent">
 					<HugeiconsIcon icon={BookmarkCheck02Icon} class="h-4 w-4" /> {t('library.in_library')}
 				</div>
 			{:else}
 				<button
-					class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+					class="menu-item"
 					onclick={() => run(unsaveFromLibrary)}
 				>
 					<HugeiconsIcon icon={BookmarkMinus02Icon} class="h-4 w-4" />
@@ -1127,15 +1259,16 @@
 				</button>
 			{/if}
 		{/if}
+		<div class="menu-sep"></div>
 		{#if editable}
 			<button
-				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				class="menu-item"
 				onclick={() => run(() => (editing = true))}
 			>
 				<HugeiconsIcon icon={PencilEdit02Icon} class="h-4 w-4" /> {t('player.edit_playlist')}
 			</button>
 			<button
-				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
+				class="menu-item text-destructive"
 				onclick={() => run(() => (confirmingDelete = true))}
 			>
 				<HugeiconsIcon icon={Delete02Icon} class="h-4 w-4" /> {t('player.delete_playlist')}
@@ -1156,3 +1289,31 @@
 		onchange={applyEdit}
 	/>
 {/if}
+
+<!-- Deleting asks first, in a dialog of its own as Spotify does, rather than a strip squeezed in
+     among the header's buttons. The name is in the sentence, so what goes is never in doubt.
+     Escape and a click outside are the Cancel, except while the request is in flight. -->
+<AlertDialog.Root
+	bind:open={() => confirmingDelete, (v) => {
+		if (!deleting) confirmingDelete = v;
+	}}
+>
+	<AlertDialog.Content>
+		<AlertDialog.Header>
+			<AlertDialog.Title>{t('library.delete_playlist_confirm')}</AlertDialog.Title>
+			<AlertDialog.Description>
+				{deleteDesc[0]}{#if deleteDesc.length > 1}<strong class="font-bold text-foreground"
+						>{pl?.title ?? t('common.playlist_singular')}</strong
+					>{deleteDesc[1]}{/if}
+			</AlertDialog.Description>
+		</AlertDialog.Header>
+		<AlertDialog.Footer>
+			<AlertDialog.Cancel disabled={deleting}>
+				{t('common.cancel')}
+			</AlertDialog.Cancel>
+			<AlertDialog.Action onclick={deleteThisPlaylist} disabled={deleting}>
+				{t('common.delete')}
+			</AlertDialog.Action>
+		</AlertDialog.Footer>
+	</AlertDialog.Content>
+</AlertDialog.Root>

@@ -31,6 +31,7 @@
     import ArtistLine from "$lib/components/ArtistLine.svelte";
     import ExplicitIcon from "$lib/components/ExplicitIcon.svelte";
     import { Skeleton } from "$lib/components/ui/skeleton";
+    import { Button } from "$lib/components/ui/button";
     import * as api from "$lib/api";
     import type { AlbumPage, BrowseItem } from "$lib/api";
     import {
@@ -129,7 +130,7 @@
         // tile keeps its circle (see browse.ts `hrefFor`).
         kind: id.startsWith(api.LOCAL_ARTIST_PREFIX) ? "artist" : "album",
         id,
-        title: album?.title ?? "Album",
+        title: album?.title ?? t('common.album_singular'),
         subtitle: album?.artist,
         thumbnail: album?.thumbnail,
         // Recently played keeps this object as the card it draws, so without the flag an album
@@ -218,6 +219,14 @@
         openAddManyToPlaylist(album.items);
     }
 
+    // The header's round buttons that are components of their own (DownloadButton,
+    // TrackSelectButton) take a class, not a variant, so the secondary icon-lg look is spelled out
+    // here. The icon stays muted rather than taking the variant's text colour: both components add
+    // `text-primary` for their "on" state, and a second text colour in the same list would win or
+    // lose on stylesheet order instead of on purpose. The ⋯ button below matches them.
+    const roundIcon =
+        "flex size-10 cursor-pointer items-center justify-center rounded-full bg-secondary text-muted-foreground transition hover:bg-secondary/80 hover:text-foreground disabled:opacity-50";
+
     // A shelf's "See all" opens the same grid route the artist page uses.
     function showMore(s: { title: string; moreBrowseId?: string; moreParams?: string }) {
         const q = new URLSearchParams({ id: s.moreBrowseId!, title: s.title });
@@ -293,14 +302,14 @@
                 {/if}
                 <div class="min-w-0">
                     <div
-                        class="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                        class="text-sm text-muted-foreground"
                     >
-                        {album.subtitle ?? "Album"}
+                        {album.subtitle ?? t('common.album_singular')}
                     </div>
                     <h1
-                        class="mt-1 font-heading text-4xl font-bold tracking-tight"
+                        class="mt-1 font-heading text-4xl font-extrabold tracking-tight"
                     >
-                        {album.title ?? "Album"}
+                        {album.title ?? t('common.album_singular')}
                     </h1>
                     <div
                         class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground"
@@ -310,7 +319,7 @@
                         {/if}
                         {#if album.artist}
                             <span
-                                class="flex items-center gap-1.5 font-medium text-foreground"
+                                class="flex items-center gap-1.5 font-bold text-foreground"
                             >
                                 {#if album.artistThumbnail}
                                     <img
@@ -343,7 +352,7 @@
                         {album.description}
                     </p>
                     <button
-                        class="mt-1 cursor-pointer text-xs font-semibold uppercase text-muted-foreground hover:text-foreground"
+                        class="mt-1 cursor-pointer text-sm font-bold text-muted-foreground transition-colors hover:text-foreground hover:underline"
                         onclick={() => (expanded = !expanded)}
                     >
                         {expanded ? t("common.less") : t("common.more")}
@@ -353,27 +362,32 @@
 
             <!-- Controls -->
             <div class="relative flex items-center gap-3">
-                <button
-                    class="flex cursor-pointer items-center gap-2 rounded-full text-foreground bg-primary px-6 py-2.5 text-sm font-semibold transition hover:opacity-90 disabled:opacity-50"
+                <Button
+                    size="lg"
+                    class="gap-2"
                     onclick={() => playAll(null)}
                     disabled={!album.items.length}
                 >
                     <HugeiconsIcon icon={PlayIcon} class="h-4 w-4" /> {t("player.play")}
-                </button>
-                <button
-                    class="flex cursor-pointer items-center gap-2 rounded-full bg-foreground/10 px-5 py-2.5 text-sm font-semibold transition hover:bg-foreground/20 disabled:opacity-50"
+                </Button>
+                <Button
+                    variant="secondary"
+                    size="lg"
+                    class="gap-2"
                     onclick={shuffle}
                     disabled={!album.items.length}
                 >
                     <HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" /> {t("common.shuffle")}
-                </button>
+                </Button>
                 <!-- Local albums are already in the Local tab; everything else is savable, signed
                      in or not. -->
                 {#if !isLocal}
-                    <button
-                        class="flex cursor-pointer items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition disabled:opacity-50 {inLibrary
-                            ? 'bg-primary/25 text-primary'
-                            : 'bg-foreground/10 hover:bg-foreground/20'}"
+                    <Button
+                        variant="secondary"
+                        size="lg"
+                        class="gap-2 {inLibrary
+                            ? 'bg-primary/25 text-primary hover:bg-primary/30'
+                            : ''}"
                         onclick={toggleLibrary}
                         disabled={savingLibrary}
                     >
@@ -385,7 +399,7 @@
                             class="h-4 w-4"
                         />
                         {inLibrary ? t("library.in_library") : t("library.save_to_library")}
-                    </button>
+                    </Button>
                 {/if}
                 <!-- Beside Play, not inside the ⋯ menu: whether an album is on your device is
                      something you want to see, not something you open a menu to find out. -->
@@ -394,20 +408,21 @@
                         items={album.items}
                         ondownload={downloadAll}
                         disabled={!album.items.length}
-                        class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-foreground/10 text-muted-foreground transition hover:bg-foreground/20 hover:text-foreground disabled:opacity-50"
+                        class={roundIcon}
                     />
                 {/if}
-                <TrackSelectButton
-                    {selection}
-                    class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-foreground/10 transition hover:bg-foreground/20 hover:text-foreground"
-                />
-                <button
-                    class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-foreground/10 text-muted-foreground transition hover:bg-foreground/20 hover:text-foreground"
+                <TrackSelectButton {selection} class={roundIcon} />
+                <!-- `size-5`, not h-5 w-5: Button sizes any svg without a size-* class to 16px, and
+                     this glyph sits beside the 20px ones in the two buttons before it. -->
+                <Button
+                    variant="secondary"
+                    size="icon-lg"
+                    class="text-muted-foreground hover:text-foreground"
                     onclick={openMenu}
                     aria-label={t("a11y.more_options")}
                 >
-                    <HugeiconsIcon icon={MoreVerticalIcon} class="h-5 w-5" />
-                </button>
+                    <HugeiconsIcon icon={MoreVerticalIcon} class="size-5" />
+                </Button>
 
                 {#if menuOpen}
                     <!-- Moved to <body>: the header clips its overflow, and a menu opened from the
@@ -423,13 +438,13 @@
                         {@attach toBody}
                     ></button>
                     <div
-                        class="fixed z-50 min-w-48 animate-in rounded-lg glass p-1 text-popover-foreground duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] fade-in-0 zoom-in-[0.97]"
+                        class="fixed z-50 min-w-56 animate-in rounded-lg glass p-1 text-popover-foreground duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] fade-in-0 zoom-in-[0.97]"
                         style={anchor.style}
                         {@attach toBody}
                         {@attach fitMenu(anchor)}
                     >
                         <button
-                            class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+                            class="menu-item"
                             onclick={() => queue(true)}
                         >
                             <HugeiconsIcon
@@ -438,7 +453,7 @@
                             /> {t("player.play_next")}
                         </button>
                         <button
-                            class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+                            class="menu-item"
                             onclick={() => queue(false)}
                         >
                             <HugeiconsIcon
@@ -450,7 +465,7 @@
                              without one (rare) has nothing to ask YouTube for. -->
                         {#if !isLocal && album.playlistId}
                             <button
-                                class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+                                class="menu-item"
                                 onclick={radio}
                             >
                                 <HugeiconsIcon
@@ -461,7 +476,7 @@
                         {/if}
                         {#if !isLocal}
                             <button
-                                class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+                                class="menu-item"
                                 onclick={saveToPlaylist}
                             >
                                 <HugeiconsIcon
@@ -471,7 +486,7 @@
                             </button>
                         {/if}
                         <button
-                            class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+                            class="menu-item"
                             onclick={() => {
                                 menuOpen = false;
                                 addPick(asItem());
@@ -484,7 +499,7 @@
                         </button>
                         {#if !isLocal}
                             <button
-                                class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+                                class="menu-item"
                                 onclick={() => {
                                     menuOpen = false;
                                     openShare(asItem());
@@ -534,7 +549,6 @@
                 <Shelf
                     title={section.title}
                     items={section.items}
-                    headingClass="font-heading text-xl font-bold"
                     onMore={section.moreBrowseId
                         ? () => showMore(section)
                         : undefined}

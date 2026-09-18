@@ -3,11 +3,13 @@
 //! crossfade across two mpv instances when one is set ([`Crossfade`]).
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use libmpv2::events::{Event, EventContext, PropertyData};
 use libmpv2::{Format, Mpv};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+
+mod silence;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -93,6 +95,12 @@ const MIN_OVERLAP_SECS: f64 = 0.5;
 /// ramp instead of partway up it.
 const CUE_AHEAD_SECS: f64 = 5.0;
 
+/// Leading silence shorter than this isn't worth a seek.
+const MIN_LEAD_SECS: f64 = 0.1;
+
+/// How many tracks' silence is remembered: the playing one, the next, and a few either side.
+const SILENCE_MEMORY: usize = 32;
+
 /// Where the sweeps start and end. The low-pass closes down to the bassline; the high-pass opens
 /// from hi-hats and voice down to below anything audible. Both move exponentially: pitch is heard
 /// on a log scale, and a linear sweep would spend most of the overlap in the top octave.
@@ -175,6 +183,42 @@ struct Mix {
     decks: [Arc<Mpv>; 2],
     state: std::sync::Mutex<MixState>,
     tx: UnboundedSender<PlayerEvent>,
+    /// Measures the silence at a track's ends (`silence.rs`).
+    probe: std::sync::mpsc::Sender<silence::Job>,
+}
+
+/// The silence at a track's two ends, as far as it has been measured.
+#[derive(Debug, Default, Clone, Copy)]
+struct Silence {
+    head: Measure,
+    tail: Measure,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+enum Measure {
+    #[default]
+    Unasked,
+    Pending,
+    Known(f64),
+    Unknown,
+}
+
+impl Silence {
+    fn at(&mut self, end: silence::End) -> &mut Measure {
+        match end {
+            silence::End::Head => &mut self.head,
+            silence::End::Tail => &mut self.tail,
+        }
+    }
+}
+
+impl Measure {
+    fn secs(self) -> Option<f64> {
+        match self {
+            Measure::Known(s) => Some(s),
+            _ => None,
+        }
+    }
 }
 
 /// The next track, held back from mpv's playlist so it can start early on the other deck.
@@ -225,6 +269,16 @@ struct MixState {
     duration: [f64; 2],
     /// Each deck's sample rate (0 until known), which bounds the sweeps' corners.
     rate: [f64; 2],
+    /// Each deck's file, as mpv reports it.
+    path: [Option<String>; 2],
+    /// Where to seek a deck to once its file has loaded: past the silence a cued track opens on.
+    /// mpv refuses a seek on a deck that has no file yet, which a deck being cued doesn't.
+    lead_in: [Option<f64>; 2],
+    /// Silence at the ends of recent tracks, by URL, for the crossfade to skip.
+    silence: HashMap<String, Silence>,
+    /// The headers last applied, for the silence probe's own fetches.
+    user_agent: Option<String>,
+    header_fields: String,
     paused: [bool; 2],
     idle: [bool; 2],
     playing: bool,
@@ -235,6 +289,8 @@ enum DeckEvent {
     Position(f64),
     Duration(f64),
     Rate(i64),
+    Path(String),
+    Loaded,
     Paused(bool),
     Idle(bool),
     Started,
@@ -255,7 +311,16 @@ impl Player {
 
         let decks = [Arc::new(new_deck(cache_dir)?), Arc::new(new_deck(cache_dir)?)];
         let (tx, rx) = unbounded_channel();
-        let mix = Arc::new(Mix {
+        let pcm = std::path::Path::new(cache_dir).join("crossfade-probe.pcm");
+        let mix = Arc::new_cyclic(|mix: &Weak<Mix>| Mix {
+            probe: {
+                let mix = mix.clone();
+                silence::spawn(pcm, move |m| {
+                    if let Some(mix) = mix.upgrade() {
+                        mix.measured(m);
+                    }
+                })
+            },
             decks,
             state: std::sync::Mutex::new(MixState {
                 active: 0,
@@ -275,6 +340,11 @@ impl Player {
                 handoff: None,
                 duration: [0.0; 2],
                 rate: [0.0; 2],
+                path: [None, None],
+                lead_in: [None, None],
+                silence: HashMap::new(),
+                user_agent: None,
+                header_fields: String::new(),
                 // mpv reports the initial value of an observed property immediately; these are
                 // what it will say before anything is loaded: `pause: false`, `idle-active: true`.
                 paused: [false; 2],
@@ -291,6 +361,7 @@ impl Player {
             ev.observe_property("pause", Format::Flag, 2)?;
             ev.observe_property("idle-active", Format::Flag, 3)?;
             ev.observe_property("audio-params/samplerate", Format::Int64, 4)?;
+            ev.observe_property("path", Format::String, 5)?;
             let mix = mix.clone();
             std::thread::Builder::new()
                 .name(format!("mpv-events-{deck}"))
@@ -323,7 +394,8 @@ impl Player {
         s.next = None;
         s.handoff = None;
         let d = s.active;
-        self.mix.apply_headers(headers)?;
+        s.lead_in[d] = None;
+        self.mix.apply_headers(&mut s, headers)?;
         s.gain[d] = gain_db;
         s.sweep[d] = Sweep::FLAT;
         s.level[d] = 1.0;
@@ -345,6 +417,8 @@ impl Player {
         let mut s = self.lock();
         if blend && s.crossfade.on() {
             s.next = Some(Next { url: url.to_owned(), gain_db });
+            self.mix.ask(&mut s, url, silence::End::Head);
+            self.mix.ask(&mut s, url, silence::End::Tail);
             return Ok(());
         }
         s.next = None;
@@ -497,6 +571,15 @@ impl Player {
                 self.mix.decks[s.active].command("loadfile", &[&quoted(&next.url), "append"])?;
             }
         }
+        // Switched on mid-track: the playing track's end and the next one's start still have time
+        // to be measured.
+        if let Some(url) = s.path[s.active].clone() {
+            self.mix.ask(&mut s, &url, silence::End::Tail);
+        }
+        if let Some(url) = s.next.as_ref().map(|n| n.url.clone()) {
+            self.mix.ask(&mut s, &url, silence::End::Head);
+            self.mix.ask(&mut s, &url, silence::End::Tail);
+        }
         // The sweep filters join or leave both chains.
         self.mix.apply_af_all(&mut s)
     }
@@ -558,7 +641,11 @@ impl Mix {
         Ok(())
     }
 
-    fn apply_headers(&self, headers: &HashMap<String, String>) -> Result<(), Error> {
+    fn apply_headers(
+        &self,
+        s: &mut MixState,
+        headers: &HashMap<String, String>,
+    ) -> Result<(), Error> {
         // User-Agent has its own mpv property; everything else joins http-header-fields.
         let fields: String = headers
             .iter()
@@ -566,13 +653,54 @@ impl Mix {
             .map(|(k, v)| format!("{k}: {v}"))
             .collect::<Vec<_>>()
             .join(",");
+        let ua = headers.get("User-Agent").or_else(|| headers.get("user-agent"));
         for deck in &self.decks {
-            if let Some(ua) = headers.get("User-Agent").or_else(|| headers.get("user-agent")) {
+            if let Some(ua) = ua {
                 deck.set_property("user-agent", ua.as_str())?;
             }
             deck.set_property("http-header-fields", fields.as_str())?;
         }
+        if ua.is_some() {
+            s.user_agent = ua.cloned();
+        }
+        s.header_fields = fields;
         Ok(())
+    }
+
+    /// Have the silence at one end of `url` measured, unless it has been or is being. Only while
+    /// crossfading: nothing else uses it.
+    fn ask(&self, s: &mut MixState, url: &str, end: silence::End) {
+        if !s.crossfade.on() {
+            return;
+        }
+        if s.silence.len() >= SILENCE_MEMORY && !s.silence.contains_key(url) {
+            s.silence.clear();
+        }
+        let measure = s.silence.entry(url.to_owned()).or_default().at(end);
+        if *measure != Measure::Unasked {
+            return;
+        }
+        *measure = Measure::Pending;
+        let job = silence::Job {
+            url: url.to_owned(),
+            end,
+            user_agent: s.user_agent.clone(),
+            header_fields: s.header_fields.clone(),
+        };
+        let _ = self.probe.send(job);
+    }
+
+    fn measured(&self, m: silence::Measured) {
+        let mut s = self.state.lock().unwrap();
+        if let Some(entry) = s.silence.get_mut(&m.url) {
+            *entry.at(m.end) = m.secs.map_or(Measure::Unknown, Measure::Known);
+        }
+    }
+
+    /// Measured silence at one end of `url`.
+    fn silence_at(s: &MixState, url: Option<&str>, end: silence::End) -> Option<f64> {
+        let mut entry = *s.silence.get(url?)?;
+        entry.at(end).secs()
     }
 
     fn apply_volume(&self, s: &MixState, d: usize) -> Result<(), Error> {
@@ -646,9 +774,22 @@ impl Mix {
                 }
             }
             DeckEvent::Rate(r) => s.rate[deck] = r as f64,
+            DeckEvent::Path(path) => {
+                // A new track on the deck that is playing: where its music ends decides when the
+                // crossfade out of it starts.
+                if deck == s.active {
+                    self.ask(&mut s, &path, silence::End::Tail);
+                }
+                s.path[deck] = Some(path);
+            }
             DeckEvent::Paused(p) => s.paused[deck] = p,
             DeckEvent::Idle(i) => s.idle[deck] = i,
             DeckEvent::Started if s.handoff == Some(deck) => s.handoff = None,
+            DeckEvent::Loaded => {
+                if let Some(lead) = s.lead_in[deck].take() {
+                    let _ = self.decks[deck].command("seek", &[&lead.to_string(), "absolute"]);
+                }
+            }
             DeckEvent::Ended if outgoing => self.end_overlap(&mut s),
             DeckEvent::Ended if deck == s.active => {
                 // The track ended before its overlap could start (its length was off, or the next
@@ -703,9 +844,15 @@ impl Mix {
         if !(duration > 0.0 && pos.is_finite()) {
             return;
         }
+        // The music ends where the silence after it starts, and the overlap ends with the music.
+        // (Not when that would be most of the track: then the measurement found something odd.)
+        let tail = Self::silence_at(s, s.path[deck].as_deref(), silence::End::Tail)
+            .filter(|&t| t < duration / 2.0)
+            .unwrap_or(0.0);
+        let end = duration - tail;
         // A third of the track at most: a crossfade longer than that isn't a transition any more.
-        let len = s.crossfade.secs.min(duration / 3.0);
-        let left = duration - pos;
+        let len = s.crossfade.secs.min(end / 3.0);
+        let left = end - pos;
         if s.cued.is_none() && left <= len + CUE_AHEAD_SECS {
             let Some(next) = s.next.take() else { return };
             if left < MIN_OVERLAP_SECS {
@@ -727,6 +874,8 @@ impl Mix {
     /// Load `next` on the deck that isn't `from`, paused and silent.
     fn cue(&self, s: &mut MixState, from: usize, next: Next) {
         let to = 1 - from;
+        let lead = Self::silence_at(s, Some(&next.url), silence::End::Head)
+            .filter(|&l| l >= MIN_LEAD_SECS);
         s.gain[to] = next.gain_db;
         s.sweep[to] = if s.crossfade.sweeps() { Sweep::opening(0.0) } else { Sweep::FLAT };
         s.level[to] = 0.0;
@@ -743,6 +892,9 @@ impl Mix {
             Ok(()) => {
                 s.cued = Some(to);
                 s.handoff = Some(to);
+                // In where the sound starts: a second of silence at the top would be a second of
+                // the overlap with nothing coming in.
+                s.lead_in[to] = lead;
             }
             Err(e) => {
                 tracing::warn!(error = %e, "crossfade: couldn't cue the next track, going gapless");
@@ -772,6 +924,20 @@ impl Mix {
             let _ = self.apply_volume(s, to);
             self.retune(s, to, Sweep::FLAT);
         }
+        // Its leading silence may have been measured only after it was cued (the next track
+        // resolved late, or the user jumped close to the end): skip it now, before it plays, or
+        // as soon as the file is open if it isn't yet.
+        if let Some(lead) = Self::silence_at(s, s.path[to].as_deref(), silence::End::Head)
+            .filter(|&l| l >= MIN_LEAD_SECS)
+        {
+            match self.decks[to].get_property::<f64>("time-pos") {
+                Ok(at) if at < lead - MIN_LEAD_SECS => {
+                    let _ = self.decks[to].command("seek", &[&lead.to_string(), "absolute"]);
+                }
+                Ok(_) => {}
+                Err(_) => s.lead_in[to] = Some(lead),
+            }
+        }
         // Playing on if the music is: an overlap can begin paused, from a seek into its window.
         let _ = self.decks[to].set_property("pause", s.paused[from]);
         s.overlap = overlap;
@@ -785,6 +951,7 @@ impl Mix {
     /// Drop a cued track: the queue changed under it, or something else is being played.
     fn uncue(&self, s: &mut MixState) {
         let Some(c) = s.cued.take() else { return };
+        s.lead_in[c] = None;
         let _ = self.decks[c].command("stop", &[]);
         s.level[c] = 1.0;
         if s.handoff == Some(c) {
@@ -821,6 +988,7 @@ impl Mix {
 
     /// Start `next` on `deck` straight away, replacing what it had.
     fn cut_to(&self, s: &mut MixState, deck: usize, next: Next) {
+        s.lead_in[deck] = None;
         s.gain[deck] = next.gain_db;
         s.sweep[deck] = Sweep::FLAT;
         s.level[deck] = 1.0;
@@ -942,7 +1110,11 @@ fn event_loop(mut ev: EventContext, deck: usize, mix: Arc<Mix>) {
                     change: PropertyData::Int64(r),
                     ..
                 } => DeckEvent::Rate(r),
+                Event::PropertyChange { name: "path", change: PropertyData::Str(p), .. } => {
+                    DeckEvent::Path(p.to_owned())
+                }
                 Event::StartFile => DeckEvent::Started,
+                Event::FileLoaded => DeckEvent::Loaded,
                 // STOP/QUIT/REDIRECT are deliberate (loadfile replace, shutdown, the end of an
                 // overlap) — ignored. ERROR never reaches this arm: libmpv2 surfaces
                 // end-file-with-error as Err from wait_event (see below).
@@ -1210,7 +1382,12 @@ mod tests {
     /// A mono 16-bit WAV of a sine: a source whose length mpv knows up front, which a crossfade
     /// needs (it starts a fixed time before the end).
     fn tone(dir: &std::path::Path, hz: f64, secs: f64, rate: u32) -> String {
-        let n = (secs * rate as f64) as u32;
+        wav(dir, &format!("{hz}"), &[(hz, secs)], rate)
+    }
+
+    /// A WAV of `(hz, secs)` segments, where 0 Hz is silence.
+    fn wav(dir: &std::path::Path, name: &str, segments: &[(f64, f64)], rate: u32) -> String {
+        let n: u32 = segments.iter().map(|&(_, secs)| (secs * rate as f64) as u32).sum();
         let mut wav = Vec::with_capacity(44 + 2 * n as usize);
         wav.extend_from_slice(b"RIFF");
         wav.extend_from_slice(&(36 + 2 * n).to_le_bytes());
@@ -1224,11 +1401,13 @@ mod tests {
         wav.extend_from_slice(&16u16.to_le_bytes());
         wav.extend_from_slice(b"data");
         wav.extend_from_slice(&(2 * n).to_le_bytes());
-        for i in 0..n {
-            let x = (i as f64 / rate as f64 * hz * std::f64::consts::TAU).sin() * 8_000.0;
-            wav.extend_from_slice(&(x as i16).to_le_bytes());
+        for &(hz, secs) in segments {
+            for i in 0..(secs * rate as f64) as u32 {
+                let x = (i as f64 / rate as f64 * hz * std::f64::consts::TAU).sin() * 8_000.0;
+                wav.extend_from_slice(&(x as i16).to_le_bytes());
+            }
         }
-        let path = dir.join(format!("{hz}.wav"));
+        let path = dir.join(format!("{name}.wav"));
         std::fs::write(&path, wav).unwrap();
         path.to_str().unwrap().to_owned()
     }
@@ -1347,5 +1526,66 @@ mod tests {
         assert!(p.lock().overlap.is_none());
         std::thread::sleep(std::time::Duration::from_millis(200));
         assert!(p.mix.decks[from].get_property::<bool>("idle-active").unwrap());
+    }
+
+    /// The overlap covers the music, not the quiet around it: a track that ends on two seconds of
+    /// silence hands over two seconds early, and one that opens on a second of it comes in at the
+    /// first sound. Both ends are measured from the files themselves, on the probe's own mpv.
+    #[test]
+    fn a_crossfade_skips_the_silence_around_the_music() {
+        use super::{Crossfade, Player, PlayerEvent};
+        use std::collections::HashMap;
+
+        let dir = std::env::temp_dir().join("limusic-crossfade-silence-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = wav(&dir, "ends-quiet", &[(440.0, 3.0), (0.0, 2.0)], 44_100);
+        let b = wav(&dir, "starts-quiet", &[(0.0, 1.0), (660.0, 3.0)], 44_100);
+        let mut p = Player::new(dir.to_str().unwrap()).expect("libmpv");
+        let mut rx = p.take_events().unwrap();
+        p.set_speed(2.0).unwrap();
+        p.set_crossfade(Crossfade { secs: 1.5, filters: false }).unwrap();
+        p.load(&a, &HashMap::new(), None).unwrap();
+        p.play().unwrap();
+        p.enqueue(&b, None, true).unwrap();
+        // Both measurements land long before they are needed.
+        let measured = |url: &str, end| {
+            let s = p.lock();
+            super::Mix::silence_at(&s, Some(url), end)
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while measured(&a, super::silence::End::Tail).is_none()
+            || measured(&b, super::silence::End::Head).is_none()
+        {
+            assert!(std::time::Instant::now() < deadline, "the silence was never measured");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let tail = measured(&a, super::silence::End::Tail).unwrap();
+        let head = measured(&b, super::silence::End::Head).unwrap();
+        assert!((tail - 2.0).abs() < 0.06, "tail {tail}");
+        assert!((head - 1.0).abs() < 0.06, "head {head}");
+
+        // The music ends at 3 s; the overlap is a third of that, so it starts at 2 s rather than
+        // 1.5 s before the file's end at 5 s.
+        let ended = |e: &PlayerEvent| matches!(e, PlayerEvent::TrackEnded);
+        let seen = until(&mut rx, 5.0, ended).expect("no handover");
+        let at = last_position(&seen);
+        assert!(
+            (1.8..2.4).contains(&at),
+            "handed over at {at}, not a second before the music ends"
+        );
+        // The incoming track starts where its sound does.
+        let first = until(&mut rx, 2.0, |e| matches!(e, PlayerEvent::Position(_))).unwrap();
+        let from = last_position(&first);
+        assert!(from >= 0.9, "the incoming track started at {from}, in its silence");
+        // And the outgoing one stops with its music, not at the end of its file two seconds later.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while p.lock().overlap.is_some() {
+            assert!(std::time::Instant::now() < deadline, "the overlap never ended");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(p.mix.decks[0].get_property::<bool>("idle-active").unwrap());
+        let out = p.mix.decks[1].get_property::<f64>("time-pos").unwrap();
+        assert!(out < 3.0, "the outgoing deck ran on into its silence (incoming at {out})");
     }
 }

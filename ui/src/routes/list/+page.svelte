@@ -18,7 +18,7 @@
 
 	const id = $derived(page.url.searchParams.get('id') ?? '');
 	const params = $derived(page.url.searchParams.get('params') ?? undefined);
-	const title = $derived(page.url.searchParams.get('title') ?? 'More');
+	const title = $derived(page.url.searchParams.get('title') ?? t('common.more'));
 
 	async function load(browseId: string, p?: string) {
 		const key = `list:${browseId}:${p ?? ''}`;

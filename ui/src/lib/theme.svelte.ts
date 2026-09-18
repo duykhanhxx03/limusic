@@ -46,6 +46,7 @@ export const THEMES: Theme[] = [
 
 /** Font stacks bundled with the app (imported in layout.css). "System" needs no download. */
 export const FONTS: { label: string; value: string }[] = [
+	{ label: 'Spotify Mix', value: "'Spotify Mix', sans-serif" },
 	{ label: 'Plus Jakarta Sans', value: "'Plus Jakarta Sans Variable', sans-serif" },
 	{ label: 'Montserrat', value: "'Montserrat Variable', sans-serif" },
 	{ label: 'Outfit', value: "'Outfit Variable', sans-serif" },

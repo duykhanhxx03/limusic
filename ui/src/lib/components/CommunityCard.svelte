@@ -135,12 +135,12 @@
 				</div>
 			{/if}
 		</div>
-		<div class="mt-2 truncate text-center text-sm font-medium">{item.title}</div>
+		<div class="mt-2 truncate text-center text-base">{item.title}</div>
 		{#if item.subtitle}
-			<div class="truncate text-center text-xs text-muted-foreground">{item.subtitle}</div>
+			<div class="truncate text-center text-sm text-muted-foreground">{item.subtitle}</div>
 		{/if}
 		{#if stats}
-			<div class="truncate text-center text-[0.6875rem] text-muted-foreground/70">{stats}</div>
+			<div class="truncate text-center text-xs text-muted-foreground/70">{stats}</div>
 		{/if}
 	</div>
 
@@ -166,8 +166,8 @@
 					     content's width and a long title pushes the row wide instead of ellipsing. The
 					     skeleton rows below always had this; the real ones did not. -->
 					<span class="min-w-0 flex-1">
-						<span class="block truncate text-xs font-medium">{t.title}</span>
-						<span class="block truncate text-[0.6875rem] text-muted-foreground">{t.artists}</span>
+						<span class="block truncate text-sm">{t.title}</span>
+						<span class="block truncate text-xs text-muted-foreground">{t.artists}</span>
 					</span>
 				</button>
 			{/each}

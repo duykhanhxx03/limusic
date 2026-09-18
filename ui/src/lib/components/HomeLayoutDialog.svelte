@@ -8,9 +8,7 @@
 	import { untrack } from 'svelte';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import {
-		Cancel02Icon,
 		DragDropHorizontalIcon,
-		SaveIcon,
 		ViewIcon,
 		ViewOffSlashIcon
 	} from '@hugeicons/core-free-icons';
@@ -72,9 +70,9 @@
 <Dialog.Root bind:open>
 	<Dialog.Content class="gap-0 overflow-hidden p-0 sm:max-w-md">
 		<div class="px-5 py-4">
-			<Dialog.Title class="text-lg font-semibold">{t('home.edit_home')}</Dialog.Title>
-			<Dialog.Description class="text-xs text-muted-foreground">
-				{t('home.shortcuts_desc')}
+			<Dialog.Title>{t('home.edit_home')}</Dialog.Title>
+			<Dialog.Description class="mt-1">
+				{t('home.edit_home_desc')}
 			</Dialog.Description>
 		</div>
 
@@ -149,15 +147,9 @@
 			{/each}
 		</div>
 
-		<div class="flex justify-end gap-2 px-5 py-3">
-			<Button variant="outline" size="sm" onclick={() => (open = false)}>
-				<HugeiconsIcon icon={Cancel02Icon} class="h-4 w-4" />
-				{t('common.cancel')}
-			</Button>
-			<Button size="sm" onclick={save}>
-				<HugeiconsIcon icon={SaveIcon} class="h-4 w-4" />
-				{t('common.save')}
-			</Button>
-		</div>
+		<Dialog.Footer class="px-5 py-3">
+			<Button variant="ghost" size="lg" onclick={() => (open = false)}>{t('common.cancel')}</Button>
+			<Button size="lg" onclick={save}>{t('common.save')}</Button>
+		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

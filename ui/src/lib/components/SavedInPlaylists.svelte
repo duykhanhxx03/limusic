@@ -10,6 +10,7 @@
 	import type { BrowseItem } from '$lib/api';
 	import { hrefFor } from '$lib/browse';
 	import { anchorMenu, fitMenu, NO_ANCHOR, toBody } from '$lib/menu';
+	import { t } from '$lib/i18n.svelte';
 
 	let { playlists }: { playlists: BrowseItem[] } = $props();
 
@@ -38,8 +39,8 @@
 
 	const label = $derived(
 		playlists.length === 1
-			? `Saved in ${playlists[0].title}`
-			: `Saved in ${playlists.length} playlists`
+			? t('library.saved_in_one', { title: playlists[0].title })
+			: t('library.saved_in_many', { count: playlists.length })
 	);
 </script>
 
@@ -61,7 +62,7 @@
 
 {#if open}
 	<div
-		class="fixed z-50 min-w-52 max-w-72 animate-in rounded-lg glass p-1 text-popover-foreground duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] fade-in-0 zoom-in-[0.97]"
+		class="fixed z-50 min-w-56 max-w-72 animate-in rounded-lg glass p-1 text-popover-foreground duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] fade-in-0 zoom-in-[0.97]"
 		style={anchor.style}
 		{@attach fitMenu(anchor)}
 		onmouseenter={keep}
@@ -69,25 +70,23 @@
 		role="tooltip"
 		{@attach toBody}
 	>
-		<p class="px-2 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-			Saved in
+		<p class="px-3 pt-2 pb-1 text-xs font-bold text-muted-foreground">
+			{t('library.saved_in')}
 		</p>
 		{#each shown as pl (pl.id)}
-			<a
-				href={hrefFor(pl)}
-				class="flex w-full items-center gap-2 rounded-md p-1.5 hover:bg-accent/10"
-				onclick={() => (open = false)}
-			>
+			<a href={hrefFor(pl)} class="menu-item" onclick={() => (open = false)}>
 				{#if pl.thumbnail}
 					<img src={pl.thumbnail} alt="" class="h-7 w-7 shrink-0 rounded object-cover" />
 				{:else}
 					<div class="h-7 w-7 shrink-0 rounded bg-muted"></div>
 				{/if}
-				<span class="min-w-0 truncate text-sm">{pl.title}</span>
+				<span class="min-w-0 truncate">{pl.title}</span>
 			</a>
 		{/each}
 		{#if extra > 0}
-			<p class="px-2 pb-1 pt-0.5 text-xs text-muted-foreground">and {extra} more</p>
+			<p class="px-3 pt-0.5 pb-1 text-xs text-muted-foreground">
+				{t('common.and_more', { count: extra })}
+			</p>
 		{/if}
 	</div>
 {/if}

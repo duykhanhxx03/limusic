@@ -6,7 +6,7 @@
 	// draws instantly and offline) and uploaded to YouTube Music behind the picker.
 	import { open as pickFile } from '@tauri-apps/plugin-dialog';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
-	import { ImageAdd02Icon, Delete02Icon } from '@hugeicons/core-free-icons';
+	import { ImageAdd02Icon } from '@hugeicons/core-free-icons';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -122,7 +122,6 @@
 	<Dialog.Content class="sm:max-w-xl">
 		<Dialog.Header>
 			<Dialog.Title>{t('dialogs.edit_playlist.title')}</Dialog.Title>
-			<Dialog.Description>{t('dialogs.edit_playlist.desc_placeholder')}</Dialog.Description>
 		</Dialog.Header>
 		<form
 			class="flex flex-col gap-4"
@@ -159,11 +158,10 @@
 							type="button"
 							variant="ghost"
 							size="sm"
-							class="gap-1.5 text-xs text-muted-foreground"
+							class="text-muted-foreground"
 							onclick={() => storeCover(null)}
 							disabled={removing}
 						>
-							<HugeiconsIcon icon={Delete02Icon} class="h-3.5 w-3.5" />
 							{removing ? t('common.loading') : t('dialogs.edit_playlist.remove_cover')}
 						</Button>
 					{/if}
@@ -181,7 +179,7 @@
 			</div>
 			<div class="flex items-center justify-between gap-4 rounded-2xl bg-muted px-3 py-2.5">
 				<div class="min-w-0">
-					<div class="text-sm font-medium">{t('common.public')}</div>
+					<div class="text-sm font-bold">{t('common.public')}</div>
 					<p class="text-xs text-muted-foreground">
 						{isPublic
 							? t('dialogs.edit_playlist.public_on')
@@ -194,8 +192,8 @@
 				{t('dialogs.edit_playlist.artwork_note')}
 			</p>
 			<Dialog.Footer>
-				<Button type="button" variant="outline" onclick={() => (open = false)}>{t('common.cancel')}</Button>
-				<Button type="submit" disabled={saving || !draftName.trim()}>
+				<Button type="button" variant="ghost" size="lg" onclick={() => (open = false)}>{t('common.cancel')}</Button>
+				<Button type="submit" size="lg" disabled={saving || !draftName.trim()}>
 					{saving ? t('common.loading') : t('dialogs.edit_playlist.save_btn')}
 				</Button>
 			</Dialog.Footer>

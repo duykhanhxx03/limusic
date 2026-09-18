@@ -215,6 +215,18 @@ pub struct PlaylistPage {
     pub collaborative: bool,
     /// Absent on lists YouTube will not reorder at all: albums and its own radio mixes.
     pub sort_menu: Option<SortMenu>,
+    /// Opens the "Suggestions" shelf YouTube Music shows under a playlist you own: songs it thinks
+    /// belong in it. Fetched on its own (`parse_playlist_suggestions`) because the page never
+    /// carries the songs themselves.
+    pub suggestions: Option<String>,
+}
+
+/// Songs YouTube Music suggests adding to a playlist you own.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct PlaylistSuggestions {
+    pub items: Vec<SongItem>,
+    /// Swaps the whole batch for a new one: YouTube's own "Refresh" under the shelf.
+    pub refresh: Option<String>,
 }
 
 /// A page of extra tracks fetched via a continuation token.
@@ -599,6 +611,48 @@ pub fn parse_playlist(root: &Value) -> PlaylistPage {
         owned,
         collaborative,
         sort_menu: sort_menu(root),
+        suggestions: if owned { suggestions_token(root) } else { None },
+    }
+}
+
+/// The token behind an owned playlist's "Suggestions" shelf. YouTube loads that shelf after the
+/// tracks, from a continuation on the section list that holds them; when the shelf comes inline it
+/// carries the continuation itself. Either way it is never the track shelf's own token, which pages
+/// the playlist (`shelf_continuation`).
+fn suggestions_token(root: &Value) -> Option<String> {
+    let list = find_all(root, "sectionListRenderer").into_iter().find(|l| {
+        l.get("contents")
+            .and_then(Value::as_array)
+            .is_some_and(|c| c.iter().any(|s| s.get("musicPlaylistShelfRenderer").is_some()))
+    })?;
+    let inline = list
+        .get("contents")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|s| s.get("musicShelfRenderer"))
+        .find_map(continuation_token);
+    inline.or_else(|| continuation_token(list.get("continuations")?))
+}
+
+/// The "Suggestions" shelf: a `musicShelfRenderer` in a section-list continuation the first time,
+/// a `musicShelfContinuation` on a refresh. Its rows each nest a copy of themselves in an "add to
+/// playlist" command, hence the shallow walk (see `find_all_shallow`).
+pub fn parse_playlist_suggestions(root: &Value) -> PlaylistSuggestions {
+    let shelf = find_all(root, "musicShelfRenderer")
+        .into_iter()
+        .next()
+        .or_else(|| find_all(root, "musicShelfContinuation").into_iter().next());
+    let Some(shelf) = shelf else { return PlaylistSuggestions::default() };
+    PlaylistSuggestions {
+        items: find_all_shallow(shelf, "musicResponsiveListItemRenderer")
+            .into_iter()
+            .filter_map(parse_list_item)
+            .collect(),
+        refresh: find_all(shelf, "reloadContinuationData")
+            .into_iter()
+            .find_map(|c| c.get("continuation").and_then(Value::as_str))
+            .map(str::to_owned),
     }
 }
 
@@ -1683,6 +1737,94 @@ mod tests {
         let p = parse_playlist(&root);
         assert_eq!(p.items.len(), 1);
         assert_eq!(p.continuation, None, "the suggestions token is not a track continuation");
+    }
+
+    /// The suggestions token, both ways YouTube hands it over, and only on a playlist you own.
+    #[test]
+    fn an_owned_playlist_offers_its_suggestions_token() {
+        let tracks = json!({ "musicPlaylistShelfRenderer": { "contents": [
+            { "musicResponsiveListItemRenderer": {
+                "playlistItemData": { "videoId": "mine1" },
+                "flexColumns": [
+                    { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [{ "text": "Mine" }] } } }
+                ]
+            } }
+        ], "continuations": [{ "nextContinuationData": { "continuation": "MORE_TRACKS" } }] } });
+        let page = |owned: bool, list: Value| {
+            let header = if owned {
+                json!({ "musicEditablePlaylistDetailHeaderRenderer": { "header": {
+                    "musicResponsiveHeaderRenderer": { "title": { "runs": [{ "text": "Mine" }] } }
+                } } })
+            } else {
+                json!({ "musicResponsiveHeaderRenderer": { "title": { "runs": [{ "text": "Theirs" }] } } })
+            };
+            json!({ "header": header, "contents": { "twoColumnBrowseResultsRenderer": {
+                "secondaryContents": { "sectionListRenderer": list }
+            } } })
+        };
+        // On the section list, after the tracks (what the web client gets).
+        let deferred = json!({
+            "contents": [tracks.clone()],
+            "continuations": [{ "nextContinuationData": { "continuation": "SUGGEST" } }]
+        });
+        let p = parse_playlist(&page(true, deferred.clone()));
+        assert_eq!(p.suggestions.as_deref(), Some("SUGGEST"));
+        assert_eq!(p.continuation.as_deref(), Some("MORE_TRACKS"), "the tracks page as before");
+        // Someone else's playlist: that continuation leads to related playlists, not songs.
+        assert_eq!(parse_playlist(&page(false, deferred)).suggestions, None);
+        // Inline, as its own shelf.
+        let inline = json!({ "contents": [tracks, { "musicShelfRenderer": {
+            "title": { "runs": [{ "text": "Suggestions" }] },
+            "contents": [],
+            "continuations": [{ "nextContinuationData": { "continuation": "SHELF" } }]
+        } }] });
+        assert_eq!(parse_playlist(&page(true, inline)).suggestions.as_deref(), Some("SHELF"));
+    }
+
+    /// The shelf the token opens, and the refresh that swaps its batch. Each row nests a copy of
+    /// itself in its "add" command; a row counted twice would be suggested twice.
+    #[test]
+    fn suggestions_parse_once_per_song_with_their_refresh_token() {
+        let row = |vid: &str, title: &str| {
+            json!({ "musicResponsiveListItemRenderer": {
+                "playlistItemData": { "videoId": vid },
+                "flexColumns": [
+                    { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [{ "text": title }] } } }
+                ],
+                "fixedColumns": [{ "musicResponsiveListItemFixedColumnRenderer": { "button": {
+                    "buttonRenderer": { "command": { "playlistEditEndpoint": { "clientActions": [
+                        { "musicAddSuggestionToPlaylistCommand": { "addToPlaylistCommand": {
+                            "insertShelfItemCommand": { "item": {
+                                "musicResponsiveListItemRenderer": { "playlistItemData": { "videoId": vid } }
+                            } }
+                        } } }
+                    ] } } }
+                } } }]
+            } })
+        };
+        let first = json!({ "continuationContents": { "sectionListContinuation": {
+            "contents": [{ "musicShelfRenderer": {
+                "title": { "runs": [{ "text": "Suggestions" }] },
+                "contents": [row("s1", "Nơi Này Có Anh"), row("s2", "Lạc Trôi")],
+                "continuations": [{ "reloadContinuationData": { "continuation": "REFRESH" } }]
+            } }],
+            "continuations": [{ "nextContinuationData": { "continuation": "RELATED" } }]
+        } } });
+        let s = parse_playlist_suggestions(&first);
+        assert_eq!(s.items.iter().map(|i| i.video_id.as_str()).collect::<Vec<_>>(), ["s1", "s2"]);
+        assert_eq!(s.items[1].title, "Lạc Trôi");
+        assert_eq!(s.refresh.as_deref(), Some("REFRESH"), "not the related-playlists token");
+        let again = json!({ "continuationContents": { "musicShelfContinuation": {
+            "contents": [row("s3", "Chạy Ngay Đi")],
+            "continuations": [{ "reloadContinuationData": { "continuation": "REFRESH2" } }]
+        } } });
+        let s = parse_playlist_suggestions(&again);
+        assert_eq!(s.items.len(), 1);
+        assert_eq!(s.refresh.as_deref(), Some("REFRESH2"));
+        // A continuation with no shelf in it (related playlists only) suggests nothing.
+        assert!(parse_playlist_suggestions(&json!({ "continuationContents": {} }))
+            .items
+            .is_empty());
     }
 
     /// What the "Edit playlist" dialog prefills from. Both fields have to survive the round trip:

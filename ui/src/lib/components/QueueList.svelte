@@ -181,22 +181,22 @@
 		<!-- The queue in front of the playing track that was never reached: start an album at track
 		     4 and the backend still queues 1-3. Always drawn: they are not history. -->
 		{#if view.earlier.length}
-			<h3 class="truncate px-2 pt-2 pb-1.5 text-sm font-semibold text-muted-foreground">
+			<h3 class="truncate px-2 pt-2 pb-1.5 text-base font-bold text-muted-foreground">
 				{view.earlierHeading}
 			</h3>
 			{@render rows(view.earlier, wins[0])}
 		{/if}
 		{#if showPrev && view.prev.length}
-			<h3 class="px-2 pt-2 pb-1.5 text-sm font-semibold text-muted-foreground">
+			<h3 class="px-2 pt-2 pb-1.5 text-base font-bold text-muted-foreground">
 				{t('player.history')}
 			</h3>
 			{@render rows(view.prev, wins[1])}
 		{/if}
 		<div bind:this={nowEl} class="flex items-center justify-between gap-2 px-2 pt-2 pb-1.5">
-			<h3 class="truncate text-sm font-semibold">{t('player.now_playing')}</h3>
+			<h3 class="truncate text-base font-bold">{t('player.now_playing')}</h3>
 			{#if view.prev.length}
 				<button
-					class="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+					class="flex shrink-0 cursor-pointer items-center gap-1.5 text-sm font-bold text-muted-foreground transition-colors hover:text-foreground"
 					onclick={togglePrev}
 				>
 					<HugeiconsIcon icon={HistoryIcon} class="h-3.5 w-3.5" />
@@ -213,14 +213,14 @@
 					title={t('player.autoplay_notice')}
 				>
 					<HugeiconsIcon icon={InfinityIcon} class="h-3.5 w-3.5" />
-					<span class="text-xs font-medium">{t('settings.playback.autoplay')}</span>
+					<span class="text-sm font-bold">{t('settings.playback.autoplay')}</span>
 				</div>
 			{:else}
 				<div class="mt-3 flex items-center justify-between gap-2 px-2 pb-1.5">
-					<h3 class="truncate text-sm font-semibold">{block.heading}</h3>
+					<h3 class="truncate text-base font-bold">{block.heading}</h3>
 					{#if block.clearable}
 						<button
-							class="shrink-0 cursor-pointer text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+							class="shrink-0 cursor-pointer text-sm font-bold text-muted-foreground transition-colors hover:text-foreground"
 							onclick={() => api.clearQueued()}
 						>
 							{t('player.clear_queue')}

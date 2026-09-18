@@ -6,7 +6,8 @@ use crate::blocklist;
 use crate::clients::YouTubeClient;
 use crate::models::browse::{
     self, AlbumPage, ArtistPage, BrowseItem, ChartsPage, ExplorePage, HistoryGroup, HomePage,
-    MoodGroup, PlaylistContinuation, PlaylistPage, PlaylistSort, SearchResults,
+    MoodGroup, PlaylistContinuation, PlaylistPage, PlaylistSort, PlaylistSuggestions,
+    SearchResults,
 };
 use crate::models::context::Context;
 use crate::models::lyrics::{self, PlainLyrics, TimedLyricLine};
@@ -596,6 +597,21 @@ impl InnerTube {
     ) -> Result<PlaylistContinuation, Error> {
         let value = self.browse_continuation(client, token).await?;
         Ok(browse::parse_playlist_continuation(&value))
+    }
+
+    /// Songs YouTube Music suggests for a playlist you own, from the page's `suggestions` token or
+    /// a batch's `refresh` token. The same filters as a search: blocked artists, and videos when
+    /// they are hidden.
+    pub async fn playlist_suggestions(
+        &self,
+        client: &YouTubeClient,
+        token: &str,
+    ) -> Result<PlaylistSuggestions, Error> {
+        let value = self.browse_continuation(client, token).await?;
+        let mut s = browse::parse_playlist_suggestions(&value);
+        self.drop_video_songs(&mut s.items);
+        self.drop_blocked_songs(&mut s.items, None);
+        Ok(s)
     }
 
     // --- lyrics (context/08 §lyrics; browseId comes from `next`) -----------------------------

@@ -19,6 +19,7 @@
 		Search01Icon
 	} from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
+	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import MediaCard from '$lib/components/MediaCard.svelte';
 	import MediaCardSkeleton from '$lib/components/MediaCardSkeleton.svelte';
@@ -188,6 +189,15 @@
 		api.removeSearchHistory().catch(() => {});
 	}
 
+	// "Clear all" asks first: it wipes every search at once and there is no undo, where the × on a
+	// row only ever costs that one row.
+	let confirmingClear = $state(false);
+	function clearAll() {
+		// bits-ui's Action is a plain button (only Cancel closes the dialog), so it closes here.
+		confirmingClear = false;
+		forgetAll();
+	}
+
 	// --- arriving ----------------------------------------------------------------------------------
 	// Run the search when arriving with a ?q= (e.g. from the Home search box). Keyed on the URL
 	// alone: typing a new query in the field must not look like a URL change and bounce us back.
@@ -302,11 +312,11 @@
 				{#if history.length}
 					<section class="max-w-xl">
 						<div class="mb-2 flex items-center justify-between">
-							<h2 class="font-heading text-xl font-bold">{t('search.recent')}</h2>
+							<h2 class="font-heading text-2xl font-bold tracking-tight">{t('search.recent')}</h2>
 							<button
 								type="button"
-								class="cursor-pointer text-xs font-semibold uppercase text-muted-foreground hover:text-foreground"
-								onclick={forgetAll}
+								class="cursor-pointer text-sm font-bold text-muted-foreground transition-colors hover:text-foreground hover:underline"
+								onclick={() => (confirmingClear = true)}
 							>
 								{t('search.clear_all')}
 							</button>
@@ -346,8 +356,8 @@
 					</section>
 				{/if}
 				<section>
-					<h2 class="mb-4 font-heading text-xl font-bold">{t('search.browse_all')}</h2>
-					<MoodGrid groupHeading="mb-2 text-sm font-semibold text-muted-foreground" />
+					<h2 class="mb-4 font-heading text-2xl font-bold tracking-tight">{t('search.browse_all')}</h2>
+					<MoodGrid groupHeading="mb-2 text-base font-bold text-muted-foreground" />
 				</section>
 			</div>
 		{:else if filter !== 'all'}
@@ -416,7 +426,7 @@
 				{#each sections as sec (sec.key)}
 					<section>
 						<div class="mb-3 flex items-center justify-between">
-							<h2 class="font-heading text-xl font-bold">{sec.label}</h2>
+							<h2 class="font-heading text-2xl font-bold tracking-tight">{sec.label}</h2>
 							<div class="flex items-center gap-1">
 								{#if sec.list}
 									<TrackSelectButton {selection} />
@@ -424,7 +434,7 @@
 								{#if sec.more}
 									<!-- "Show more" is the category's own filter: the same list, one chip over. -->
 									<button
-										class="cursor-pointer text-xs font-semibold uppercase text-muted-foreground hover:text-foreground"
+										class="cursor-pointer text-sm font-bold text-muted-foreground transition-colors hover:text-foreground hover:underline"
 										onclick={() => pick(sec.key as Filter)}
 									>
 										{t('common.show_more')}
@@ -453,3 +463,16 @@
 		{/if}
 	</div>
 </div>
+
+<AlertDialog.Root bind:open={confirmingClear}>
+	<AlertDialog.Content>
+		<AlertDialog.Header>
+			<AlertDialog.Title>{t('search.clear_all_title')}</AlertDialog.Title>
+			<AlertDialog.Description>{t('search.clear_all_desc')}</AlertDialog.Description>
+		</AlertDialog.Header>
+		<AlertDialog.Footer>
+			<AlertDialog.Cancel>{t('common.cancel')}</AlertDialog.Cancel>
+			<AlertDialog.Action onclick={clearAll}>{t('search.clear_all')}</AlertDialog.Action>
+		</AlertDialog.Footer>
+	</AlertDialog.Content>
+</AlertDialog.Root>

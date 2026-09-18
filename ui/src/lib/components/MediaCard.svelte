@@ -64,9 +64,9 @@
 <div class="group relative flex w-full flex-col gap-2" data-ctx>
 	<!-- draggable: every card is a drag source for home's Shortcuts grid (the only drop target). -->
 	<div
-		class="flex flex-col text-left transition-colors hover:bg-accent/10 {compact
-			? 'gap-1.5 rounded-lg p-1.5'
-			: 'gap-2 rounded-xl p-2'}"
+		class="flex flex-col text-left transition-colors hover:bg-foreground/[0.07] {compact
+			? 'gap-1.5 rounded-md p-1.5'
+			: 'gap-2 rounded-md p-3'}"
 		role="button"
 		tabindex="0"
 		draggable="true"
@@ -91,7 +91,7 @@
 			<div
 				class="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover:opacity-100 {round
 					? 'rounded-full'
-					: 'rounded-lg'}"
+					: 'rounded-md'}"
 			></div>
 			<!-- No resting shadow. Measured (perf/hover.mjs, 300 cards, scrolled): it was three quarters
 			     of the hover cost, and not because of the hovered card. WebKit rasterizes in tiles, so
@@ -102,7 +102,7 @@
 			<div
 				class="relative aspect-square w-full overflow-hidden bg-muted {round
 					? 'rounded-full'
-					: 'rounded-lg'}"
+					: 'rounded-md'}"
 			>
 				{#if item.thumbnail && attempt < 2 && !onRepeat}
 					<img
@@ -139,9 +139,9 @@
 					<!-- transition-[opacity,transform], not transition-all: opacity and translate are the
 					     only things that change, and both composite. -->
 					<button
-						class="absolute flex translate-y-1 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground opacity-0 transition-[opacity,transform] duration-[var(--duration-fast)] ease-out group-hover:translate-y-0 group-hover:opacity-100 focus-visible:opacity-100 {compact
+						class="absolute flex translate-y-2 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-[0_8px_16px_rgb(0_0_0/0.3)] transition-[opacity,transform] duration-[var(--duration-fast)] ease-out group-hover:translate-y-0 group-hover:opacity-100 hover:scale-105 focus-visible:opacity-100 {compact
 							? 'bottom-1.5 right-1.5 h-7 w-7'
-							: 'bottom-2 right-2 h-9 w-9'}"
+							: 'bottom-2 right-2 h-11 w-11'}"
 						class:animate-pulse={playing}
 						disabled={playing}
 						aria-label={t('player.play')}
@@ -150,18 +150,18 @@
 							playNow();
 						}}
 					>
-						<HugeiconsIcon icon={PlayIcon} class={compact ? 'h-3 w-3' : 'h-4 w-4'} />
+						<HugeiconsIcon icon={PlayIcon} class={compact ? 'h-3 w-3' : 'h-5 w-5 fill-current'} />
 					</button>
 				{/if}
 			</div>
 		</div>
 		<div class="min-w-0 {round ? 'text-center' : ''}">
-			<div class="truncate font-medium {compact ? 'text-xs' : 'text-sm'}">{item.title}</div>
+			<div class="truncate {compact ? 'text-xs' : 'text-base'}">{item.title}</div>
 			{#if item.subtitle || item.explicit}
 				<div
 					class="flex items-center gap-1 text-muted-foreground {round
 						? 'justify-center'
-						: ''} {compact ? 'text-[0.6875rem]' : 'text-xs'}"
+						: ''} {compact ? 'text-xs' : 'text-sm'}"
 				>
 					{#if item.explicit}
 						<ExplicitIcon class="h-3 w-3 shrink-0" />

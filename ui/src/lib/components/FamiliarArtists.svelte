@@ -209,7 +209,7 @@
 							class="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/90 via-black/25 to-transparent"
 						></div>
 						<div class="pointer-events-none absolute inset-x-0 bottom-0 p-4">
-							<div class="font-heading text-xs font-semibold tracking-widest text-primary">
+							<div class="font-heading text-xs font-bold tracking-widest text-primary">
 								{rank(0)}
 							</div>
 							<div class="mt-1 line-clamp-2 font-heading text-xl font-bold leading-tight text-white">
@@ -270,7 +270,7 @@
 								style="width:{share(a)}%"
 							></div>
 							<div
-								class="relative w-5 shrink-0 text-center font-heading text-xs font-semibold text-muted-foreground/60 transition-colors group-hover/row:text-primary"
+								class="relative w-5 shrink-0 text-center font-heading text-xs font-bold text-muted-foreground/60 transition-colors group-hover/row:text-primary"
 							>
 								{rank(i + 1)}
 							</div>
@@ -278,7 +278,7 @@
 								{@render avatar(a, 'h-5 w-5')}
 							</div>
 							<div class="relative min-w-0 flex-1">
-								<div class="truncate text-sm font-medium">{a.name ?? t('common.unknown_artist')}</div>
+								<div class="truncate text-base">{a.name ?? t('common.unknown_artist')}</div>
 								<div class="truncate text-xs text-muted-foreground">
 									{t('library.play_count', { count: a.plays })}
 								</div>

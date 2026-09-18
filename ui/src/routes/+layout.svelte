@@ -11,7 +11,7 @@
 	import { browser } from '$app/environment';
 	import { page } from '$app/state';
 	import { afterNavigate, beforeNavigate } from '$app/navigation';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { fly } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
@@ -33,6 +33,7 @@
 	import ResizeBorders from '$lib/components/ResizeBorders.svelte';
 	import PlayerBar from '$lib/components/PlayerBar.svelte';
 	import QueuePanel from '$lib/components/QueuePanel.svelte';
+	import RightPanel from '$lib/components/RightPanel.svelte';
 	import LyricsPanel from '$lib/components/LyricsPanel.svelte';
 	import AddToPlaylist from '$lib/components/AddToPlaylist.svelte';
 	import SettingsDialog from '$lib/components/SettingsDialog.svelte';
@@ -47,7 +48,16 @@
 	import KeyboardShortcuts from '$lib/components/KeyboardShortcuts.svelte';
 	import HomeFeed from '$lib/components/HomeFeed.svelte';
 	import { Button } from '$lib/components/ui/button';
-	import { auth, chooseNpTab, dismissToast, initApp, np, playback, ui } from '$lib/player.svelte';
+	import {
+		auth,
+		chooseNpTab,
+		dismissToast,
+		initApp,
+		np,
+		playback,
+		toggleRightPanel,
+		ui
+	} from '$lib/player.svelte';
 	import { win, initWin } from '$lib/win.svelte';
 	import { initZoom } from '$lib/zoom';
 	import { initShortcuts } from '$lib/shortcuts';
@@ -77,6 +87,42 @@
 	$effect(() => {
 		if (tabbed) queueOpen = lyricsOpen = false;
 	});
+	// Tabbed, the lyrics button opens the player view on its lyrics tab — from anywhere, not only
+	// while the view is up — and closes it when that tab is what is showing. There used to be a
+	// lyrics page of its own over the content as well, which was a second place for the same words.
+	// Untabbed the view has no lyrics column, so that page is still how the words get shown.
+	function toggleLyrics() {
+		if (!appearance.tabbedPlayer) {
+			lyricsOpen = !lyricsOpen;
+		} else if (np.open && np.tab === 'lyrics') {
+			np.open = false;
+		} else {
+			np.open = true;
+			// Picked once the view is up: a tab chosen before it mounts reads as a choice older than
+			// the track's lyrics lookup, which the view overrules when there turn out to be none
+			// (see NowPlaying). This button is exactly the choice it must not overrule.
+			tick().then(() => chooseNpTab('lyrics'));
+		}
+	}
+
+	// The right column (now playing, or the queue) docks from xl up, as Spotify's does. Narrower, it
+	// would squeeze the page to a strip, so there the queue floats over the page as it always did.
+	// It steps aside while the full now-playing view is open, which shows all of it and more — but
+	// hidden, not unmounted: taken out, it came back on close with every cover reloading and the
+	// artist fetched again.
+	let docked = $state(false);
+	$effect(() => {
+		const mq = matchMedia('(min-width: 80rem)');
+		docked = mq.matches;
+		const on = () => (docked = mq.matches);
+		mq.addEventListener('change', on);
+		return () => mq.removeEventListener('change', on);
+	});
+	$effect(() => {
+		if (docked) queueOpen = false;
+	});
+	const rightMounted = $derived(docked && !!ui.rightPanel && !!playback.now);
+	const rightOpen = $derived(rightMounted && !np.open);
 
 	// "Adapt colors to artwork": re-run on every track change and on the toggle itself. The 120px
 	// cover is the one the player bar has already loaded, so this costs no extra request.
@@ -219,7 +265,7 @@
 	     that, when the bar slides away while lyrics are being read, the view's own background is
 	     what is left there rather than a bare strip. -->
 	<div
-		class="flex h-screen flex-col overflow-hidden bg-background text-foreground {win.maximized ||
+		class="app-canvas flex h-screen flex-col overflow-hidden text-foreground {win.maximized ||
 		ui.theaterOpen ||
 		win.chrome !== 'off'
 			? ''
@@ -228,52 +274,51 @@
 	>
 		<ResizeBorders />
 		<Titlebar />
-		<!-- relative: the queue and lyrics panels are absolute overlays inside it (see QueuePanel).
-		     `--sidebar-w` is the one place the sidebar's width is decided. The rail reads it, and so
-		     do the two overlays that have to start exactly where it ends — before this they each
-		     hard-coded `left-16 lg:left-60`, which a draggable edge would have silently desynced.
-		     The responsive rule lives in CSS (layout.css): below `lg` the rail is 4rem whatever the
-		     stored width says, because at that size a 15rem sidebar leaves no page. -->
+		<!-- Three panels on the canvas: the library, the page, and the now-playing column. `--sidebar-w`
+		     is the one place the library's width is decided; the responsive rule lives in CSS
+		     (layout.css): below `lg` it is a rail of covers whatever the stored width says. -->
 		<div
-			class="app-shell relative flex min-h-0 flex-1"
+			class="app-shell relative flex min-h-0 flex-1 gap-2 px-2"
 			data-sidebar={ui.sidebarCollapsed ? 'collapsed' : 'open'}
 			style="--sidebar-open:{ui.sidebarWidth}px"
 		>
 			<Sidebar />
-			<!-- The sidebar, continued under the player bar. Only ever seen while lyrics are being
-			     read with the bar slid away (ui.immersive): without it the rail stopped short of the
-			     window's bottom edge and left a block of page colour where the bar had been. The
-			     now-playing view does the same for its own side (see NowPlaying). -->
-			{#if np.open}
-				<div
-					aria-hidden="true"
-					class="pointer-events-none absolute left-0 top-full bg-sidebar"
-					style="width: var(--sidebar-w); height: var(--bar-h)"
-				></div>
+			<!-- The page's panel. `relative`: the now-playing view and the lyrics and queue panels are
+			     overlays inside it, so they cover exactly the page and nothing has to know how wide the
+			     library is. -->
+			<div class="relative min-w-0 flex-1">
+				<!-- dragScroll: dragging a card up to home's Shortcuts grid has to be possible from
+				     anywhere in the feed, so aiming at the top edge scrolls this container while the drag
+				     is in flight. -->
+				<main
+					bind:this={mainEl}
+					class="panel h-full overflow-y-auto overflow-x-hidden"
+					{@attach dragScroll}
+				>
+					<!-- Remount the current page on sign-in/out so it refetches with the new account. -->
+					{#key auth.epoch}
+						<!-- `contents` while home is the page, so its layout is exactly what the route drew;
+						     `hidden` otherwise, which keeps it mounted and costs no layout or paint. -->
+						{#if homeMounted}
+							<div class={onHome ? 'contents' : 'hidden'}>
+								<HomeFeed />
+							</div>
+						{/if}
+						{@render children()}
+					{/key}
+				</main>
+				{#if np.open && playback.now}<NowPlaying {queueOpen} {lyricsOpen} />{/if}
+				<!-- The lyrics page covers the page's panel; a floating queue (narrow windows) goes over it. -->
+				{#if lyricsOpen}<LyricsPanel onClose={() => (lyricsOpen = false)} />{/if}
+				{#if queueOpen}<QueuePanel onClose={() => (queueOpen = false)} />{/if}
+			</div>
+			{#if rightMounted}
+				<div class={rightOpen ? 'contents' : 'hidden'}><RightPanel /></div>
 			{/if}
-			<!-- dragScroll: dragging a card up to home's Shortcuts grid has to be possible from anywhere in
-			     the feed, so aiming at the top edge scrolls this container while the drag is in flight. -->
-			<main bind:this={mainEl} class="min-w-0 flex-1 overflow-y-auto" {@attach dragScroll}>
-				<!-- Remount the current page on sign-in/out so it refetches with the new account. -->
-				{#key auth.epoch}
-					<!-- `contents` while home is the page, so its layout is exactly what the route drew;
-					     `hidden` otherwise, which keeps it mounted and costs no layout or paint. -->
-					{#if homeMounted}
-						<div class={onHome ? 'contents' : 'hidden'}>
-							<HomeFeed />
-						</div>
-					{/if}
-					{@render children()}
-				{/key}
-			</main>
-			<!-- Always mounted, unlike the player view below it: it owns the one <video> element, which
-			     has to keep playing while the view is closed. It renders nothing but a zero-sized
-			     parking container until the view borrows the picture. -->
+			<!-- Always mounted, unlike the player view: it owns the one <video> element, which has to
+			     keep playing while the view is closed. It renders nothing but a zero-sized parking
+			     container until the view borrows the picture. -->
 			<VideoSurface />
-			{#if np.open && playback.now}<NowPlaying {queueOpen} {lyricsOpen} />{/if}
-			<!-- Lyrics before queue: side by side over the page, lyrics on the left, queue on the right. -->
-			{#if lyricsOpen}<LyricsPanel onClose={() => (lyricsOpen = false)} {queueOpen} />{/if}
-			{#if queueOpen}<QueuePanel onClose={() => (queueOpen = false)} />{/if}
 		</div>
 		{#if playback.now}
 			<!-- Slides up from its own height on first play; leaves instantly (bar removal is rare).
@@ -294,10 +339,21 @@
 						: ''}"
 				>
 					<PlayerBar
-						onToggleQueue={() => (tabbed ? chooseNpTab('queue') : (queueOpen = !queueOpen))}
-						queueOpen={tabbed ? np.tab === 'queue' : queueOpen}
-						onToggleLyrics={() => (tabbed ? chooseNpTab('lyrics') : (lyricsOpen = !lyricsOpen))}
-						lyricsOpen={tabbed ? np.tab === 'lyrics' : lyricsOpen}
+						onToggleQueue={() =>
+							tabbed
+								? chooseNpTab('queue')
+								: docked
+									? toggleRightPanel('queue')
+									: (queueOpen = !queueOpen)}
+						queueOpen={tabbed
+							? np.tab === 'queue'
+							: docked
+								? rightOpen && ui.rightPanel === 'queue'
+								: queueOpen}
+						onTogglePanel={docked && !np.open ? () => toggleRightPanel('playing') : undefined}
+						panelOpen={rightOpen && ui.rightPanel === 'playing'}
+						onToggleLyrics={toggleLyrics}
+						lyricsOpen={appearance.tabbedPlayer ? np.open && np.tab === 'lyrics' : lyricsOpen}
 					/>
 				</div>
 			</div>
@@ -368,7 +424,7 @@
 				{@const action = t.action}
 				<button
 					type="button"
-					class="-my-1 ml-1 cursor-pointer rounded-md px-2 py-1 text-sm font-semibold text-primary transition-colors hover:bg-primary/10"
+					class="-my-1 ml-1 cursor-pointer rounded-md px-2 py-1 text-sm font-bold text-primary transition-colors hover:bg-primary/10"
 					onclick={() => {
 						action.run();
 						dismissToast();

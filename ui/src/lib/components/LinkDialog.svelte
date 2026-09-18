@@ -36,9 +36,14 @@
 				{t('dialogs.link.desc')}
 			</Dialog.Description>
 		</Dialog.Header>
-		<form class="flex gap-2" onsubmit={submit}>
+		<form class="flex flex-col gap-4" onsubmit={submit}>
 			<Input bind:value={url} placeholder="https://music.youtube.com/playlist?list=..." />
-			<Button type="submit" disabled={!url.trim()}>{t('dialogs.link.open')}</Button>
+			<Dialog.Footer>
+				<Button type="button" variant="ghost" size="lg" onclick={() => (ui.linkOpen = false)}>
+					{t('common.cancel')}
+				</Button>
+				<Button type="submit" size="lg" disabled={!url.trim()}>{t('dialogs.link.open')}</Button>
+			</Dialog.Footer>
 		</form>
 	</Dialog.Content>
 </Dialog.Root>

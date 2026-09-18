@@ -21,6 +21,7 @@
 //! A run where every provider merely *errored* (offline) caches nothing, so lyrics come back
 //! when the network does. Everything is best-effort — a lyrics failure is never a user error.
 
+use std::collections::HashSet;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -176,7 +177,17 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
     if !crate::local::is_local_song(&req.video_id)
         && state.db.get_setting("lyrics_simpmusic").as_deref() != Some("false")
     {
-        if let Ok(Some(l)) = simpmusic_get(state, req).await {
+        if let Ok(Some(mut l)) = simpmusic_get(state, req).await {
+            // An entry can set a word's syllables down as words of their own, and only a text that
+            // spells the song out tells the two apart (`join_syllables`). YouTube's own lyrics for
+            // the track are one, from the service that is playing it anyway.
+            if let (Some(bid), Some(client)) =
+                (&browse_id, state.clients.get(innertube::METADATA_CLIENT))
+            {
+                if let Ok(Some(p)) = state.it.lyrics_plain(client, bid).await {
+                    join_syllables(&mut l.lines, &p.text);
+                }
+            }
             return (Some(l), true);
         }
     }
@@ -959,6 +970,82 @@ fn simpmusic_timed(e: &SimpMusicEntry) -> (Option<Vec<LyricLine>>, Option<Vec<Ly
 fn simpmusic_plain(e: &SimpMusicEntry) -> Option<Lyrics> {
     let plain = e.plain_lyric.as_deref().filter(|s| !s.trim().is_empty());
     plain_from_text(plain.map(decode_entities).as_deref(), SIMPMUSIC)
+}
+
+/// The space taken back out of words an entry split into syllables — "e nough" → "enough", "an ti
+/// dote" → "antidote" — going by `reference`, a text of the same song that spells them out.
+///
+/// Some SimpMusic entries time a word syllable by syllable and set every syllable down as a word of
+/// its own, in the word sync, the line sync and the plain text alike: Olivia Rodrigo's "the cure"
+/// reads "Why can't it ever be e nough?" and "I'm un rav eled" in all three, so nothing in the
+/// entry tells "e nough" from two words. The reference decides: of the ways to group a line's
+/// pieces into words, the one that leaves the fewest the reference never writes, with the fewest
+/// joins that takes. Pieces that are each a word of the reference on their own are never joined,
+/// so "may be" stays apart in a song that also sings "maybe", and a hyphenated word of the
+/// reference counts as its parts: joining "skin tight" because the reference has "skin-tight"
+/// would only lose the hyphen. The syllables keep their own timing; only the space between them
+/// goes, and both renderers draw pieces with no space between them as one word.
+fn join_syllables(lines: &mut [LyricLine], reference: &str) {
+    fn key(s: &str) -> String {
+        s.nfc().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
+    }
+    let known: HashSet<String> = reference
+        .split(|c: char| c.is_whitespace() || matches!(c, '-' | '‐' | '–' | '—'))
+        .map(key)
+        .collect();
+    let unknown = |k: &str| !k.is_empty() && !known.contains(k);
+    for line in lines {
+        // Each piece with the space after it, if it has one. A line with no word timing splits at
+        // its spaces.
+        let mut pieces: Vec<String> = match &line.words {
+            Some(words) => words.iter().map(|w| w.text.clone()).collect(),
+            None => line.text.split_whitespace().map(|p| format!("{p} ")).collect(),
+        };
+        let keys: Vec<String> = pieces.iter().map(|p| key(p)).collect();
+        // The best grouping of the first `i` pieces: (words the reference never writes, joins,
+        // where its last group starts).
+        let mut best = vec![(usize::MAX, usize::MAX, 0); pieces.len() + 1];
+        best[0] = (0, 0, 0);
+        for end in 1..=pieces.len() {
+            let mut run = String::new();
+            let mut all_known = true;
+            for start in (0..end).rev() {
+                let single = start + 1 == end;
+                // Punctuation on its own is nobody's syllable.
+                if !single && (keys[start].is_empty() || keys[end - 1].is_empty()) {
+                    break;
+                }
+                run.insert_str(0, &keys[start]);
+                all_known &= !unknown(&keys[start]);
+                if !single && (all_known || unknown(&run)) {
+                    continue;
+                }
+                let (missed, joins, _) = best[start];
+                let grouped = (missed + usize::from(unknown(&run)), joins + end - start - 1, start);
+                best[end] = best[end].min(grouped);
+            }
+        }
+        let mut joined = false;
+        let mut end = pieces.len();
+        while end > 0 {
+            let start = best[end].2;
+            for p in &mut pieces[start..end - 1] {
+                let len = p.trim_end().len();
+                joined |= len < p.len();
+                p.truncate(len);
+            }
+            end = start;
+        }
+        if !joined {
+            continue;
+        }
+        line.text = pieces.concat().trim_end().to_owned();
+        if let Some(words) = &mut line.words {
+            for (w, p) in words.iter_mut().zip(pieces) {
+                w.text = p;
+            }
+        }
+    }
 }
 
 /// A shift below this is noise between two people's timing of the same cut, not two cuts.
@@ -2153,6 +2240,48 @@ mod tests {
         let l = simpmusic_lyrics(&e, &[], false).unwrap();
         assert!(!l.synced);
         assert_eq!(l.source, "SimpMusic Lyrics");
+    }
+
+    /// SimpMusic's entry for Olivia Rodrigo's "the cure", every syllable a word of its own, against
+    /// YouTube's lyrics for it (LyricFind's), which spell the words out.
+    #[test]
+    fn syllables_set_down_as_words_join_back_into_the_word() {
+        let reference = "I thought I found the antidote this time\r\nBut I'm unraveled\r\n\
+            Why can't it ever be enough?\r\nMaybe it may be\r\nSkin-tight";
+        let rich = "[00:26.11] <00:26.11>I <00:26.36>thought <00:26.61>I <00:26.78>found <00:27.05>the <00:27.25>an <00:28.45>ti <00:28.72>dote <00:29.73>this <00:30.10>time\n\
+            [02:12.80] <02:12.80>But <02:13.11>I'm <02:13.31>un <02:13.66>rav <02:14.16>eled\n\
+            [03:24.23] <03:24.23>Why <03:24.64>can't <03:25.24>it <03:25.55>ever <03:26.10>be <03:26.54>e <03:27.01>nough?\n\
+            [03:30.00] <03:30.00>It <03:30.20>may <03:30.40>be <03:30.60>e <03:30.80>nough\n\
+            [03:31.00] <03:31.00>Skin <03:31.40>tight";
+        let mut l = from_parsed("X", parse_rich_sync(rich)).unwrap();
+        join_syllables(&mut l.lines, reference);
+        let text: Vec<&str> = l.lines.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(
+            text,
+            [
+                "I thought I found the antidote this time",
+                "But I'm unraveled",
+                "Why can't it ever be enough?",
+                // Both words of the reference, however they concatenate.
+                "It may be enough",
+                // Its hyphenated word is two.
+                "Skin tight",
+            ]
+        );
+        // Each syllable is still timed from its own tag.
+        let w = l.lines[0].words.as_ref().unwrap();
+        let w: Vec<(&str, u64)> = w.iter().map(|w| (w.text.as_str(), w.start_ms)).collect();
+        assert_eq!(&w[4..8], [("the ", 27050), ("an", 27250), ("ti", 28450), ("dote ", 28720)]);
+
+        // A line with no word timing, as the entry's line sync has it.
+        let line = || from_parsed("X", parse_lrc("[03:39.47] It's not e nough")).unwrap().lines;
+        let mut lines = line();
+        join_syllables(&mut lines, "It's not enough");
+        assert_eq!(lines[0].text, "It's not enough");
+        // A reference with nothing to say leaves the line as it was.
+        let mut lines = line();
+        join_syllables(&mut lines, "");
+        assert_eq!(lines[0].text, "It's not e nough");
     }
 
     #[test]

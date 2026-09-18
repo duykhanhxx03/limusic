@@ -22,7 +22,7 @@
 		value = $bindable(''),
 		/** The text field itself, for callers that fill it and hand the cursor back. */
 		inputRef = $bindable(null),
-		placeholder = 'Search',
+		placeholder = t('common.search'),
 		inputClass = '',
 		/** Panel geometry. Default matches the field; a narrow field wants its own width. */
 		panelClass = 'left-0 right-0',
@@ -134,7 +134,7 @@
 <!-- data-ctx: right-clicking a row opens that item's menu at the pointer (see `ctxHost`). The host
      is this whole block, but the input inside it keeps WebKit's own menu (`wantsNative`). -->
 <div
-	class="relative w-full min-w-0"
+	class="group/search relative w-full min-w-0"
 	data-ctx
 	onfocusout={(e) => {
 		if (!e.currentTarget.contains(e.relatedTarget as Node | null)) close();
@@ -153,11 +153,12 @@
 		onkeydown={onKeydown}
 	/>
 	<!-- Advertises the palette, which searches the same thing from anywhere in the app
-	     (shortcuts.ts). Out of the way once there is a query to read, and never a click target:
-	     the field behind it is the target. -->
+	     (shortcuts.ts). Only while the pointer is on the field: a hint for whoever is about to use
+	     it, not a fixture of the bar. Out of the way once there is a query to read, and never a
+	     click target: the field behind it is the target. -->
 	{#if !value}
 		<kbd
-			class="pointer-events-none absolute {kbdClass} top-1/2 -translate-y-1/2 rounded bg-muted px-1.5 py-0.5 font-mono text-[0.625rem] font-medium tracking-wide text-muted-foreground"
+			class="pointer-events-none absolute {kbdClass} top-1/2 -translate-y-1/2 rounded bg-muted px-1.5 py-0.5 font-mono text-[0.625rem] font-medium tracking-wide text-muted-foreground opacity-0 transition-opacity duration-[var(--duration-quick)] group-hover/search:opacity-100"
 		>
 			{MOD}K
 		</kbd>
@@ -167,7 +168,7 @@
 			id="search-suggest"
 			role="listbox"
 			aria-label={t('a11y.search_preview')}
-			class="absolute top-full z-50 mt-2 overflow-hidden rounded-xl glass-strong text-popover-foreground animate-in fade-in-0 zoom-in-[0.97] duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] {panelClass}"
+			class="absolute top-full z-50 mt-2 overflow-hidden rounded-xl glass-strong p-1 text-popover-foreground animate-in fade-in-0 zoom-in-[0.97] duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] {panelClass}"
 		>
 			{#if loading && !items.length}
 				{#each Array(4) as _, i (i)}
@@ -180,7 +181,7 @@
 					</div>
 				{/each}
 			{:else if !items.length}
-				<div class="px-4 py-3 text-sm text-muted-foreground">{t('common.nothing_quick')}</div>
+				<div class="p-3 text-sm text-muted-foreground">{t('common.nothing_quick')}</div>
 			{:else}
 				{#each items as item, i (item.id)}
 					{@const hero = i === 0}
@@ -192,10 +193,10 @@
 						role="option"
 						tabindex="-1"
 						aria-selected={i === active}
-						class="flex w-full cursor-pointer items-center gap-3 px-3 text-left transition-colors {i ===
+						class="flex w-full cursor-pointer items-center gap-3 rounded-[0.25rem] px-3 text-left transition-colors {i ===
 						active
-							? 'bg-accent/60'
-							: 'hover:bg-accent/40'} {hero ? 'py-2.5' : 'py-1.5'}"
+							? 'bg-foreground/10'
+							: 'hover:bg-foreground/10'} {hero ? 'py-2.5' : 'py-1.5'}"
 						onmousedown={(e) => e.preventDefault()}
 						onmouseenter={() => {
 							active = i;
@@ -227,7 +228,7 @@
 							</div>
 						{/if}
 						<div class="min-w-0 flex-1">
-							<div class="truncate {hero ? 'font-semibold' : 'text-sm'}">{item.title}</div>
+							<div class="truncate {hero ? 'text-base font-bold' : 'text-sm'}">{item.title}</div>
 							<div class="flex items-center gap-1 text-xs text-muted-foreground">
 								{#if item.explicit}
 									<ExplicitIcon class="h-3 w-3 shrink-0" />
@@ -239,7 +240,7 @@
 						</div>
 						{#if hero}
 							<span
-								class="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide text-primary"
+								class="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary"
 							>
 								{t('common.top_result')}
 							</span>
@@ -247,12 +248,13 @@
 					</div>
 				{/each}
 			{/if}
+			<div class="menu-sep"></div>
 			<!-- Submits the enclosing form, which is where each caller decides what "all results" does.
 			     Explicitly, not type="submit": closing the panel unmounts this button mid-click, and a
 			     submit button removed from the DOM before the click completes never submits (#125). -->
 			<button
 				type="button"
-				class="flex w-full cursor-pointer items-center gap-2 bg-muted/30 px-3 py-2 text-left text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+				class="menu-item text-muted-foreground transition-colors hover:text-foreground"
 				onmousedown={(e) => e.preventDefault()}
 				onmouseenter={() => (active = -1)}
 				onclick={(e) => {
@@ -260,7 +262,7 @@
 					close();
 				}}
 			>
-				<HugeiconsIcon icon={Search01Icon} class="h-3.5 w-3.5" />
+				<HugeiconsIcon icon={Search01Icon} class="h-4 w-4" />
 				{t('common.all_results_for', { query: value.trim() })}
 			</button>
 		</div>

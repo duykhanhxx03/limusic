@@ -161,7 +161,7 @@
 	     nothing above it changes when the country does. -->
 	<section class="mt-10">
 		<div class="mb-3 flex items-center gap-3">
-			<h2 class="font-heading text-lg font-semibold">{t('explore.charts')}</h2>
+			<h2 class="font-heading text-2xl font-bold tracking-tight">{t('explore.charts')}</h2>
 			<span class="flex-1"></span>
 			{#if countries.length}
 				<Select.Root type="single" value={country} onValueChange={pickCountry}>

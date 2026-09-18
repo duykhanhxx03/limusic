@@ -316,11 +316,11 @@
 			: 'opacity-100'}"
 	>
 		<div class="min-w-0">
-			<p class="text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+			<p class="text-xs font-bold text-muted-foreground">
 				{playback.queue.sourceName ? t('player.playing_from') : t('player.now_playing')}
 			</p>
 			{#if playback.queue.sourceName}
-				<p class="mt-1 truncate text-sm font-medium">{playback.queue.sourceName}</p>
+				<p class="mt-1 truncate text-sm font-bold">{playback.queue.sourceName}</p>
 			{/if}
 		</div>
 		<button
@@ -432,7 +432,7 @@
 					/>
 					<div class="mt-1 flex items-center gap-2">
 						{#if album}
-							<p class="truncate text-[13px] text-muted-foreground">{album}</p>
+							<p class="truncate text-sm text-muted-foreground">{album}</p>
 						{/if}
 						<!-- Room here for the unit, unlike the player bar. -->
 						<QualityChip codec={playback.now?.audioCodec} bitrate={playback.now?.audioBitrate} />
@@ -494,7 +494,7 @@
 					}}
 					aria-label={t('player.seek')}
 				/>
-				<div class="mt-2 flex justify-between text-xs font-medium tabular-nums text-muted-foreground">
+				<div class="mt-2 flex justify-between text-xs tabular-nums text-muted-foreground">
 					<span>{fmt(shownPosition)}</span>
 					<span>{fmt(playback.duration)}</span>
 				</div>

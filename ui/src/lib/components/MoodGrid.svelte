@@ -23,7 +23,7 @@
 	let {
 		/** The group titles ("Moods & moments", "Genres"). A page of their own sets them as section
 		 *  headings; under another heading they step down. */
-		groupHeading = 'mb-3 font-heading text-lg font-semibold'
+		groupHeading = 'mb-3 font-heading text-2xl font-bold tracking-tight'
 	}: { groupHeading?: string } = $props();
 
 	let groups = $state<MoodGroup[] | null>(null);

@@ -3,16 +3,20 @@
 	// several can go in at once; already-added rows show a tick instead of vanishing.
 	// ponytail: library only. Anything else in YouTube still gets there by dragging its card onto the
 	// grid, or ⋯ → Add to shortcuts — wire a search box in here if that turns out to be the common case.
-	import { fade, scale } from 'svelte/transition';
-	import { quintOut } from 'svelte/easing';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
-	import { Cancel01Icon, Tick02Icon, Add01Icon } from '@hugeicons/core-free-icons';
+	import { Tick02Icon, Add01Icon } from '@hugeicons/core-free-icons';
+	import * as Dialog from '$lib/components/ui/dialog';
 	import { thumb } from '$lib/thumb';
 	import { addPick, library, loadLibrary, personal } from '$lib/player.svelte';
 	import { mergeSaved } from '$lib/personal';
 	import { t } from '$lib/i18n.svelte';
 
 	let { onclose }: { onclose: () => void } = $props();
+
+	// The parent mounts this only while picking, so the dialog starts open. Dismissing it flips
+	// `open` first and reports `onclose` once the closing animation has finished: unmounting on the
+	// spot would cut the fade off.
+	let open = $state(true);
 
 	let filter = $state('');
 	// Playlists saved on this machine count as library too: signed out they're all there is.
@@ -26,75 +30,66 @@
 	loadLibrary(); // no-op once the sidebar has it
 </script>
 
-<svelte:window onkeydown={(e) => e.key === 'Escape' && onclose()} />
-
-<div
-	in:fade={{ duration: 250 }}
-		out:fade={{ duration: 150 }}
-	class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
->
-	<div
-		in:scale={{ duration: 250, start: 0.96, easing: quintOut }}
-			out:scale={{ duration: 150, start: 0.96, easing: quintOut }}
-		class="flex max-h-[32rem] w-full max-w-sm flex-col rounded-xl glass p-4"
+<!-- Backdrop clicks are ignored, as they were before the Dialog port: the picker stays open for
+     several adds in a row, and a stray click just past a row should not throw the list away. -->
+<Dialog.Root bind:open onOpenChangeComplete={(o) => !o && onclose()}>
+	<!-- Flex, not the primitive's grid: the list has to shrink into the capped height and scroll. -->
+	<Dialog.Content
+		class="flex max-h-[32rem] flex-col gap-4 sm:max-w-sm"
+		interactOutsideBehavior="ignore"
 	>
-		<div class="mb-3 flex items-center justify-between">
-			<h2 class="font-heading text-base font-semibold">{t('home.add_shortcut')}</h2>
-			<button
-				class="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-				onclick={onclose}
-				aria-label={t('a11y.close')}
-			>
-				<HugeiconsIcon icon={Cancel01Icon} class="h-4 w-4" />
-			</button>
-		</div>
-		<!-- svelte-ignore a11y_autofocus -->
-		<input
-			bind:value={filter}
-			autofocus
-			placeholder={t('common.filter_library')}
-			class="mb-2 w-full rounded-lg bg-input px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-		/>
-		{#if library.loading && !library.items.length}
-			<p class="p-2 text-sm text-muted-foreground">{t('common.loading')}</p>
-		{:else if matches.length}
-			<div class="min-h-0 flex-1 overflow-y-auto">
-				{#each matches as item (item.id)}
-					{@const on = already(item.id)}
-					<button
-						class="flex w-full cursor-pointer items-center gap-3 rounded-lg p-2 text-left hover:bg-accent/10 disabled:cursor-default disabled:opacity-60"
-						disabled={on}
-						onclick={() => addPick(item)}
-					>
-						{#if item.thumbnail}
-							<img
-								src={thumb(item.thumbnail, 96)}
-								alt=""
-								class="h-10 w-10 shrink-0 rounded-md object-cover"
-							/>
-						{:else}
-							<div class="h-10 w-10 shrink-0 rounded-md bg-muted"></div>
-						{/if}
-						<div class="min-w-0 flex-1">
-							<div class="truncate text-sm font-medium">{item.title}</div>
-							{#if item.subtitle}
-								<div class="truncate text-xs text-muted-foreground">{item.subtitle}</div>
+		<Dialog.Header>
+			<Dialog.Title>{t('home.add_shortcut')}</Dialog.Title>
+		</Dialog.Header>
+		<div class="flex min-h-0 flex-1 flex-col">
+			<!-- svelte-ignore a11y_autofocus -->
+			<input
+				bind:value={filter}
+				autofocus
+				placeholder={t('common.filter_library')}
+				class="mb-2 w-full rounded-lg bg-input px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			/>
+			{#if library.loading && !library.items.length}
+				<p class="p-2 text-sm text-muted-foreground">{t('common.loading')}</p>
+			{:else if matches.length}
+				<div class="min-h-0 flex-1 overflow-y-auto">
+					{#each matches as item (item.id)}
+						{@const on = already(item.id)}
+						<button
+							class="flex w-full cursor-pointer items-center gap-3 rounded-lg p-2 text-left hover:bg-accent/10 disabled:cursor-default disabled:opacity-60"
+							disabled={on}
+							onclick={() => addPick(item)}
+						>
+							{#if item.thumbnail}
+								<img
+									src={thumb(item.thumbnail, 96)}
+									alt=""
+									class="h-10 w-10 shrink-0 rounded-md object-cover"
+								/>
+							{:else}
+								<div class="h-10 w-10 shrink-0 rounded-md bg-muted"></div>
 							{/if}
-						</div>
-						<!-- altIcon/showAlt, not a ternary on `icon`: HugeiconsIcon freezes `icon` at mount. -->
-						<HugeiconsIcon
-							icon={Add01Icon}
-							altIcon={Tick02Icon}
-							showAlt={on}
-							class="h-4 w-4 shrink-0 {on ? 'text-primary' : 'text-muted-foreground'}"
-						/>
-					</button>
-				{/each}
-			</div>
-		{:else}
-			<p class="p-2 text-sm text-muted-foreground">
-				{filter.trim() ? t('common.nothing_matches') : t('library.no_playlists_hint')}
-			</p>
-		{/if}
-	</div>
-</div>
+							<div class="min-w-0 flex-1">
+								<div class="truncate text-base">{item.title}</div>
+								{#if item.subtitle}
+									<div class="truncate text-xs text-muted-foreground">{item.subtitle}</div>
+								{/if}
+							</div>
+							<!-- altIcon/showAlt, not a ternary on `icon`: HugeiconsIcon freezes `icon` at mount. -->
+							<HugeiconsIcon
+								icon={Add01Icon}
+								altIcon={Tick02Icon}
+								showAlt={on}
+								class="h-4 w-4 shrink-0 {on ? 'text-primary' : 'text-muted-foreground'}"
+							/>
+						</button>
+					{/each}
+				</div>
+			{:else}
+				<p class="p-2 text-sm text-muted-foreground">
+					{filter.trim() ? t('common.nothing_matches') : t('library.no_playlists_hint')}
+				</p>
+			{/if}
+		</div>
+	</Dialog.Content>
+</Dialog.Root>

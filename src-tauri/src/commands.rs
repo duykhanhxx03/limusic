@@ -991,6 +991,7 @@ pub async fn get_playlist(
             owned: false, // nothing to rename or delete; it rebuilds itself from what you play
             collaborative: false,
             sort_menu: None, // built from local history, so YouTube has no order to give
+            suggestions: None,
         });
     }
     let client = metadata_client(&state)?;
@@ -1068,6 +1069,17 @@ pub async fn get_playlist_more(
 ) -> Result<PlaylistContinuation, String> {
     let client = metadata_client(&state)?;
     state.it.playlist_continuation(client, &token).await.map_err(|e| e.to_string())
+}
+
+/// Songs YouTube Music suggests adding to a playlist you own. `token` is the playlist page's
+/// `suggestions`, or the `refresh` of the batch on screen for a new one.
+#[tauri::command]
+pub async fn get_playlist_suggestions(
+    state: St<'_>,
+    token: String,
+) -> Result<innertube::PlaylistSuggestions, String> {
+    let client = metadata_client(&state)?;
+    state.it.playlist_suggestions(client, &token).await.map_err(|e| e.to_string())
 }
 
 /// An album page. `id` is the album browseId (`MPRE…`).

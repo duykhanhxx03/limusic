@@ -31,8 +31,13 @@
 	// component, or the lyrics refetch and the scroll position is lost.
 	// `compact` is the mini-player: a ~220px column with no room for the source footer or a
 	// scrollbar. It only shrinks the type and chrome; the sync/auto-scroll logic is identical.
-	let { expanded = false, compact = false }: { expanded?: boolean; compact?: boolean } =
-		$props();
+	// `page` is the lyrics page over the main panel: a left-aligned column of readable width, in the
+	// side panel's type (the owner paints the background).
+	let {
+		expanded = false,
+		compact = false,
+		page = false
+	}: { expanded?: boolean; compact?: boolean; page?: boolean } = $props();
 
 	let lyrics = $state<api.Lyrics | null>(null);
 	let loading = $state(true);
@@ -621,7 +626,9 @@
 		? 'px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
 		: expanded
 			? 'px-10 py-6'
-			: 'px-5 py-6'}"
+			: page
+				? 'px-14 py-8'
+				: 'px-5 py-6'}"
 >
 	{#snippet skeleton()}
 		<div class="space-y-3" in:fade={{ duration: 150 }}>
@@ -638,12 +645,13 @@
 				{interlude}
 				{clock}
 				{expanded}
+				{page}
 				onseek={seekTo}
 				onfail={() => (canvasFailed = true)}
 			/>
 		{/if}
 		{#if loading && skeletonDue}
-			<div class="absolute inset-0 {expanded ? 'px-10 py-6' : 'px-5 py-6'}">
+			<div class="absolute inset-0 {expanded ? 'px-10 py-6' : page ? 'px-14 py-8' : 'px-5 py-6'}">
 				{@render skeleton()}
 			</div>
 		{/if}
@@ -657,7 +665,7 @@
 		     played far enough to scroll past it (issue #201). Instead the opening lines sit at the
 		     top and centering starts once there is room above, the way every other lyrics view
 		     behaves. -->
-		<div class="pb-[55vh] {expanded ? 'mx-auto max-w-3xl' : ''}">
+		<div class="pb-[55vh] {expanded ? 'mx-auto max-w-3xl' : page ? 'max-w-2xl' : ''}">
 			{#each lines as line, i (i)}
 				{@const isActive = i === activeIndex}
 				{#if interlude?.at === i}
@@ -698,7 +706,13 @@
 							: compact
 								? 'py-1 text-sm leading-snug'
 								: 'py-2 text-xl leading-snug'}
-							{isActive ? 'text-foreground' : 'text-muted-foreground'}"
+							{isActive
+								? page
+									? 'text-white'
+									: 'text-foreground'
+								: page
+									? 'text-white/60'
+									: 'text-muted-foreground'}"
 					>
 						{#if line.words && line.words.length > 0}
 							<span class="flex flex-wrap items-baseline">
@@ -725,11 +739,13 @@
 		</div>
 	{:else if lyrics}
 		<div
-			class="space-y-2 leading-relaxed text-foreground/90 {expanded
+			class="space-y-2 leading-relaxed {page ? 'text-white/90' : 'text-foreground/90'} {expanded
 				? 'mx-auto max-w-3xl text-xl'
 				: compact
 					? 'text-xs'
-					: 'text-[15px]'}"
+					: page
+						? 'max-w-2xl text-lg'
+						: 'text-base'}"
 		>
 			{#each lyrics.lines as line, i (i)}
 				{#if line.text}

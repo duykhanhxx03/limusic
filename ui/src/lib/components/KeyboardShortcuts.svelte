@@ -46,12 +46,12 @@
 		<div class="gap-x-10 sm:columns-2">
 			{#each GROUPS as group (group.title)}
 				<section class="mb-6 break-inside-avoid">
-					<h3 class="mb-2 text-base font-semibold">{group.title}</h3>
+					<h3 class="mb-2 text-base font-bold">{group.title}</h3>
 					<dl>
 						{#each group.rows as [what, keys] (what)}
 							<div class="grid grid-cols-2 items-center gap-4 py-2">
 								<dt class="text-sm text-muted-foreground">{what}</dt>
-								<dd class="font-mono text-xs font-medium">{keys}</dd>
+								<dd class="font-mono text-xs">{keys}</dd>
 							</div>
 						{/each}
 					</dl>

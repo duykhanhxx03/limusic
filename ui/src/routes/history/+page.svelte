@@ -162,17 +162,19 @@
 							? t('history.matching', { count: matchCount.toLocaleString() })
 							: t('history.subtitle')}
 					</p>
+					<!-- Play first and primary, Shuffle beside it: the order every page header uses. -->
 					<div class="mt-3 flex flex-wrap items-center gap-2">
-						<Button class="gap-2 rounded-full" disabled={!flat.length} onclick={() => play(null, true)}>
-							<HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" /> {t('common.shuffle_all')}
+						<Button size="lg" class="gap-2" disabled={!flat.length} onclick={() => play(0)}>
+							<HugeiconsIcon icon={PlayIcon} class="h-4 w-4" /> {t('common.play_all')}
 						</Button>
 						<Button
-							variant="outline"
-							class="gap-2 rounded-full"
+							variant="secondary"
+							size="lg"
+							class="gap-2"
 							disabled={!flat.length}
-							onclick={() => play(0)}
+							onclick={() => play(null, true)}
 						>
-							<HugeiconsIcon icon={PlayIcon} class="h-4 w-4" /> {t('common.play_all')}
+							<HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" /> {t('common.shuffle_all')}
 						</Button>
 					</div>
 				</div>
@@ -190,7 +192,7 @@
 					<h2
 						class="sticky top-0 z-10 mb-1 flex items-baseline gap-3 bg-background py-2"
 					>
-						<span class="font-heading text-lg font-bold tracking-tight">{group.title}</span>
+						<span class="font-heading text-2xl font-bold tracking-tight">{group.title}</span>
 						<span class="flex-1"></span>
 						<span class="text-xs text-muted-foreground">
 							{t('history.songs_count', { count: group.items.length.toLocaleString() })}

@@ -6,6 +6,51 @@
 @import "@fontsource-variable/outfit";
 @import "@fontsource-variable/dm-sans";
 
+/* Spotify Mix, the default face (see --font-sans). Spotify's own player sets type in two weights,
+   400 for what you read (titles of cards and rows, artists, chips) and 700 for what labels or acts
+   (headings, buttons), with 800 for a page's big title — measured on open.spotify.com, whose
+   stylesheet declares no other. So those are the cuts here, plus 400 italic for lyric
+   translations and 900. No 500 and no 600 on purpose: CSS matching then sets `font-medium` in the
+   400 and `font-semibold` in the 700, which puts every screen on Spotify's two weights without
+   restyling each one. Another font picked in settings keeps its own 500 and 600.
+   The kit's own stylesheet.css is not used: it labels several files with the wrong weight (its
+   Extrabold Italic is declared `bold`); these numbers are the files' own usWeightClass. */
+@font-face {
+	font-family: 'Spotify Mix';
+	src: url('../lib/assets/fonts/spotify-mix/SpotifyMix-Regular.woff2') format('woff2');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Spotify Mix';
+	src: url('../lib/assets/fonts/spotify-mix/SpotifyMix-RegularItalic.woff2') format('woff2');
+	font-weight: 400;
+	font-style: italic;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Spotify Mix';
+	src: url('../lib/assets/fonts/spotify-mix/SpotifyMix-Bold.woff2') format('woff2');
+	font-weight: 700;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Spotify Mix';
+	src: url('../lib/assets/fonts/spotify-mix/SpotifyMix-Extrabold.woff2') format('woff2');
+	font-weight: 800;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Spotify Mix';
+	src: url('../lib/assets/fonts/spotify-mix/SpotifyMix-Black.woff2') format('woff2');
+	font-weight: 900;
+	font-style: normal;
+	font-display: swap;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 /* --primary and --accent used to be @property-registered so a 600 ms crossfade could interpolate
@@ -82,8 +127,12 @@
 	   24px. It also ships a `vietnamese` subset, which matters here and which several of the
 	   better-looking candidates (Instrument Sans, Urbanist, Figtree) do not have — a title like
 	   "Thương Lấy Chính Mình" falls back to a system face without it. */
-	--font-sans: 'Plus Jakarta Sans Variable', sans-serif;
-	--font-heading: 'Plus Jakarta Sans Variable', sans-serif;
+	/* Spotify Mix now. Set beside Plus Jakarta Sans in this app's own webview (WebKitGTK),
+	   Jakarta's regular weight read as hairline at the 13–14px of a subtitle, and its tight fit ran
+	   "gì?Những" together. Spotify Mix holds a solid regular and covers Vietnamese in full, stacked
+	   tone marks included. The files are bundled (see the @font-face rules at the top). */
+	--font-sans: 'Spotify Mix', sans-serif;
+	--font-heading: 'Spotify Mix', sans-serif;
 	--font-serif: ui-serif, Georgia, serif;
 	--font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 	/* Tailwind's stock shadow scale. Restated here because @theme inline maps the shadow
@@ -654,6 +703,47 @@ html.art-tint.dark {
 	background-color: var(--popover);
 }
 
+/* Popup menus (right-click, ⋯, ⋮), laid out the way Spotify lays out its context menu, which reads
+   as roomy and is quick to hit: 40px rows, 14px type, the icon a clear 12px from its label, a flat
+   tint under the pointer, and hairlines between groups of actions.
+   The hairline is the one line this design keeps (see below): a menu is a list of unrelated verbs,
+   and at 40px a row of spacing between groups reads as a missing item rather than a break.
+   A separator hides itself when its group rendered nothing — first, last, or next to another one —
+   so a menu marks its groups once and never has to wrap them in the conditions of their items.
+   Components, not utilities, so a `text-destructive` or `w-auto` on an item still wins. */
+@layer components {
+	.menu-item {
+		display: flex;
+		width: 100%;
+		min-height: 2.5rem;
+		align-items: center;
+		gap: 0.75rem;
+		padding-inline: 0.75rem;
+		border-radius: 0.25rem;
+		text-align: left;
+		font-size: 0.875rem;
+		line-height: 1.25rem;
+		cursor: pointer;
+	}
+	.menu-item:hover {
+		background-color: color-mix(in oklab, var(--foreground) 10%, transparent);
+	}
+	.menu-item:disabled {
+		cursor: default;
+		opacity: 0.5;
+	}
+	.menu-sep {
+		height: 1px;
+		margin: 0.25rem 0.75rem;
+		background-color: color-mix(in oklab, var(--foreground) 10%, transparent);
+	}
+	.menu-sep:first-child,
+	.menu-sep:last-child,
+	.menu-sep + .menu-sep {
+		display: none;
+	}
+}
+
 /* No hairline utilities any more. The last dozen rules (dialog headers, settings rows, the queue's
    section heading, the sidebar's sections) went on 2026-09-17: spacing and tone group those as
    well, and the design is surfaces without outlines. Reach for a gap before a line. */
@@ -815,16 +905,35 @@ html.art-tint.dark {
    `auto` keyword swaps in the measured size after a card's first paint, so the scrollbar stays put.
    Paint containment clips at the card's own box, which the group-hover shadow stays inside: it
    reaches ~27px below the cover and there are 52px of title, subtitle and padding under it. */
-/* The sidebar's width, in one place. The rail sets its own width from it and the two full-height
-   overlays (now-playing, lyrics) start where it ends, so a dragged edge moves all three together.
-   Collapsed is a fixed rail; below `lg` it is a fixed rail whatever the stored width says, because
-   a 15rem sidebar on a 900px window leaves nothing for the page. */
+/* The panel layout: the library, the page and the now-playing column are rounded surfaces set on a
+   darker canvas, with a gap between them — the arrangement Spotify's desktop client made familiar.
+   The titlebar and the player bar sit on the canvas itself.
+
+   The canvas is mixed from --background rather than given a token of its own, so every palette
+   and the artwork tint carry it with no extra inherited custom property (#217: a root property
+   that changes per track restyles the whole document). The player bar paints it opaquely: the
+   now-playing view reaches down under the bar, and has to stay hidden there until the bar slides
+   away. */
+.app-canvas {
+	background-color: color-mix(in oklab, var(--background) 42%, black);
+}
+:root:not(.dark) .app-canvas {
+	background-color: color-mix(in oklab, var(--background) 90%, black);
+}
+@utility panel {
+	background-color: var(--background);
+	border-radius: 0.5rem;
+}
+
+/* The sidebar's width, in one place. Collapsed is a fixed rail of covers; below `lg` it is that
+   rail whatever the stored width says, because a wide library on a 900px window leaves nothing
+   for the page. */
 .app-shell {
-	--sidebar-w: 4rem;
+	--sidebar-w: 4.5rem;
 }
 @media (min-width: 64rem) {
 	.app-shell[data-sidebar='open'] {
-		--sidebar-w: var(--sidebar-open, 15rem);
+		--sidebar-w: var(--sidebar-open, 21.25rem);
 	}
 }
 
@@ -837,12 +946,12 @@ html.art-tint.dark {
 	   as you scrolled, and since a hover is what forces the layout pass that reconciles it, hovering
 	   near that boundary reflowed the grid, moved the scroll position, and changed which cards were
 	   skipped. Same number for both and the loop can't start. */
-	grid-auto-rows: 12.75rem;
+	grid-auto-rows: 13.5rem;
 	gap: 1rem;
 }
 .card-grid > * {
 	content-visibility: auto;
-	contain-intrinsic-size: auto 12.75rem;
+	contain-intrinsic-size: auto 13.5rem;
 }
 
 /* A track title too wide for the player scrolls itself instead of stopping at an ellipsis.
@@ -955,6 +1064,15 @@ input[type='range'].range:active::-webkit-slider-thumb {
 	scale: 0.88;
 	transition-duration: var(--duration-micro);
 	transition-timing-function: var(--ease-out);
+}
+
+/* A row that scrolls sideways under the pointer (chip rows) without a scrollbar under it: a bar the
+   width of the page beneath a single line of pills is heavier than the pills. */
+@utility no-scrollbar {
+	scrollbar-width: none;
+	&::-webkit-scrollbar {
+		display: none;
+	}
 }
 
 /* Custom scrollbars everywhere (KI-5). WebKitGTK paints its *native* overlay

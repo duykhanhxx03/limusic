@@ -14,7 +14,6 @@
 	import { page } from '$app/state';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
-	import SleepTimer from './SleepTimer.svelte';
 	import {
 		ArrowLeft01Icon,
 		ArrowRight01Icon,
@@ -22,13 +21,18 @@
 		SquareIcon,
 		Cancel01Icon,
 		MinimizeScreenIcon,
-		CameraVideoIcon,
 		Link04Icon,
 		Archive02Icon,
 		Home01Icon,
 		HistoryIcon,
-		Search01Icon
+		Search01Icon,
+		Compass01Icon,
+		Settings01Icon,
+		Sun01Icon,
+		Moon02Icon
 	} from '@hugeicons/core-free-icons';
+	import { toggleMode } from 'mode-watcher';
+	import { LIGHT_MODE } from '$lib/theme.svelte';
 	import AccountMenu from './AccountMenu.svelte';
 	import SearchSuggest from './SearchSuggest.svelte';
 	import { appIcon } from '$lib/appicon.svelte';
@@ -54,6 +58,21 @@
 
 	// Search lives on the bar rather than on the home page, so it is in the same place from inside a
 	// playlist, an album or the library — the point of a command strip.
+	/** The round buttons around the search field: lit while their page is open. Explore owns its
+	 *  sub-pages except the mood grid, which the Browse button inside the field stands for. */
+	function navClass(href: string): string {
+		const path = page.url.pathname;
+		const on =
+			href === '/'
+				? path === '/'
+				: href === '/explore'
+					? path.startsWith('/explore') && path !== '/explore/moods'
+					: path.startsWith(href);
+		return on
+			? 'bg-foreground/[0.12] text-foreground'
+			: 'bg-foreground/[0.08] text-muted-foreground hover:bg-foreground/[0.12] hover:text-foreground';
+	}
+
 	let searchQuery = $state('');
 	function goSearch() {
 		if (!searchQuery.trim()) return;
@@ -79,31 +98,32 @@
 	data-tauri-drag-region
 	class="relative {ui.theaterOpen
 		? 'z-0'
-		: 'z-50'} grid h-12 shrink-0 select-none grid-cols-[minmax(max-content,1fr)_minmax(0,32rem)_minmax(max-content,1fr)] items-center bg-card"
+		: 'z-50'} grid h-16 shrink-0 select-none grid-cols-[minmax(max-content,1fr)_minmax(0,36rem)_minmax(max-content,1fr)] items-center"
 >
 	<div data-tauri-drag-region class="col-start-2 row-start-1 flex h-full min-w-0 items-center px-2">
 		<!-- data-tauri-drag-region so the gaps between the three controls still drag the window. Bare,
 		     not `deep`: `deep` would make every descendant a drag handle, and the suggestion panel
 		     hanging below this group would then pull the window out from under the pointer. -->
 		<div data-tauri-drag-region class="flex w-full min-w-0 items-center gap-2">
-			<!-- Home. The sidebar has one as well, and deliberately: this is the one that stays in the
-			     same place however deep into a playlist you are. -->
+			<!-- Where to go lives here, around the search field, as in Spotify: the library panel
+			     below is only what you keep. -->
 			<a
 				href="/"
 				title={t('nav.home')}
 				aria-label={t('nav.home')}
-				class="flex size-8 shrink-0 items-center justify-center rounded-full transition-colors {page
-					.url.pathname === '/'
-					? 'bg-primary/15 text-primary'
-					: 'bg-foreground/10 text-muted-foreground hover:bg-foreground/20 hover:text-foreground'}"
+				class="flex size-12 shrink-0 items-center justify-center rounded-full transition-[background-color,color,scale] hover:scale-[1.04] {navClass(
+					'/'
+				)}"
 			>
-				<HugeiconsIcon icon={Home01Icon} class="h-4 w-4" />
+				<HugeiconsIcon icon={Home01Icon} class="h-6 w-6" />
 			</a>
 
 			<!-- Must be a <form>: SearchSuggest falls through to onsubmit for a bare Enter and for its
 			     own "all results" row (see the note at the top of that component). -->
+			<!-- Spotify's field: a 48px pill a step lighter than the bar, lighter again with a hairline
+			     under the pointer, and a white ring while typing. The icons light with it. -->
 			<form
-				class="relative min-w-0 flex-1"
+				class="group/field relative min-w-0 flex-1"
 				onsubmit={(e) => {
 					e.preventDefault();
 					goSearch();
@@ -111,48 +131,57 @@
 			>
 				<HugeiconsIcon
 					icon={Search01Icon}
-					class="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+					class="pointer-events-none absolute left-3.5 top-1/2 z-10 h-6 w-6 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within/field:text-foreground group-hover/field:text-foreground"
 				/>
 				<!-- The panel is wider than the field and centred under it with a margin rather than a
 				     translate: the open animation animates `transform`, so a -translate-x-1/2 here would
 				     be overwritten for the length of it and the panel would slide sideways into place. -->
 				<SearchSuggest
 					bind:value={searchQuery}
-					placeholder={t('common.search')}
-					inputClass="h-8 rounded-full pl-9 pr-24"
+					placeholder={t('nav.search_prompt')}
+					inputClass="h-12 rounded-full bg-foreground/[0.08] pl-12 pr-24 text-base md:text-base hover:bg-foreground/[0.12] hover:ring-1 hover:ring-foreground/20 focus-visible:bg-foreground/[0.12] focus-visible:ring-2 focus-visible:ring-foreground"
 					panelClass="left-1/2 -ml-[13rem] w-[26rem]"
-					kbdClass="right-11"
+					kbdClass="right-[3.75rem]"
 				/>
 				<!-- Browse, at the end of the field where Spotify keeps it: every mood and genre as
 				     cards, for when you know the kind of thing you want and not its name. Inside the
 				     form's box but not a submit — it navigates, it never searches. -->
 				<span
 					aria-hidden="true"
-					class="pointer-events-none absolute right-9 top-1/2 h-4 w-px -translate-y-1/2 bg-foreground/15"
+					class="pointer-events-none absolute right-12 top-1/2 h-6 w-px -translate-y-1/2 bg-foreground/20"
 				></span>
 				<a
 					href="/explore/moods"
 					title={t('nav.browse')}
 					aria-label={t('nav.browse')}
-					class="absolute right-1 top-1/2 z-10 flex size-7 -translate-y-1/2 items-center justify-center rounded-full transition-colors {page
+					class="absolute right-2 top-1/2 z-10 flex size-9 -translate-y-1/2 items-center justify-center rounded-full transition-colors {page
 						.url.pathname === '/explore/moods'
 						? 'text-primary'
 						: 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground'}"
 				>
-					<HugeiconsIcon icon={Archive02Icon} class="h-4 w-4" />
+					<HugeiconsIcon icon={Archive02Icon} class="h-6 w-6" />
 				</a>
 			</form>
 
 			<a
+				href="/explore"
+				title={t('nav.explore')}
+				aria-label={t('nav.explore')}
+				class="flex size-12 shrink-0 items-center justify-center rounded-full transition-[background-color,color,scale] hover:scale-[1.04] {navClass(
+					'/explore'
+				)}"
+			>
+				<HugeiconsIcon icon={Compass01Icon} class="h-6 w-6" />
+			</a>
+			<a
 				href="/history"
 				title={t('nav.history')}
 				aria-label={t('nav.history')}
-				class="flex size-8 shrink-0 items-center justify-center rounded-full transition-colors {page
-					.url.pathname === '/history'
-					? 'bg-primary/15 text-primary'
-					: 'bg-foreground/10 text-muted-foreground hover:bg-foreground/20 hover:text-foreground'}"
+				class="flex size-12 shrink-0 items-center justify-center rounded-full transition-[background-color,color,scale] hover:scale-[1.04] {navClass(
+					'/history'
+				)}"
 			>
-				<HugeiconsIcon icon={HistoryIcon} class="h-4 w-4" />
+				<HugeiconsIcon icon={HistoryIcon} class="h-6 w-6" />
 			</a>
 		</div>
 	</div>
@@ -166,13 +195,18 @@
 			? 'pl-[70px]'
 			: ''}"
 	>
-		<!-- pointer-events-none: the mark and the name are decoration, so a click on either drags the
-		     window like the rest of the bar.
+		<!-- The mark and the name go home, like the Home button beside the search field (and, like it,
+		     scroll home back to the top when you are already there — the layout's same-page link
+		     rule). A link rather than decoration, so this corner no longer drags the window; the rest
+		     of the bar still does.
 
-		     The name shows from `lg` up only: below it that width is the search field's. `lg` is also
-		     where the sidebar wordmark appears, so the app is never named twice at one width and
-		     unnamed at another. -->
-		<span class="pointer-events-none ml-3 mr-2 flex items-center gap-2">
+		     The name shows from `lg` up only: below it that width is the search field's. -->
+		<a
+			href="/"
+			title={t('nav.home')}
+			aria-label={t('nav.home')}
+			class="ml-2 mr-1 flex items-center gap-2 rounded-md px-1 py-1 transition-opacity hover:opacity-80"
+		>
 			{#if appIcon.custom}
 				<!-- A picked icon is an arbitrary image, so it goes in as one. -->
 				<img src={appIcon.src} alt="" class="size-5" />
@@ -183,11 +217,11 @@
 				<Logo class="size-5" />
 			{/if}
 			<span
-				class="hidden whitespace-nowrap font-heading text-[13px] font-bold tracking-tight lg:block"
+				class="hidden whitespace-nowrap font-heading text-sm font-bold tracking-tight lg:block"
 			>
 				YouTube Music ++
 			</span>
-		</span>
+		</a>
 		<!-- Bigger and heavier than the icons on the right: these are navigation, and at their
 		     weight the arrow read as decoration and got missed. -->
 		<button
@@ -219,9 +253,28 @@
 		<AccountMenu />
 		<div class="w-3"></div>
 
-		<!-- Stop the music after a while. Beside the app-level buttons rather than in the player bar:
-		     it is a property of the session, not of the track that happens to be playing. -->
-		<SleepTimer />
+		<!-- Settings, and the theme switch while light mode is offered (LIGHT_MODE, theme.svelte.ts).
+		     They lived at the foot of the sidebar, which is the library now. -->
+		<button
+			class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground"
+			onclick={() => (ui.settingsOpen = true)}
+			title={t('nav.settings')}
+			aria-label={t('nav.settings')}
+		>
+			<HugeiconsIcon icon={Settings01Icon} class="h-4 w-4" />
+		</button>
+		{#if LIGHT_MODE}
+			<button
+				class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground"
+				onclick={toggleMode}
+				title={t('a11y.toggle_theme')}
+				aria-label={t('a11y.toggle_theme')}
+			>
+				<HugeiconsIcon icon={Sun01Icon} class="h-4 w-4 dark:hidden" />
+				<HugeiconsIcon icon={Moon02Icon} class="hidden h-4 w-4 dark:block" />
+			</button>
+		{/if}
+
 
 		<!-- Paste a YouTube Music link and go to it: the only way into a playlist that is shared by
 		     link and never appears in search or the library (#63). -->
@@ -232,19 +285,6 @@
 			aria-label={t('dialogs.link.title')}
 		>
 			<HugeiconsIcon icon={Link04Icon} class="h-4 w-4" />
-		</button>
-
-		<!-- Theater mode: fullscreen, cover and lyrics, nothing else. Next to the mini player because
-		     the pair are the same idea in opposite directions (shrink the app / become the screen),
-		     and disabled with nothing playing, since there'd be nothing to show. -->
-		<button
-			class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground disabled:pointer-events-none disabled:opacity-25"
-			onclick={() => (ui.theaterOpen = true)}
-			disabled={!playback.now}
-			title={t('player.theater_mode')}
-			aria-label={t('player.theater_mode')}
-		>
-			<HugeiconsIcon icon={CameraVideoIcon} class="h-4 w-4" />
 		</button>
 
 		<!-- Mini player: hides the app to the tray and hands over to the floating widget (mini.rs).

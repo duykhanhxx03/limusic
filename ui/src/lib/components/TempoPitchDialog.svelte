@@ -42,17 +42,17 @@
 			size="icon-sm"
 			disabled={atMin}
 			onclick={() => onStep(-1)}
-			aria-label="- {label}"
+			aria-label={t('dialogs.tempo_pitch.decrease', { label })}
 		>
 			<HugeiconsIcon icon={MinusSignIcon} class="h-4 w-4" />
 		</Button>
-		<span class="w-16 text-center font-medium tabular-nums">{value}</span>
+		<span class="w-16 text-center font-bold tabular-nums">{value}</span>
 		<Button
 			variant="ghost"
 			size="icon-sm"
 			disabled={atMax}
 			onclick={() => onStep(1)}
-			aria-label="+ {label}"
+			aria-label={t('dialogs.tempo_pitch.increase', { label })}
 		>
 			<HugeiconsIcon icon={PlusSignIcon} class="h-4 w-4" />
 		</Button>
@@ -62,8 +62,8 @@
 <Dialog.Root bind:open>
 	<Dialog.Content class="gap-5 sm:max-w-sm">
 		<div class="grid gap-1">
-			<Dialog.Title class="text-lg font-semibold">{t('dialogs.tempo_pitch.title')}</Dialog.Title>
-			<Dialog.Description class="text-xs text-muted-foreground">
+			<Dialog.Title>{t('dialogs.tempo_pitch.title')}</Dialog.Title>
+			<Dialog.Description>
 				{t('dialogs.tempo_pitch.desc')}
 			</Dialog.Description>
 		</div>
@@ -87,10 +87,10 @@
 			)}
 		</div>
 
-		<div class="flex justify-end gap-2">
+		<Dialog.Footer>
 			<!-- Reset does not close: you're usually resetting to hear the difference. -->
-			<Button variant="outline" size="sm" onclick={() => apply(1, 0)}>{t('common.reset')}</Button>
-			<Button size="sm" onclick={() => (open = false)}>{t('common.done')}</Button>
-		</div>
+			<Button variant="ghost" size="lg" onclick={() => apply(1, 0)}>{t('common.reset')}</Button>
+			<Button size="lg" onclick={() => (open = false)}>{t('common.done')}</Button>
+		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

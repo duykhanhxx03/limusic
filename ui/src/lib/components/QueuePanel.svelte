@@ -12,7 +12,7 @@
      can't use behind a panel you opened on purpose is the better trade. Below lg a scrim dismisses
      it; at lg+ the content stays visible underneath and the player bar's button closes it. -->
 <button
-	class="absolute inset-0 z-20 cursor-default bg-black/40 lg:hidden"
+	class="absolute inset-0 z-20 cursor-default rounded-lg bg-black/40 lg:hidden"
 	onclick={onClose}
 	aria-label={t('a11y.close_queue')}
 	in:fade={{ duration: 250 }}
@@ -21,8 +21,8 @@
 <aside
 	in:fly={{ x: 32, duration: 250, easing: cubicOut }}
 	out:fly={{ x: 32, duration: 150, easing: cubicOut }}
-	class="absolute inset-y-0 right-0 z-30 flex h-full w-80 max-w-[80vw] flex-col glass"
+	class="absolute inset-y-0 right-0 z-30 flex h-full w-80 max-w-[80vw] flex-col overflow-hidden rounded-lg glass"
 >
-	<h2 class="px-4 py-3 font-heading text-sm font-semibold">{t('queue.title')}</h2>
+	<h2 class="px-4 py-3 font-heading text-base font-bold">{t('queue.title')}</h2>
 	<QueueList />
 </aside>

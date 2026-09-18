@@ -190,7 +190,7 @@
 	data-selection-key={selectionKey}
 	data-selected={selectable ? selected : undefined}
 	aria-describedby={selectable ? selectionDescriptionId : undefined}
-	aria-label={selectable ? t('selection.track', { title: song.title }) : `Play ${song.title}`}
+	aria-label={selectable ? t('selection.track', { title: song.title }) : t('a11y.play_track', { title: song.title })}
 	class="group flex w-full cursor-pointer items-center gap-3 rounded-lg p-2 transition-colors hover:bg-accent/10 {selected
 		? 'bg-primary/15'
 		: active
@@ -227,7 +227,7 @@
 		<div class="flex min-w-0 shrink-0 items-center gap-3">
 			{#if index !== undefined}
 				<span
-					class="relative w-5 shrink-0 text-center text-xs {active
+					class="relative w-5 shrink-0 text-center text-base {active
 						? 'text-primary'
 						: 'text-muted-foreground'}"
 				>
@@ -254,7 +254,7 @@
 		</div>
 		<div class="min-w-0 flex-1">
 			<div class="flex min-w-0 items-center gap-2">
-				<span class="min-w-0 truncate text-sm font-medium {active ? 'text-primary' : ''}">
+				<span class="min-w-0 truncate text-base leading-snug {active ? 'text-primary' : ''}">
 					{song.title}
 				</span>
 				<!-- On disk. After the title, not before it: it is a property of the row, not part of
@@ -278,7 +278,7 @@
 					/>
 				{/if}
 			</div>
-			<div class="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+			<div class="flex min-w-0 items-center gap-1 text-sm leading-snug text-muted-foreground">
 				<ArtistLine runs={song.artist_runs} text={song.artists} />
 				{#if compact && duration}
 					<!-- No leading dot with nothing before it: a search row can come back artist-less
@@ -294,7 +294,7 @@
 	     centred column of its own there; narrow ones sit it next to the duration at its natural width
 	     rather than dropping it, since it never needs more than "1,234 plays" worth of room. -->
 	{#if song.play_count && showPlayCount && !compact}
-		<div class="flex shrink-0 items-center justify-center text-xs text-muted-foreground lg:flex-1">
+		<div class="flex shrink-0 items-center justify-center text-sm text-muted-foreground lg:flex-1">
 			<span class="truncate">{t('library.play_count', { count: song.play_count })}</span>
 		</div>
 	{/if}
@@ -346,7 +346,7 @@
 			</div>
 		{/if}
 		{#if duration && !compact}
-			<span class="shrink-0 text-xs tabular-nums text-muted-foreground">{duration}</span>
+			<span class="shrink-0 text-sm tabular-nums text-muted-foreground">{duration}</span>
 		{/if}
 		{#if compact}
 			<!-- Persistent, not hover-only: a filled heart is state the row has to keep showing. -->

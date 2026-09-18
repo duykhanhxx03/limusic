@@ -198,7 +198,7 @@
 	></button>
 	<div
 		data-menu
-		class="pointer-events-auto fixed z-[70] min-w-48 animate-in rounded-lg glass p-1 text-popover-foreground duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] fade-in-0 zoom-in-[0.97]"
+		class="pointer-events-auto fixed z-[70] min-w-56 animate-in rounded-lg glass p-1 text-popover-foreground duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] fade-in-0 zoom-in-[0.97]"
 		style={anchor.style}
 		{@attach toBody}
 		{@attach fitMenu(anchor)}
@@ -207,15 +207,15 @@
 		     siblings in a flex wrapper rather than a nested button (invalid HTML), with the hover
 		     tint on the wrapper so it still reads as a single item. -->
 		{#if item.kind === 'album' || item.kind === 'playlist'}
-			<div class="flex items-center rounded-md hover:bg-accent/10">
+			<div class="flex items-center rounded-[0.25rem] hover:bg-foreground/10">
 				<button
-					class="flex flex-1 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-primary"
+					class="menu-item w-auto flex-1 text-primary hover:bg-transparent"
 					onclick={(e) => play(e, false)}
 				>
 					<HugeiconsIcon icon={PlayIcon} class="h-4 w-4" /> {t('player.play')}
 				</button>
 				<button
-					class="mr-1 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-accent/20"
+					class="mr-1 flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full hover:bg-foreground/10"
 					title={t('player.shuffle_play')}
 					aria-label={t('player.shuffle_play')}
 					onclick={(e) => play(e, true)}
@@ -226,16 +226,17 @@
 		{/if}
 		{#if showPin}
 			<button
-				class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				class="menu-item"
 				onclick={(e) => run(e, () => togglePin(item.id))}
 			>
 				<HugeiconsIcon icon={pinned ? PinOffIcon : PinIcon} class="h-4 w-4" />
 				{pinned ? t("player.unpin") : t("player.pin_to_top")}
 			</button>
 		{/if}
+		<div class="menu-sep"></div>
 		{#if canQueue}
 			<button
-				class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10 disabled:opacity-50"
+				class="menu-item"
 				disabled={queueing}
 				onclick={(e) => {
 					e.stopPropagation();
@@ -245,7 +246,7 @@
 				<HugeiconsIcon icon={ArrowUpNarrowWideIcon} class="h-4 w-4" /> {t('player.play_next')}
 			</button>
 			<button
-				class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10 disabled:opacity-50"
+				class="menu-item"
 				disabled={queueing}
 				onclick={(e) => {
 					e.stopPropagation();
@@ -257,14 +258,15 @@
 		{/if}
 		{#if onYouTube}
 			<button
-				class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				class="menu-item"
 				onclick={(e) => run(e, () => startRadio(item.kind as 'artist' | 'album' | 'playlist', item.id, item.title))}
 			>
 				<HugeiconsIcon icon={Radio02Icon} class="h-4 w-4" /> {t('player.start_radio')}
 			</button>
 		{/if}
+		<div class="menu-sep"></div>
 		<button
-			class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+			class="menu-item"
 			onclick={(e) => run(e, () => (isPick ? removePick(item.id) : addPick(item)))}
 		>
 			<HugeiconsIcon icon={DashboardSquare02Icon} class="h-4 w-4" />
@@ -272,18 +274,19 @@
 		</button>
 		{#if onYouTube}
 			<button
-				class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				class="menu-item"
 				onclick={(e) => run(e, () => openShare(item))}
 			>
 				<HugeiconsIcon icon={Share08Icon} class="h-4 w-4" /> {t("player.share")}
 			</button>
 		{/if}
+		<div class="menu-sep"></div>
 		<!-- One row for library membership: put it in, take the local copy back out, or just say it
 		     is already there (YouTube's own copy is unsaved from the item's page, which knows which
 		     write to send). Local folders and On Repeat have no library to be in. -->
 		{#if onYouTube && !inLib}
 			<button
-				class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10 disabled:opacity-50"
+				class="menu-item"
 				disabled={saving}
 				onclick={(e) => {
 					e.stopPropagation();
@@ -294,7 +297,7 @@
 			</button>
 		{:else if onYouTube && !savedHere && !owned}
 			<button
-				class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10 disabled:opacity-50"
+				class="menu-item"
 				disabled={saving}
 				onclick={(e) => {
 					e.stopPropagation();
@@ -305,7 +308,7 @@
 				{t('library.remove_from_library')}
 			</button>
 		{:else if onYouTube}
-			<div class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground">
+			<div class="menu-item cursor-default text-muted-foreground hover:bg-transparent">
 				<HugeiconsIcon icon={BookmarkCheck02Icon} class="h-4 w-4" /> {t('library.in_library')}
 			</div>
 		{/if}
@@ -313,7 +316,7 @@
 		     page, where the button knows which write action to send. -->
 		{#if savedHere}
 			<button
-				class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				class="menu-item"
 				onclick={(e) =>
 					run(e, () => {
 						toggleSaved(item);
@@ -327,7 +330,7 @@
 		     there is no reliable identity in it to block by (plan 046). -->
 		{#if onYouTube && item.kind === 'artist'}
 			<button
-				class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				class="menu-item"
 				onclick={(e) => run(e, () => blockArtist(item.id, item.title))}
 			>
 				<HugeiconsIcon icon={UserBlock01Icon} class="h-4 w-4" /> {t('player.block_artist')}

@@ -50,7 +50,7 @@
 		<div class="flex flex-wrap items-center justify-center gap-1" role="group" aria-label={t('selection.actions')}>
 			<span class="px-2 text-sm whitespace-nowrap" role="status">
 				{#if selection.count}
-					<span class="font-medium">{t('selection.count', { count: selection.count })}</span>
+					<span class="font-bold">{t('selection.count', { count: selection.count })}</span>
 					{#if selection.hidden}
 						<span class="text-muted-foreground"> · {t('selection.hidden', { count: selection.hidden })}</span>
 					{/if}

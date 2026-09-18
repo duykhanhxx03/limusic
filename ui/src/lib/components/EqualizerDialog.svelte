@@ -16,7 +16,6 @@
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import {
 		ArrowDown01Icon,
-		ArrowReloadHorizontalIcon,
 		CloudDownloadIcon,
 		HeadphonesIcon,
 		Loading03Icon,
@@ -202,8 +201,8 @@
 			     overlaps anything the header puts in that corner. -->
 			<div class="flex items-center justify-between gap-4 pr-10">
 				<div>
-					<Dialog.Title class="text-lg font-semibold">{t('eq.title')}</Dialog.Title>
-					<Dialog.Description class="text-xs text-muted-foreground">
+					<Dialog.Title>{t('eq.title')}</Dialog.Title>
+					<Dialog.Description class="mt-1">
 						{t('eq.desc')}
 					</Dialog.Description>
 				</div>
@@ -317,7 +316,7 @@
 						{/each}
 					</div>
 
-					<p class="mt-1 px-3 pb-1 text-[11px] text-muted-foreground">
+					<p class="mt-1 px-3 pb-1 text-xs text-muted-foreground">
 						{t('eq.autoeq.credit_before')}<button
 							class="cursor-pointer underline-offset-2 hover:text-foreground hover:underline"
 							onclick={() => api.openExternal(AUTOEQ_URL).catch(() => {})}>AutoEq</button
@@ -362,10 +361,9 @@
 		</div>
 
 		<Dialog.Footer>
-			<Button variant="ghost" size="sm" class="gap-2" onclick={reset}>
-				<HugeiconsIcon icon={ArrowReloadHorizontalIcon} class="h-4 w-4" />
-				{t('eq.reset')}
-			</Button>
+			<!-- Reset does not close, like Tempo & Pitch: you reset to hear the difference. -->
+			<Button variant="ghost" size="lg" onclick={reset}>{t('eq.reset')}</Button>
+			<Button size="lg" onclick={() => (open = false)}>{t('common.done')}</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

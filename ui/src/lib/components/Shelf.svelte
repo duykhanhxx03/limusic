@@ -42,7 +42,7 @@
 		onMore,
 		community = false,
 		rich = true,
-		headingClass = 'font-heading text-lg font-semibold',
+		headingClass = 'font-heading text-2xl font-bold tracking-tight',
 		queueAll = true
 	}: {
 		title?: string;
@@ -56,7 +56,7 @@
 		community?: boolean;
 		/** Opt out of the per-kind forms and render plain cards. */
 		rich?: boolean;
-		/** Artist and album pages use text-xl font-bold; home uses the default. */
+		/** Spotify's section heading, 24px bold, unless a page asks for another. */
 		headingClass?: string;
 		/**
 		 * Whether clicking a song row queues the rest of the shelf behind it. True for a shelf that

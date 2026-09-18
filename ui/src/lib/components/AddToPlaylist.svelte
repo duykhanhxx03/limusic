@@ -1,8 +1,5 @@
 <script lang="ts">
-	import { fade, scale } from 'svelte/transition';
-	import { quintOut } from 'svelte/easing';
-	import { HugeiconsIcon } from '@hugeicons/svelte';
-	import { Cancel01Icon } from '@hugeicons/core-free-icons';
+	import * as Dialog from '$lib/components/ui/dialog';
 	import * as api from '$lib/api';
 	import type { BrowseItem } from '$lib/api';
 	import { t } from '$lib/i18n.svelte';
@@ -127,37 +124,15 @@
 	}
 </script>
 
-<svelte:window
-	onkeydown={(e) => {
-		if (ui.addSongs && e.key === 'Escape') close();
-	}}
-/>
-
-{#if ui.addSongs}
-	<div
-		in:fade={{ duration: 250 }}
-		out:fade={{ duration: 150 }}
-		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-		role="presentation"
-		onclick={(e) => {
-			if (e.target === e.currentTarget) close();
-		}}
-	>
-		<div
-			in:scale={{ duration: 250, start: 0.96, easing: quintOut }}
-			out:scale={{ duration: 150, start: 0.96, easing: quintOut }}
-			class="flex max-h-[32rem] w-full max-w-sm flex-col rounded-xl glass p-4"
-		>
-			<div class="mb-3 flex items-center justify-between">
-				<h2 class="font-heading text-base font-semibold">{t('player.add_to_playlist')}</h2>
-				<button
-					class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-					onclick={close}
-					aria-label={t('a11y.close')}
-				>
-					<HugeiconsIcon icon={Cancel01Icon} class="h-4 w-4" />
-				</button>
-			</div>
+<!-- The picker's state lives in `ui.addSongs`, so the dialog's own open flag is derived from it and
+     every dismissal (Esc, backdrop, ✕) routes through `close()`. -->
+<Dialog.Root bind:open={() => ui.addSongs !== null, (v) => !v && close()}>
+	<!-- Flex, not the primitive's grid: the list has to shrink into the capped height and scroll. -->
+	<Dialog.Content class="flex max-h-[32rem] flex-col gap-4 sm:max-w-sm">
+		<Dialog.Header>
+			<Dialog.Title>{t('player.add_to_playlist')}</Dialog.Title>
+		</Dialog.Header>
+		<div class="flex min-h-0 flex-1 flex-col">
 			{#if playlists.length > 1}
 				<input
 					bind:this={box}
@@ -182,7 +157,7 @@
 								<div class="h-10 w-10 rounded-md bg-muted"></div>
 							{/if}
 							<div class="min-w-0">
-								<div class="truncate text-sm font-medium">{pl.title}</div>
+								<div class="truncate text-base">{pl.title}</div>
 								{#if pl.subtitle}
 									<div class="truncate text-xs text-muted-foreground">{pl.subtitle}</div>
 								{/if}
@@ -196,5 +171,5 @@
 				</p>
 			{/if}
 		</div>
-	</div>
-{/if}
+	</Dialog.Content>
+</Dialog.Root>

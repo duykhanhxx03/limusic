@@ -105,10 +105,10 @@
 					{/if}
 				</div>
 				<div class="min-w-0 flex-1">
-					<div class="truncate text-sm font-medium">{item.title}</div>
+					<div class="truncate text-base leading-snug">{item.title}</div>
 					<!-- Subtitle when there is one (a creator or an artist tells you more than the kind
 					     does); the kind is the fallback so the second line never collapses. -->
-					<div class="truncate text-xs capitalize text-muted-foreground">
+					<div class="truncate text-sm leading-snug capitalize text-muted-foreground">
 						{item.subtitle || (
 							item.kind === 'playlist' ? t('common.playlist_singular') :
 							item.kind === 'album' ? t('common.album_singular') :

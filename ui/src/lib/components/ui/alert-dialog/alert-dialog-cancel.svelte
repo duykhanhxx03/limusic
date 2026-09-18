@@ -10,8 +10,8 @@
 	let {
 		ref = $bindable(null),
 		class: className,
-		variant = "outline",
-		size = "default",
+		variant = "ghost",
+		size = "lg",
 		...restProps
 	}: AlertDialogPrimitive.CancelProps & {
 		variant?: ButtonVariant;

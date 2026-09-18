@@ -179,7 +179,7 @@
 											<!-- ring-background so the count reads over the icon's stroke (as in
 											     Titlebar). -->
 											<span
-												class="absolute -right-2 -top-1.5 min-w-3.5 rounded-full bg-accent px-[3px] text-[9px] font-semibold leading-[0.875rem] text-accent-foreground ring-[1.5px] ring-background"
+												class="absolute -right-2 -top-1.5 min-w-3.5 rounded-full bg-accent px-[3px] text-[10px] font-bold leading-[0.875rem] text-accent-foreground ring-[1.5px] ring-background"
 											>
 												{toSync.length}
 											</span>
@@ -195,7 +195,7 @@
 						</Tooltip.Root>
 					</Tooltip.Provider>
 				{/if}
-				<Button variant="outline" size="sm" class="gap-2" onclick={() => (dialogOpen = true)}>
+				<Button variant="secondary" size="sm" class="gap-2" onclick={() => (dialogOpen = true)}>
 					<HugeiconsIcon icon={Add01Icon} class="h-4 w-4" /> {t('nav.new_playlist')}
 				</Button>
 			</div>
@@ -217,10 +217,10 @@
 			>
 				<Input bind:value={newTitle} placeholder={t('dialogs.edit_playlist.name_placeholder')} autofocus />
 				<Dialog.Footer>
-					<Button type="button" variant="outline" onclick={() => (dialogOpen = false)}>
+					<Button type="button" variant="ghost" size="lg" onclick={() => (dialogOpen = false)}>
 						{t('common.cancel')}
 					</Button>
-					<Button type="submit" disabled={busy || !newTitle.trim()}>
+					<Button type="submit" size="lg" disabled={busy || !newTitle.trim()}>
 						{busy ? t('common.loading') : t('common.create')}
 					</Button>
 				</Dialog.Footer>
@@ -299,7 +299,7 @@
 							{#if uploadTab === 'all'}
 								<LibrarySongs uploads limit={20} onSeeAll={() => (uploadTab = 'songs')} />
 								{#if library.uploadAlbums.length}
-									<h2 class="mb-3 mt-8 font-heading text-lg font-semibold">{t('common.albums')}</h2>
+									<h2 class="mb-3 mt-8 font-heading text-2xl font-bold tracking-tight">{t('common.albums')}</h2>
 									{@render grid(library.uploadAlbums, '', rvUploadsAll)}
 								{/if}
 							{/if}
