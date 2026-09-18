@@ -254,17 +254,24 @@ impl Db {
         let _ = conn.execute("ALTER TABLE stream_url_cache ADD COLUMN audio_mime TEXT", []);
         let _ = conn.execute("ALTER TABLE stream_url_cache ADD COLUMN audio_bitrate INTEGER", []);
         let _ = conn.execute("ALTER TABLE stream_url_cache ADD COLUMN ping_client TEXT", []);
-        // SimpMusic Lyrics now answers ahead of every other provider, but a track whose lyrics were
-        // fetched before it existed is served from this cache forever and would never reach it.
-        // Once per database: the marker row inserts only on the launch that adds it.
-        if conn
-            .execute(
-                "INSERT OR IGNORE INTO settings(key, value) VALUES('lyrics_cache_epoch', '2')",
-                [],
-            )
-            .is_ok_and(|n| n == 1)
-        {
+        // The lyrics cache is only as good as the chain that filled it, and a cached answer is served
+        // forever. So every change to what the chain would answer bumps LYRICS_CACHE_EPOCH, and a
+        // database on any other epoch drops its cache, once:
+        //   2 — SimpMusic Lyrics went ahead of every other provider.
+        //   3 — a catalogue search hit has to carry the right title, not only the right length. A
+        //       Vietnamese track had been cached with a Chinese song's lyrics of the same length.
+        const LYRICS_CACHE_EPOCH: &str = "3";
+        let epoch: Option<String> = conn
+            .query_row("SELECT value FROM settings WHERE key = 'lyrics_cache_epoch'", [], |r| {
+                r.get(0)
+            })
+            .ok();
+        if epoch.as_deref() != Some(LYRICS_CACHE_EPOCH) {
             let _ = conn.execute("DELETE FROM lyrics_cache", []);
+            let _ = conn.execute(
+                "INSERT OR REPLACE INTO settings(key, value) VALUES('lyrics_cache_epoch', ?1)",
+                [LYRICS_CACHE_EPOCH],
+            );
         }
         // Local files are no longer recorded as plays (see `AppState::on_position`), but 0.3.1
         // recorded them for a while, so clear out anything already sitting in On Repeat's table.
@@ -1343,6 +1350,14 @@ mod tests {
         drop(d);
         let d = Db::open(&path).unwrap();
         assert!(d.get_lyrics("v", 1, 60).is_some(), "later launches keep the cache");
+        // A database left on an older epoch (SimpMusic's, 2) is cleared again for the next one.
+        d.0.lock()
+            .unwrap()
+            .execute("UPDATE settings SET value = '2' WHERE key = 'lyrics_cache_epoch'", [])
+            .unwrap();
+        drop(d);
+        let d = Db::open(&path).unwrap();
+        assert_eq!(d.get_lyrics("v", 1, 60), None, "an older epoch is cleared too");
         drop(d);
         let _ = std::fs::remove_file(&path);
     }

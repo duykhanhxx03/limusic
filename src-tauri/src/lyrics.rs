@@ -12,7 +12,8 @@
 //! 3. **YouTube Music timed** — `next(videoId)` → lyrics browseId → mobile-client browse
 //!    (`timedLyricsData`). The same real-time lyrics the YTM app shows.
 //! 4. **Netease / QQ / Kugou** → synced LRC, plus translations from Netease. Search hits are
-//!    matched on length (`best_by_duration`); these catalogues rank remixes next to originals.
+//!    matched on title, then length (`best_match`); these catalogues rank remixes next to
+//!    originals, and a wide search returns unrelated songs of exactly the right length.
 //! 5. Plain fallbacks: LRCLIB fuzzy search → LRCLIB plain (from step 2's response) → YT plain
 //!    (WEB_REMIX browse) → the fuzzy search's plain text.
 //!
@@ -23,6 +24,7 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use unicode_normalization::UnicodeNormalization;
 
 use crate::state::AppState;
 
@@ -298,6 +300,9 @@ struct LrclibTrack {
     synced_lyrics: Option<String>,
     #[serde(default)]
     duration: Option<f64>,
+    /// The search endpoint's hits carry it; checked there, like every other catalogue search.
+    #[serde(default)]
+    track_name: Option<String>,
 }
 
 /// LRCLIB asks integrations to identify themselves via User-Agent.
@@ -331,7 +336,7 @@ async fn lrclib_get(req: &LyricsRequest) -> Result<Option<LrclibTrack>, reqwest:
 /// `/api/search`: fuzzy fallback. Prefers a synced candidate whose duration is within ±5s of
 /// ours (when known); returns the best or `Ok(None)`.
 async fn lrclib_search(req: &LyricsRequest) -> Result<Option<LrclibTrack>, reqwest::Error> {
-    let q = [("track_name", req.title.as_str()), ("artist_name", req.artists.as_str())];
+    let q = [("track_name", req.title.as_str()), ("artist_name", lead_artist(&req.artists))];
     let list: Vec<LrclibTrack> = get(format!("{LRCLIB_ROOT}/search"))
         .query(&q)
         .send()
@@ -352,7 +357,8 @@ async fn lrclib_search(req: &LyricsRequest) -> Result<Option<LrclibTrack>, reqwe
     let mut best_synced: Option<(f64, LrclibTrack)> = None;
     let mut best_plain: Option<LrclibTrack> = None;
     for t in list {
-        if !close(&t) {
+        // Fuzzy means fuzzy: the right length is not enough on its own (see `best_match`).
+        if !close(&t) || !same_title(&req.title, t.track_name.as_deref().unwrap_or("")) {
             continue;
         }
         if synced(&t) {
@@ -412,9 +418,17 @@ fn plain_from_text(text: Option<&str>, source: &str) -> Option<Lyrics> {
 /// Declaring those synced puts the UI in its synced view, where no line ever highlights (none has
 /// a cue to pass) and clicking one to seek does nothing: lyrics that look broken, rather than
 /// lyrics that read as plain text.
-fn from_parsed(source: &str, lines: Vec<LyricLine>) -> Option<Lyrics> {
+fn from_parsed(source: &str, mut lines: Vec<LyricLine>) -> Option<Lyrics> {
     if lines.is_empty() {
         return None;
+    }
+    for line in &mut lines {
+        if let Some(words) = line.words.as_mut() {
+            tidy_words(words);
+        }
+        if line.words.as_ref().is_some_and(Vec::is_empty) {
+            line.words = None;
+        }
     }
     Some(Lyrics {
         source: source.to_owned(),
@@ -423,6 +437,37 @@ fn from_parsed(source: &str, lines: Vec<LyricLine>) -> Option<Lyrics> {
         instrumental: false,
         lines,
     })
+}
+
+/// One space between two words, however the source spelled it, and none where it had none.
+///
+/// Word-timed sources disagree about where the space goes: after the word (`<t>Một <t>người`), on
+/// both sides of it (`<t> Uhm, <t>`), or as a run of spaces between two words with a timestamp of
+/// its own (`<t>   <t>`). Both renderers draw a word's text as it stands and add their own gap
+/// after a word that ends in a space — so a leading space was measured into the word, a
+/// spaces-only "word" became a gap of its own, and a line read as if every word were set apart.
+/// Here each word loses its surrounding whitespace, a whitespace-only word goes, and a word keeps a
+/// single trailing space when anything separated it from the next one. CJK, which has no spaces
+/// between its words, stays joined.
+fn tidy_words(words: &mut Vec<LyricWord>) {
+    let mut out: Vec<LyricWord> = Vec::with_capacity(words.len());
+    // Whitespace seen since the last word kept.
+    let mut gap = false;
+    for w in words.drain(..) {
+        let text = w.text.trim();
+        if text.is_empty() {
+            gap = true;
+            continue;
+        }
+        if gap || w.text.starts_with(char::is_whitespace) {
+            if let Some(prev) = out.last_mut() {
+                prev.text.push(' ');
+            }
+        }
+        gap = w.text.ends_with(char::is_whitespace);
+        out.push(LyricWord { text: text.to_owned(), ..w });
+    }
+    *words = out;
 }
 
 // --- LRC parsing ----------------------------------------------------------------------------
@@ -559,37 +604,104 @@ async fn boidu_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error
 /// LRCLIB search above uses, for the same reason.
 const MATCH_TOLERANCE_SECS: f64 = 5.0;
 
-/// Pick the search hit closest in length to what we're playing, rejecting anything further off than
-/// `MATCH_TOLERANCE_SECS`.
+/// Pick the search hit that is our song: the same title, then the closest in length to what we're
+/// playing, rejecting anything further off than `MATCH_TOLERANCE_SECS`.
 ///
-/// The three providers below rank remixes, live cuts and radio edits right next to the original
-/// (Kugou's top hit for "Shape of You" is a 263s edit of a 233s song, and Netease ranks a 231s
-/// remix second), so taking whatever came back first plays lyrics seconds out of step with the
-/// audio. Closest-match rather than first-within-tolerance matters: the remix is often inside the
-/// window too, and only the distance separates it from the real cut.
+/// The title comes first because length alone names no song. A catalogue search can go wide —
+/// YouTube's localized artist line ("COOLKID, RHYDER và BAN") once sent QQ off to every song called
+/// "Cool Kid" — and in a page of unrelated songs one will be the right length by chance: that is
+/// how a Vietnamese track got Oliver Jiang's "酷小孩Cool Kid", at exactly 192 seconds. No lyrics
+/// is a better answer than someone else's.
 ///
-/// With no length on our side there is nothing to check, so the first hit stands. A candidate whose
-/// own length is missing ranks last but is not dropped — if a provider renames the field we want
-/// degraded matching, not a provider that silently returns nothing.
-fn best_by_duration<T>(
+/// Closest-match rather than first-within-tolerance matters because these catalogues rank remixes,
+/// live cuts and radio edits right next to the original (Kugou's top hit for "Shape of You" is a
+/// 263s edit of a 233s song, and Netease ranks a 231s remix second): the remix often has the same
+/// title once its "(Remix)" is dropped, and sits inside the window too, so only the distance
+/// separates it from the real cut.
+///
+/// With no length on our side there is nothing to measure, so the first same-titled hit stands. A
+/// candidate whose own length is missing ranks last but is not dropped — if a provider renames the
+/// field we want degraded matching, not a provider that silently returns nothing.
+fn best_match<'a, T>(
+    title: &str,
     ours: Option<f64>,
-    cands: &[T],
+    cands: &'a [T],
+    title_of: impl Fn(&'a T) -> Option<&'a str>,
     secs: impl Fn(&T) -> Option<f64>,
-) -> Option<&T> {
+) -> Option<&'a T> {
+    let named = cands.iter().filter(|c| same_title(title, title_of(c).unwrap_or("")));
     let Some(ours) = ours.filter(|d| *d > 0.0) else {
-        return cands.first();
+        return named.into_iter().next();
     };
-    cands
-        .iter()
+    named
         .map(|c| (secs(c).map_or(f64::INFINITY, |d| (d - ours).abs()), c))
         .filter(|(d, _)| *d <= MATCH_TOLERANCE_SECS || d.is_infinite())
         .min_by(|a, b| a.0.total_cmp(&b.0))
         .map(|(_, c)| c)
 }
 
+/// A song title reduced to what two catalogues agree on. Accents fold away — a catalogue that files
+/// "Chịu Cách Mình Nói Thua" as "Chiu Cach Minh Noi Thua" is naming the same song — and so do
+/// bracketed asides ("(Official Video)", "(feat. X)", "[MV]", "【…】", a search's `<em>` highlight)
+/// and everything that is not a letter or a digit, spaces included. CJK stays as it is: those
+/// characters are letters, and they are the title.
+fn title_key(s: &str) -> String {
+    let mut depth = 0u32;
+    let mut out = String::new();
+    for c in s.nfd() {
+        match c {
+            '(' | '[' | '{' | '<' | '（' | '【' | '「' | '『' => depth += 1,
+            ')' | ']' | '}' | '>' | '）' | '】' | '」' | '』' => {
+                depth = depth.saturating_sub(1)
+            }
+            _ if depth > 0 => {}
+            'đ' | 'Đ' => out.push('d'),
+            c if unicode_normalization::char::is_combining_mark(c) => {}
+            c if c.is_alphanumeric() => out.extend(c.to_lowercase()),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Whether a catalogue's title names the song we asked for (see `best_match`). Containment either
+/// way, so "Song" still finds "Song - From 'The Film'" and the reverse; but a key under four
+/// characters has to match outright, or "Go" would claim "Gorgeous". A title with nothing left to
+/// compare on our side blocks nothing; a hit with no title of its own is not trusted.
+fn same_title(ours: &str, theirs: &str) -> bool {
+    let (a, b) = (title_key(ours), title_key(theirs));
+    if a.is_empty() {
+        return true;
+    }
+    if b.is_empty() {
+        return false;
+    }
+    let (short, long) = if a.chars().count() <= b.chars().count() { (&a, &b) } else { (&b, &a) };
+    short == long || (short.chars().count() >= 4 && long.contains(short.as_str()))
+}
+
+/// The lead artist out of YouTube's artist line, for a catalogue search. YouTube joins the names in
+/// the content language — "A, B & C", "A, B và C", "A, B und C" — and the joining word is noise to
+/// a search engine that has never seen it: "và" is what sent QQ looking for "Cool Kid". The lead
+/// artist and the title find the song on every catalogue here; a language whose joining word is
+/// not listed only costs a query some precision, never correctness, which `same_title` guards.
+fn lead_artist(artists: &str) -> &str {
+    const JOINS: [&str; 14] = [
+        ",", "、", " & ", " x ", " X ", " feat.", " feat ", " ft.", " và ", " and ", " und ",
+        " et ", " y ", " e ",
+    ];
+    let cut = JOINS.iter().filter_map(|j| artists.find(j)).min().unwrap_or(artists.len());
+    artists[..cut].trim()
+}
+
+/// What a catalogue search is asked for: the title and the lead artist.
+fn search_query(req: &LyricsRequest) -> String {
+    format!("{} {}", req.title, lead_artist(&req.artists)).trim().to_owned()
+}
+
 /// Netease Cloud Music provider (supports LRC, word timestamps, & translations)
 async fn netease_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
-    let query = format!("{} {}", req.title, req.artists);
+    let query = search_query(req);
     // POST `/api/search/get`, not GET `/api/search/get/web`: the latter now answers with an
     // encrypted hex blob instead of JSON, which parsed to "no hit" and left this provider dead.
     let resp: serde_json::Value = match crate::http::client()
@@ -614,8 +726,13 @@ async fn netease_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Err
         .map(|v| v.as_slice())
         .unwrap_or_default();
     // Netease reports track length in milliseconds.
-    let hit =
-        best_by_duration(req.duration, songs, |s| Some(s.get("duration")?.as_f64()? / 1000.0));
+    let hit = best_match(
+        &req.title,
+        req.duration,
+        songs,
+        |s| s.get("name")?.as_str(),
+        |s| Some(s.get("duration")?.as_f64()? / 1000.0),
+    );
     let Some(id) = hit.and_then(|s| s.get("id")).and_then(|v| v.as_u64()) else {
         return Ok(None);
     };
@@ -934,7 +1051,7 @@ fn decode_entities(s: &str) -> String {
 
 /// QQ Music provider
 async fn qqmusic_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
-    let query = format!("{} {}", req.title, req.artists);
+    let query = search_query(req);
     let search_url = format!(
         "https://c.y.qq.com/soso/fcgi-bin/client_search_cp?w={}&format=json",
         urlencoding::encode(&query)
@@ -960,7 +1077,13 @@ async fn qqmusic_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Err
         .map(|v| v.as_slice())
         .unwrap_or_default();
     // QQ reports track length in whole seconds, as `interval`.
-    let hit = best_by_duration(req.duration, songs, |s| s.get("interval")?.as_f64());
+    let hit = best_match(
+        &req.title,
+        req.duration,
+        songs,
+        |s| s.get("songname")?.as_str(),
+        |s| s.get("interval")?.as_f64(),
+    );
     let Some(mid) = hit.and_then(|s| s.get("songmid")).and_then(|v| v.as_str()) else {
         return Ok(None);
     };
@@ -997,7 +1120,7 @@ async fn qqmusic_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Err
 
 /// Kugou provider
 async fn kugou_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
-    let query = format!("{} {}", req.title, req.artists);
+    let query = search_query(req);
     let search_url = format!(
         "https://songsearch.kugou.com/song_search_v2?keyword={}&page=1&pagesize=5",
         urlencoding::encode(&query)
@@ -1017,7 +1140,13 @@ async fn kugou_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error
         .map(|v| v.as_slice())
         .unwrap_or_default();
     // Kugou reports track length in whole seconds, as `Duration`.
-    let hit = best_by_duration(req.duration, songs, |s| s.get("Duration")?.as_f64());
+    let hit = best_match(
+        &req.title,
+        req.duration,
+        songs,
+        |s| s.get("SongName")?.as_str(),
+        |s| s.get("Duration")?.as_f64(),
+    );
     let Some(h) = hit.and_then(|s| s.get("FileHash")).and_then(|v| v.as_str()) else {
         return Ok(None);
     };
@@ -1513,22 +1642,88 @@ mod tests {
     /// Real Kugou/Netease search shapes: the original is not first, and a remix sits inside the
     /// tolerance window, so only closest-match picks the right cut.
     #[test]
-    fn best_by_duration_skips_remixes_and_wrong_cuts() {
-        let secs = |t: &(f64, &str)| Some(t.0);
+    fn best_match_skips_remixes_and_wrong_cuts() {
+        type Hit = (f64, &'static str, &'static str);
+        fn pick(d: Option<f64>, c: &[Hit]) -> Option<&'static str> {
+            best_match("Shape of You", d, c, |t| Some(t.1), |t| Some(t.0)).map(|t| t.2)
+        }
         // Kugou's actual top hit for "Shape of You" is a 263s edit of a 233s song.
-        let kugou = [(263.0, "wrong cut"), (251.0, "dj edit"), (233.0, "original")];
-        assert_eq!(best_by_duration(Some(233.0), &kugou, secs).unwrap().1, "original");
+        let kugou = [
+            (263.0, "Shape of You", "wrong cut"),
+            (251.0, "Shape of You (DJ PULLER版)", "dj edit"),
+            (233.0, "Shape of You", "original"),
+        ];
+        assert_eq!(pick(Some(233.0), &kugou), Some("original"));
         // Netease ranks a 231s remix second; both are within 5s, distance breaks the tie.
-        let netease = [(233.7, "original"), (231.2, "stormzy remix")];
-        assert_eq!(best_by_duration(Some(233.0), &netease, secs).unwrap().1, "original");
+        let netease =
+            [(233.7, "Shape of You", "original"), (231.2, "Shape of You (Remix)", "remix")];
+        assert_eq!(pick(Some(233.0), &netease), Some("original"));
         // Nothing close enough beats a wrong answer.
-        assert!(best_by_duration(Some(233.0), &kugou[..2], secs).is_none());
-        // No length on our side: nothing to check, first hit stands.
-        assert_eq!(best_by_duration(None, &kugou, secs).unwrap().1, "wrong cut");
+        assert_eq!(pick(Some(233.0), &kugou[..2]), None);
+        // No length on our side: nothing to measure, the first same-titled hit stands.
+        assert_eq!(pick(None, &kugou), Some("wrong cut"));
         // A hit with no length of its own still gets used rather than silently dropped.
-        let unknown = [(0.0, "no duration")];
-        let none = |_: &(f64, &str)| None;
-        assert_eq!(best_by_duration(Some(233.0), &unknown, none).unwrap().1, "no duration");
+        let unknown: [Hit; 1] = [(0.0, "Shape of You", "no duration")];
+        let hit = best_match("Shape of You", Some(233.0), &unknown, |t| Some(t.1), |_| None);
+        assert_eq!(hit.map(|t| t.2), Some("no duration"));
+    }
+
+    /// The search that went wrong, as QQ answered it: "và" in the artist line sent it after "Cool
+    /// Kid", and one of those songs is exactly as long as ours. Length alone picked it.
+    #[test]
+    fn a_same_length_stranger_is_not_our_song() {
+        let qq = [
+            (237.0, "Cool Kids"),
+            (153.0, "The Cool Kid"),
+            (192.0, "酷小孩Cool Kid"),
+            (240.0, "50 CUỘC GỌI NHỠ"),
+        ];
+        let title = "Chịu cách mình nói thua";
+        assert!(best_match(title, Some(192.0), &qq, |t| Some(t.1), |t| Some(t.0)).is_none());
+        // The same song under a catalogue's capitals, without its accents, or with an aside.
+        for theirs in [
+            "Chịu Cách Mình Nói Thua",
+            "Chiu Cach Minh Noi Thua",
+            "Chịu Cách Mình Nói Thua (Official Audio)",
+        ] {
+            assert!(same_title(title, theirs), "{theirs}");
+        }
+        assert!(same_title("Shape of You", "<em>Shape</em> of You"));
+        assert!(same_title("告白气球", "告白气球 (Live)"));
+        assert!(!same_title("Go", "Gorgeous"), "a short title has to match outright");
+        assert!(!same_title("Nơi Này Có Anh", ""), "a hit with no title is not trusted");
+    }
+
+    #[test]
+    fn a_catalogue_search_asks_for_the_lead_artist() {
+        assert_eq!(lead_artist("COOLKID, RHYDER và BAN"), "COOLKID");
+        assert_eq!(lead_artist("Sơn Tùng M-TP & Tyga"), "Sơn Tùng M-TP");
+        assert_eq!(lead_artist("Sơn Tùng M-TP và Tyga"), "Sơn Tùng M-TP");
+        assert_eq!(lead_artist("Ed Sheeran"), "Ed Sheeran");
+    }
+
+    /// SimpMusic's spaced rich sync, as it came for "Đừng Làm Trái Tim Anh Đau": spaces around every
+    /// word and a timed run of three between them. Drawn as parsed, every word stood apart.
+    #[test]
+    fn word_spacing_is_one_space_whatever_the_source_did() {
+        let words = |raw: &str| -> Vec<String> {
+            let l = from_parsed("X", parse_rich_sync(raw)).unwrap();
+            l.lines[0].words.as_ref().unwrap().iter().map(|w| w.text.clone()).collect()
+        };
+        assert_eq!(
+            words("[00:43.81] <00:43.81> Uhm, <00:44.20>   <00:44.25> đau <00:44.38>   <00:44.43> hết <00:44.55>"),
+            ["Uhm, ", "đau ", "hết"]
+        );
+        // The compact form was already right and stays so.
+        assert_eq!(
+            words("[00:33.84] <00:33.84>Một <00:34.03>người <00:34.25>nắm"),
+            ["Một ", "người ", "nắm"]
+        );
+        // No spaces in the source, none added.
+        assert_eq!(
+            words("[00:01.00] <00:01.00>我<00:01.30>爱<00:01.60>你<00:02.00>"),
+            ["我", "爱", "你"]
+        );
     }
 
     #[test]
