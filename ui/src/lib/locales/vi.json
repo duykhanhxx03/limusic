@@ -87,6 +87,7 @@
 		"home": "Trang chủ",
 		"search": "Tìm kiếm",
 		"library": "Thư viện",
+		"explore": "Khám phá",
 		"settings": "Cài đặt",
 		"new_playlist": "Danh sách phát mới",
 		"account": "Tài khoản",
@@ -685,6 +686,12 @@
 		"save_rest": "Tải thêm {count} bài",
 		"cancel": "Dừng tải",
 		"saved": "Đã tải"
+	},
+	"explore": {
+		"moods": "Tâm trạng và thể loại",
+		"charts": "Bảng xếp hạng",
+		"country": "Quốc gia của bảng xếp hạng",
+		"no_charts": "YouTube không có bảng xếp hạng cho quốc gia này."
 	},
 	"errors": {
 		"generic_title": "Không tải được nội dung này",

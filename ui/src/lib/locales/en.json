@@ -87,6 +87,7 @@
 		"home": "Home",
 		"search": "Search",
 		"library": "Library",
+		"explore": "Explore",
 		"settings": "Settings",
 		"new_playlist": "New Playlist",
 		"account": "Account",
@@ -685,6 +686,12 @@
 		"save_rest": "Download {count} more",
 		"cancel": "Stop downloading",
 		"saved": "Downloaded"
+	},
+	"explore": {
+		"moods": "Moods & genres",
+		"charts": "Charts",
+		"country": "Chart country",
+		"no_charts": "YouTube publishes no charts for this country."
 	},
 	"errors": {
 		"generic_title": "Couldn't load this",

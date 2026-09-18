@@ -523,3 +523,56 @@ fn find_rows<'a>(root: &'a serde_json::Value, key: &str) -> Vec<&'a serde_json::
     walk(root, key, &mut out);
     out
 }
+
+/// Explore, its moods, and the charts: all three are anonymous browse targets whose shapes are
+/// unlike home's (list rows that are artists, a country menu modelled as a checkbox form), so
+/// this pins them against the live response rather than a fixture that can only ever agree with
+/// the parser that produced it.
+///   cargo test -p innertube --features integration-tests explore_charts_and_moods -- --nocapture
+#[tokio::test]
+async fn explore_charts_and_moods() {
+    let it = InnerTube::new(Session::default(), None).unwrap();
+    let clients = Clients::bundled();
+    let client = clients.get("WEB_REMIX").expect("WEB_REMIX client");
+
+    let explore = it.explore(client).await.expect("explore");
+    eprintln!(
+        "explore: {} moods, sections: {:?}",
+        explore.moods.len(),
+        explore.sections.iter().map(|s| (&s.title, s.items.len())).collect::<Vec<_>>()
+    );
+    assert!(!explore.moods.is_empty(), "no mood chips");
+    assert!(!explore.sections.is_empty(), "no explore shelves");
+
+    // The same buttons, grouped — the moods page is a second request precisely for the groups.
+    let groups = it.moods(client).await.expect("moods");
+    eprintln!("moods: {:?}", groups.iter().map(|g| (&g.title, g.chips.len())).collect::<Vec<_>>());
+    assert!(groups.len() >= 2, "moods page came back ungrouped");
+    let grouped: usize = groups.iter().map(|g| g.chips.len()).sum();
+    assert_eq!(grouped, explore.moods.len(), "the groups and the row disagree on the mood count");
+
+    let mood = &explore.moods[0];
+    let page = it.mood(client, &mood.params).await.expect("mood category");
+    eprintln!("mood {:?}: {} shelves", mood.title, page.sections.len());
+    assert!(!page.sections.is_empty(), "mood {:?} came back empty", mood.title);
+
+    // No country asked for: YouTube picks one from the IP and names it back.
+    let charts = it.charts(client, None).await.expect("charts");
+    eprintln!(
+        "charts({:?}): {} countries, sections: {:?}",
+        charts.selected,
+        charts.countries.len(),
+        charts.sections.iter().map(|s| (&s.title, s.items.len())).collect::<Vec<_>>()
+    );
+    assert!(charts.countries.len() > 30, "country menu looks truncated");
+    assert!(charts.selected.is_some(), "no country reported as selected");
+    assert!(!charts.sections.is_empty(), "no chart shelves");
+
+    // …and asking for one gets that one. Global is the code every region has.
+    let global = it.charts(client, Some("ZZ")).await.expect("global charts");
+    assert_eq!(global.selected.as_deref(), Some("ZZ"), "country choice was ignored");
+    assert!(
+        global.sections.iter().any(|s| s.items.iter().any(|i| i.kind == "artist")),
+        "no artist rows in the global charts — the list-row parse regressed"
+    );
+}

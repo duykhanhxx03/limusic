@@ -4,8 +4,8 @@
 use std::sync::Arc;
 
 use innertube::{
-    AlbumPage, ArtistPage, BrowseItem, HistoryGroup, HomePage, PlaylistContinuation, PlaylistPage,
-    PlaylistSort, Rating, SearchResults, SongItem,
+    AlbumPage, ArtistPage, BrowseItem, ChartsPage, ExplorePage, HistoryGroup, HomePage,
+    PlaylistContinuation, PlaylistPage, PlaylistSort, Rating, SearchResults, SongItem,
 };
 use tauri::{Emitter, State};
 
@@ -178,7 +178,7 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 /// `visitor_data`) and internal blobs (`queue_json`, `queue_index`, `queue_position`) never cross
 /// into the webview: they'd otherwise ship the login credential to the renderer on every open, and
 /// the webview can't overwrite them either.
-const UI_SETTINGS: [&str; 19] = [
+const UI_SETTINGS: [&str; 20] = [
     "volume",
     "proxy",
     "quality",
@@ -198,6 +198,7 @@ const UI_SETTINGS: [&str; 19] = [
     "lyrics_offset_ms",
     "content_country",
     "content_language",
+    "charts_country",
 ];
 
 /// The country (`gl`) and language (`hl`) YouTube Music localizes to, from the two settings. Either
@@ -783,6 +784,55 @@ pub async fn get_home(state: St<'_>, params: Option<String>) -> Result<HomePage,
 pub async fn get_home_more(state: St<'_>, token: String) -> Result<HomePage, String> {
     let client = metadata_client(&state)?;
     state.it.home_continuation(client, &token).await.map_err(|e| e.to_string())
+}
+
+/// The Explore page: mood/genre chips + the region's own shelves. One request, signed out or in.
+#[tauri::command]
+pub async fn get_explore(state: St<'_>) -> Result<ExplorePage, String> {
+    let client = metadata_client(&state)?;
+    state.it.explore(client).await.map_err(|e| e.to_string())
+}
+
+/// The moods page: every mood and genre, in YouTube's own groups.
+#[tauri::command]
+pub async fn get_moods(state: St<'_>) -> Result<Vec<innertube::MoodGroup>, String> {
+    let client = metadata_client(&state)?;
+    state.it.moods(client).await.map_err(|e| e.to_string())
+}
+
+/// One mood/genre category, from an Explore chip's `params`.
+#[tauri::command]
+pub async fn get_mood(state: St<'_>, params: String) -> Result<HomePage, String> {
+    let client = metadata_client(&state)?;
+    state.it.mood(client, &params).await.map_err(|e| e.to_string())
+}
+
+/// The artwork for a mood's card: the cover of the first playlist YouTube files under it.
+///
+/// There is no cheaper source — the buttons YouTube hands out carry a colour and nothing else — so
+/// this is a whole category browse per mood, cached for a month. The UI asks only for the cards a
+/// reader actually scrolls to, which is why this takes one mood rather than the whole page.
+#[tauri::command]
+pub async fn get_mood_cover(state: St<'_>, params: String) -> Result<Option<String>, String> {
+    const MOOD_COVER_TTL: i64 = 30 * 24 * 60 * 60;
+    if let Some(url) = state.db.mood_cover(&params, MOOD_COVER_TTL) {
+        return Ok(Some(url));
+    }
+    let client = metadata_client(&state)?;
+    let page = state.it.mood(client, &params).await.map_err(|e| e.to_string())?;
+    let url = page.sections.iter().flat_map(|s| &s.items).find_map(|i| i.thumbnail.clone());
+    if let Some(url) = &url {
+        state.db.put_mood_cover(&params, url);
+    }
+    Ok(url)
+}
+
+/// The charts for `country` (an ISO code from a previous response's menu, `ZZ` = Global).
+/// `None` lets YouTube pick from the IP and report back which it picked.
+#[tauri::command]
+pub async fn get_charts(state: St<'_>, country: Option<String>) -> Result<ChartsPage, String> {
+    let client = metadata_client(&state)?;
+    state.it.charts(client, country.as_deref()).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]

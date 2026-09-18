@@ -684,6 +684,46 @@ export const getArtist = (id: string) => invoke<ArtistPage>('get_artist', { id }
 export const getBrowseGrid = (id: string, params?: string) =>
 	invoke<BrowseItem[]>('get_browse_grid', { id, params });
 
+/** One of YouTube's mood/genre buttons. `color` is its own stripe colour as 0xRRGGBB. */
+export interface MoodChip {
+	title: string;
+	params: string;
+	color?: number;
+}
+export interface ExplorePage {
+	moods: MoodChip[];
+	sections: HomeSection[];
+}
+/** A country the charts exist for. `code` is ISO 3166 alpha-2; `ZZ` is YouTube's code for Global. */
+export interface ChartCountry {
+	code: string;
+	name: string;
+}
+export interface ChartsPage {
+	countries: ChartCountry[];
+	/** The country these charts are for — YouTube picks one from the IP when none was asked for. */
+	selected?: string;
+	sections: HomeSection[];
+}
+/** One titled grid of the moods page ("Moods & moments", "Genres"). */
+export interface MoodGroup {
+	title: string;
+	chips: MoodChip[];
+}
+export const getExplore = () => invoke<ExplorePage>('get_explore');
+/** Every mood and genre, in YouTube's own groups — the Explore row's "See all". */
+export const getMoods = () => invoke<MoodGroup[]>('get_moods');
+/**
+ * The cover for one mood's card: the artwork of the first playlist filed under it. Costs a whole
+ * category browse the first time and is cached for a month in Rust, so ask only for the cards that
+ * actually come on screen.
+ */
+export const getMoodCover = (params: string) => invoke<string | null>('get_mood_cover', { params });
+/** One mood/genre category, from a chip's `params`. Comes back shaped like the home feed. */
+export const getMood = (params: string) => invoke<HomePage>('get_mood', { params });
+/** The charts for `country` (omit to let YouTube pick from the IP). */
+export const getCharts = (country?: string) => invoke<ChartsPage>('get_charts', { country });
+
 // --- local music (local.rs) ------------------------------------------------------------------
 /** Rescan the watched folders. Cheap when nothing changed (one stat per file). */
 export const getLocalLibrary = () => invoke<LocalLibrary>('get_local_library');

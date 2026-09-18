@@ -5,6 +5,7 @@
 	import {
 		Home01Icon,
 		Search01Icon,
+		Compass01Icon,
 		LibraryIcon,
 		Settings01Icon,
 		Sun01Icon,
@@ -39,6 +40,7 @@
 	const nav = $derived([
 		{ href: '/', label: t('nav.home'), icon: Home01Icon },
 		{ href: '/search', label: t('nav.search'), icon: Search01Icon },
+		{ href: '/explore', label: t('nav.explore'), icon: Compass01Icon },
 		{ href: '/library', label: t('nav.library'), icon: LibraryIcon }
 	]);
 	const isActive = (href: string) =>

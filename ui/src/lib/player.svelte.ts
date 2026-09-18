@@ -58,6 +58,9 @@ export const np = $state({ open: false, tab: 'queue' as 'queue' | 'lyrics' });
  */
 export const prefs = $state({
 	musicVideos: false,
+	/** The country the Explore page's charts are showing, as an ISO code (`ZZ` = Global). Empty
+	 *  means "whatever YouTube picks from the IP", which is what a fresh install wants. */
+	chartsCountry: '',
 	/** Lyrics timing offset in ms. Positive shows each line later, for audio that reaches the ears
 	 *  late (Bluetooth). Only the lyrics clock sees it; the seek bar and seeking do not. */
 	lyricsOffsetMs: 0
@@ -1315,6 +1318,7 @@ export function initApp(mini = false): () => void {
 	api.getSettings()
 		.then((s) => {
 			prefs.musicVideos = s.music_videos === 'true';
+			prefs.chartsCountry = s.charts_country ?? '';
 			const offset = Number.parseInt(s.lyrics_offset_ms ?? '', 10);
 			if (Number.isFinite(offset)) prefs.lyricsOffsetMs = offset;
 		})

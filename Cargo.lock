@@ -2854,6 +2854,7 @@ dependencies = [
 name = "innertube"
 version = "0.10.1"
 dependencies = [
+ "base64 0.22.1",
  "hex",
  "reqwest 0.12.28",
  "rustypipe",

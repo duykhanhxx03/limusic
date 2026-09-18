@@ -5,8 +5,8 @@ use serde::Serialize;
 use crate::blocklist;
 use crate::clients::YouTubeClient;
 use crate::models::browse::{
-    self, AlbumPage, ArtistPage, BrowseItem, HistoryGroup, HomePage, PlaylistContinuation,
-    PlaylistPage, PlaylistSort, SearchResults,
+    self, AlbumPage, ArtistPage, BrowseItem, ChartsPage, ExplorePage, HistoryGroup, HomePage,
+    MoodGroup, PlaylistContinuation, PlaylistPage, PlaylistSort, SearchResults,
 };
 use crate::models::context::Context;
 use crate::models::lyrics::{self, PlainLyrics, TimedLyricLine};
@@ -338,12 +338,7 @@ impl InnerTube {
     ) -> Result<HomePage, Error> {
         let value = self.browse(client, Some("FEmusic_home"), params).await?;
         let mut page = browse::parse_home(&value);
-        for s in &mut page.sections {
-            self.drop_video_cards(&mut s.items);
-            self.drop_blocked_cards(&mut s.items);
-        }
-        // A shelf the filter emptied (an all-videos row) would render as a bare heading.
-        page.sections.retain(|s| !s.items.is_empty());
+        self.clean_sections(&mut page.sections);
         Ok(page)
     }
 
@@ -357,12 +352,79 @@ impl InnerTube {
     ) -> Result<HomePage, Error> {
         let value = self.browse_continuation(client, token).await?;
         let mut page = browse::parse_home(&value);
-        for s in &mut page.sections {
+        self.clean_sections(&mut page.sections);
+        Ok(page)
+    }
+
+    /// The Explore page (`FEmusic_explore`): mood/genre chips plus the region's own shelves
+    /// (Trending, New releases, New music videos). context/08. Works signed out.
+    pub async fn explore(&self, client: &YouTubeClient) -> Result<ExplorePage, Error> {
+        let value = self.browse(client, Some("FEmusic_explore"), None).await?;
+        let mut page = browse::parse_explore(&value);
+        self.clean_sections(&mut page.sections);
+        Ok(page)
+    }
+
+    /// The moods page (`FEmusic_moods_and_genres`): the same buttons Explore carries, but in
+    /// YouTube's own groups ("Moods & moments", "Genres"). context/08.
+    pub async fn moods(&self, client: &YouTubeClient) -> Result<Vec<MoodGroup>, Error> {
+        let value = self.browse(client, Some("FEmusic_moods_and_genres"), None).await?;
+        Ok(browse::parse_moods(&value))
+    }
+
+    /// One mood/genre category (`FEmusic_moods_and_genres_category`), whose `params` comes from an
+    /// [`explore`] chip. The response is carousels of playlists — the home shape, same parser.
+    pub async fn mood(&self, client: &YouTubeClient, params: &str) -> Result<HomePage, Error> {
+        let value =
+            self.browse(client, Some("FEmusic_moods_and_genres_category"), Some(params)).await?;
+        let mut page = browse::parse_home(&value);
+        self.clean_sections(&mut page.sections);
+        Ok(page)
+    }
+
+    /// The charts (`FEmusic_charts`) for one country. context/08.
+    ///
+    /// `country` is an ISO code from the returned menu (`ZZ` = Global) and travels in `formData`,
+    /// not `params`: YouTube models the country picker as a checkbox form, and its menu rows carry
+    /// no browse params to send back. `None` lets YouTube pick from the IP, and the response says
+    /// which it picked.
+    pub async fn charts(
+        &self,
+        client: &YouTubeClient,
+        country: Option<&str>,
+    ) -> Result<ChartsPage, Error> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct SelectedValues {
+            selected_values: Vec<String>,
+        }
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ChartsBody {
+            context: Context,
+            browse_id: &'static str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            form_data: Option<SelectedValues>,
+        }
+        let body = ChartsBody {
+            context: self.context_for(client),
+            browse_id: "FEmusic_charts",
+            form_data: country.map(|c| SelectedValues { selected_values: vec![c.to_owned()] }),
+        };
+        let value = self.post("browse", client, &body, true).await?;
+        let mut page = browse::parse_charts(&value);
+        self.clean_sections(&mut page.sections);
+        Ok(page)
+    }
+
+    /// The two content filters every generated shelf goes through, plus dropping the shelves they
+    /// empty (a shelf with no cards renders as a bare heading).
+    fn clean_sections(&self, sections: &mut Vec<browse::Section>) {
+        for s in sections.iter_mut() {
             self.drop_video_cards(&mut s.items);
             self.drop_blocked_cards(&mut s.items);
         }
-        page.sections.retain(|s| !s.items.is_empty());
-        Ok(page)
+        sections.retain(|s| !s.items.is_empty());
     }
 
     /// Play history (`FEmusic_history`), in YouTube's own date buckets (Today, Yesterday, …).

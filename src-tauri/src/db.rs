@@ -215,6 +215,11 @@ impl Db {
                 etag       TEXT,
                 fetched_at INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS mood_cover (
+                params     TEXT PRIMARY KEY,
+                url        TEXT NOT NULL,
+                fetched_at INTEGER NOT NULL
+            ) WITHOUT ROWID;
             CREATE TABLE IF NOT EXISTS autoeq_curve (
                 path   TEXT PRIMARY KEY,
                 preamp REAL NOT NULL,
@@ -866,6 +871,28 @@ impl Db {
     pub fn autoeq_entry_exists(&self, path: &str) -> bool {
         let conn = self.0.lock().unwrap();
         conn.query_row("SELECT 1 FROM autoeq_entry WHERE path = ?1", [path], |_| Ok(())).is_ok()
+    }
+
+    /// The cached cover for a mood card, if it was fetched inside `max_age` seconds. A mood's
+    /// artwork is the first playlist YouTube files under it, which costs a whole category browse
+    /// to learn — so it is worth keeping, and worth re-checking eventually, because YouTube
+    /// reshuffles what leads a mood.
+    pub fn mood_cover(&self, params: &str, max_age: i64) -> Option<String> {
+        let conn = self.0.lock().unwrap();
+        conn.query_row(
+            "SELECT url FROM mood_cover WHERE params = ?1 AND fetched_at > ?2",
+            rusqlite::params![params, now_secs() - max_age],
+            |r| r.get(0),
+        )
+        .ok()
+    }
+
+    pub fn put_mood_cover(&self, params: &str, url: &str) {
+        let conn = self.0.lock().unwrap();
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO mood_cover(params, url, fetched_at) VALUES(?1, ?2, ?3)",
+            rusqlite::params![params, url, now_secs()],
+        );
     }
 
     pub fn autoeq_curve(&self, path: &str) -> Option<crate::autoeq::Curve> {

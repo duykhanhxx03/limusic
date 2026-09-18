@@ -43,6 +43,26 @@ export const hrefFor = (i: BrowseItem): string =>
 				? `/album/${encodeURIComponent(i.id)}`
 				: `/playlist/${encodeURIComponent(i.id)}`;
 
+/**
+ * Where a shelf's "See all" goes. Most point at a browse grid (`FE…`), which the /list page
+ * renders as a wall of cards; the charts' Trending row points at an actual playlist instead, and
+ * sending that through /list would flatten a 100-track chart into unplayable cards.
+ */
+export function moreHref(section: {
+	title: string;
+	moreBrowseId?: string;
+	moreParams?: string;
+}): string {
+	const id = section.moreBrowseId ?? '';
+	if (id.startsWith('FE')) {
+		const q = new URLSearchParams({ id, title: section.title });
+		if (section.moreParams) q.set('params', section.moreParams);
+		return `/list?${q.toString()}`;
+	}
+	const kind = /^(VL)?MPRE/.test(id) ? 'album' : id.startsWith('UC') ? 'artist' : 'playlist';
+	return hrefFor({ kind, id, title: section.title } as BrowseItem);
+}
+
 /** Primary click: a song plays, everything else opens its page. */
 export function openItem(item: BrowseItem): void {
 	// A click counts as "used" for Shortcuts eviction wherever the item was rendered. No-op unless

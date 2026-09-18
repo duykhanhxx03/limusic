@@ -317,6 +317,17 @@ pub fn parse_home(root: &Value) -> HomePage {
             Some(HomeChip { title, params })
         })
         .collect();
+    HomePage {
+        chips,
+        sections: carousel_sections(root, parse_carousel_item),
+        continuation: continuation_token(root),
+    }
+}
+
+/// Every `musicCarouselShelfRenderer` in a response as a titled row, with its "More" target. The
+/// card parser is a parameter because the same shelf shape holds different rows on different
+/// surfaces: home carousels are cards and songs, the charts' are cards and *artists*.
+fn carousel_sections(root: &Value, item: fn(&Value) -> Option<BrowseItem>) -> Vec<Section> {
     let mut sections = Vec::new();
     for shelf in find_all(root, "musicCarouselShelfRenderer") {
         let header = find_all(shelf, "musicCarouselShelfBasicHeaderRenderer").into_iter().next();
@@ -324,7 +335,7 @@ pub fn parse_home(root: &Value) -> HomePage {
         let items: Vec<BrowseItem> = shelf
             .get("contents")
             .and_then(Value::as_array)
-            .map(|c| c.iter().filter_map(parse_carousel_item).collect())
+            .map(|c| c.iter().filter_map(item).collect())
             .unwrap_or_default();
         if !items.is_empty() {
             let more = header
@@ -337,7 +348,166 @@ pub fn parse_home(root: &Value) -> HomePage {
             sections.push(Section { title, items, more_browse_id, more_params });
         }
     }
-    HomePage { chips, sections, continuation: continuation_token(root) }
+    sections
+}
+
+/// One of the coloured mood/genre buttons on the Explore page (`musicNavigationButtonRenderer`).
+/// `params` fed to `FEmusic_moods_and_genres_category` returns that mood's playlist carousels.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoodChip {
+    pub title: String,
+    pub params: String,
+    /// YouTube's own stripe colour for the chip, as 0xRRGGBB (its alpha byte dropped). Kept so the
+    /// row looks like YouTube's, where the colour is the only thing telling two genres apart.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<u32>,
+}
+
+/// The Explore page: the mood/genre chips plus whatever shelves YouTube puts on it for the
+/// region (Trending, New releases, New music videos).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorePage {
+    pub moods: Vec<MoodChip>,
+    pub sections: Vec<Section>,
+}
+
+/// One entry of the charts country menu. `code` is the ISO country YouTube wants back in
+/// `formData.selectedValues` — `ZZ` is its code for Global.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChartCountry {
+    pub code: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChartsPage {
+    pub countries: Vec<ChartCountry>,
+    /// The country this page is actually for, as a `countries` code. Asked for nothing, YouTube
+    /// picks one from the IP, so this is the only way to know which.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selected: Option<String>,
+    pub sections: Vec<Section>,
+}
+
+/// One titled grid of the moods page ("Moods & moments", "Genres").
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoodGroup {
+    pub title: String,
+    pub chips: Vec<MoodChip>,
+}
+
+/// Parse a `FEmusic_moods_and_genres` response: the same buttons as Explore's row, but split into
+/// YouTube's own groups, which is the whole reason for the extra request. context/08.
+pub fn parse_moods(root: &Value) -> Vec<MoodGroup> {
+    find_all(root, "gridRenderer")
+        .into_iter()
+        .filter_map(|grid| {
+            let title = find_all(grid, "gridHeaderRenderer")
+                .into_iter()
+                .next()
+                .and_then(|h| runs_text(h.get("title")))?;
+            let chips = parse_mood_chips(grid.get("items")?);
+            (!chips.is_empty()).then_some(MoodGroup { title, chips })
+        })
+        .collect()
+}
+
+/// Parse a `FEmusic_explore` response. context/08.
+pub fn parse_explore(root: &Value) -> ExplorePage {
+    ExplorePage {
+        moods: parse_mood_chips(root),
+        sections: carousel_sections(root, parse_carousel_item),
+    }
+}
+
+/// The mood/genre buttons of an explore-ish response (`FEmusic_explore` carries the same 37 as
+/// `FEmusic_moods_and_genres`, so the chips cost no second request).
+fn parse_mood_chips(root: &Value) -> Vec<MoodChip> {
+    find_all(root, "musicNavigationButtonRenderer")
+        .into_iter()
+        .filter_map(|b| {
+            let endpoint = b.get("clickCommand")?.get("browseEndpoint")?;
+            // Only the category buttons: the same renderer draws the "New releases" / "Charts"
+            // shortcuts at the top of the page, which are pages of their own.
+            if endpoint.get("browseId")?.as_str()? != "FEmusic_moods_and_genres_category" {
+                return None;
+            }
+            Some(MoodChip {
+                title: runs_text(b.get("buttonText"))?,
+                params: endpoint.get("params")?.as_str()?.to_owned(),
+                color: b
+                    .get("solid")
+                    .and_then(|s| s.get("leftStripeColor"))
+                    .and_then(Value::as_u64)
+                    .map(|c| (c & 0x00FF_FFFF) as u32),
+            })
+        })
+        .collect()
+}
+
+/// Parse a `FEmusic_charts` response: the country menu plus the chart shelves. context/08.
+pub fn parse_charts(root: &Value) -> ChartsPage {
+    // The selected country appears twice — once as the menu's current value, once in the list
+    // itself — so the same code arrives twice and a UI keyed on it would break. Keep the first.
+    let mut seen = std::collections::HashSet::new();
+    let countries: Vec<ChartCountry> = find_all(root, "musicMultiSelectMenuItemRenderer")
+        .into_iter()
+        .filter_map(|it| {
+            Some(ChartCountry {
+                code: country_code(&find_first_str(it, "formItemEntityKey")?)?,
+                name: runs_text(it.get("title"))?,
+            })
+        })
+        .filter(|c| seen.insert(c.code.clone()))
+        .collect();
+    // The menu marks nothing as current; the filter button above it is labelled with the country
+    // the page is showing, so the name it carries is what identifies the selected row.
+    let selected = find_all(root, "musicSortFilterButtonRenderer")
+        .into_iter()
+        .find_map(|b| runs_text(b.get("title")))
+        .and_then(|name| countries.iter().find(|c| c.name == name).map(|c| c.code.clone()));
+    ChartsPage { countries, selected, sections: carousel_sections(root, parse_chart_item) }
+}
+
+/// A charts row. Unlike a home carousel, whose list rows are always songs, the charts' are
+/// artists (and, in some countries, podcast shows — which this app has no page for).
+fn parse_chart_item(node: &Value) -> Option<BrowseItem> {
+    if has_page_type(node, "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE") {
+        return None;
+    }
+    if let Some(tr) = node.get("musicTwoRowItemRenderer") {
+        return parse_two_row_item(tr);
+    }
+    node.get("musicResponsiveListItemRenderer").and_then(list_item_to_browse_item)
+}
+
+fn has_page_type(node: &Value, page_type: &str) -> bool {
+    find_all(node, "browseEndpointContextMusicConfig")
+        .into_iter()
+        .any(|c| c.get("pageType").and_then(Value::as_str) == Some(page_type))
+}
+
+/// The ISO country out of a charts menu row's `formItemEntityKey`, which is a url-safe base64
+/// protobuf reading `…explore_charts_country_menu_<digits><CC>…`. YouTube publishes the code
+/// nowhere else in the response, and the menu is the only list of the countries that *have* a
+/// chart (70 of them), so it is worth digging out rather than shipping a guessed list.
+fn country_code(key: &str) -> Option<String> {
+    let key = urlencoding::decode(key).ok()?;
+    let raw = base64::Engine::decode(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+        key.trim_end_matches('='),
+    )
+    .ok()?;
+    let text = String::from_utf8_lossy(&raw);
+    let tail = text.split("country_menu_").nth(1)?;
+    let code: String =
+        tail.trim_start_matches(|c: char| c.is_ascii_digit()).chars().take(2).collect();
+    code.chars().all(|c| c.is_ascii_uppercase()).then_some(code)
 }
 
 /// One date bucket of the play history ("Today", "Yesterday", "This week"). context/08.
@@ -2036,5 +2206,142 @@ mod tests {
         let root = json!({ "musicPlaylistShelfRenderer": { "contents": [] } });
         assert!(sort_menu(&root).is_none());
         assert!(parse_playlist(&root).sort_menu.is_none());
+    }
+    /// The charts' list rows are artists, not songs — the home carousel parser reads every list
+    /// row as a track and would drop the whole "Top artists" shelf on the floor. Podcast shows
+    /// ride the same shelf shape in some countries and this app has no page for them.
+    #[test]
+    fn parses_chart_artists_and_drops_podcasts() {
+        let artist = |name: &str, id: &str| {
+            json!({ "musicResponsiveListItemRenderer": {
+                "flexColumns": [
+                    { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [{ "text": name }] } } },
+                    { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [{ "text": "1.2M subscribers" }] } } }
+                ],
+                "navigationEndpoint": { "browseEndpoint": {
+                    "browseId": id,
+                    "browseEndpointContextSupportedConfigs": { "browseEndpointContextMusicConfig": {
+                        "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                    } }
+                } }
+            } })
+        };
+        let podcast = json!({ "musicResponsiveListItemRenderer": {
+            "flexColumns": [
+                { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [{ "text": "A Show" }] } } }
+            ],
+            "navigationEndpoint": { "browseEndpoint": {
+                "browseId": "UCshow",
+                "browseEndpointContextSupportedConfigs": { "browseEndpointContextMusicConfig": {
+                    "pageType": "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE"
+                } }
+            } }
+        } });
+        let root = json!({ "contents": { "sectionListRenderer": { "contents": [
+            { "musicCarouselShelfRenderer": {
+                "header": { "musicCarouselShelfBasicHeaderRenderer": {
+                    "title": { "runs": [{ "text": "Top artists" }] }
+                } },
+                "contents": [artist("First", "UCone"), artist("Second", "UCtwo")]
+            } },
+            { "musicCarouselShelfRenderer": {
+                "header": { "musicCarouselShelfBasicHeaderRenderer": {
+                    "title": { "runs": [{ "text": "Weekly top podcast shows" }] }
+                } },
+                "contents": [podcast]
+            } }
+        ] } } });
+        let page = parse_charts(&root);
+        assert_eq!(page.sections.len(), 1, "the podcast shelf empties and goes");
+        assert_eq!(page.sections[0].title, "Top artists");
+        assert_eq!(page.sections[0].items.len(), 2);
+        assert_eq!(page.sections[0].items[0].kind, "artist");
+        assert_eq!(page.sections[0].items[0].id, "UCone");
+    }
+
+    /// The only place the charts publish a country's code is inside the base64 entity key of its
+    /// menu row; the selected one is named by the filter button above the menu.
+    #[test]
+    fn reads_the_chart_countries_and_the_selected_one() {
+        let country = |name: &str, key: &str| {
+            json!({ "musicMultiSelectMenuItemRenderer": {
+                "title": { "runs": [{ "text": name }] },
+                "formItemEntityKey": key
+            } })
+        };
+        let root = json!({
+            "header": { "musicSortFilterButtonRenderer": {
+                "title": { "runs": [{ "text": "Vietnam" }] }
+            } },
+            "contents": [
+                country("Vietnam", "EidleHBsb3JlX2NoYXJ0c19jb3VudHJ5X21lbnVfMzE2NzY2NTY3Vk4gkQEoAQ%3D%3D"),
+                // YouTube repeats the selected country: once as the menu's value, once in the list.
+                country("Vietnam", "EidleHBsb3JlX2NoYXJ0c19jb3VudHJ5X21lbnVfMzE2NzY2NTY3Vk4gkQEoAQ%3D%3D"),
+                country("Global", "EidleHBsb3JlX2NoYXJ0c19jb3VudHJ5X21lbnVfMzE2NzY2NTY3WlogkQEoAQ%3D%3D"),
+                // Nothing to decode a code out of — skipped rather than shown as a dead option.
+                country("Nowhere", "not-base64-at-all")
+            ]
+        });
+        let page = parse_charts(&root);
+        let codes: Vec<&str> = page.countries.iter().map(|c| c.code.as_str()).collect();
+        assert_eq!(codes, ["VN", "ZZ"]);
+        assert_eq!(page.selected.as_deref(), Some("VN"));
+    }
+
+    /// The moods page is the same buttons in YouTube's groups; a grid with no buttons in it (the
+    /// page header's own grid) is not a group.
+    #[test]
+    fn groups_the_moods_page() {
+        let button = |text: &str| {
+            json!({ "musicNavigationButtonRenderer": {
+                "buttonText": { "runs": [{ "text": text }] },
+                "clickCommand": { "browseEndpoint": {
+                    "browseId": "FEmusic_moods_and_genres_category", "params": "ggMP"
+                } }
+            } })
+        };
+        let grid = |title: &str, items: Vec<Value>| {
+            json!({ "gridRenderer": {
+                "header": { "gridHeaderRenderer": { "title": { "runs": [{ "text": title }] } } },
+                "items": items
+            } })
+        };
+        let root = json!({ "contents": [
+            grid("Moods & moments", vec![button("Chill"), button("Focus")]),
+            grid("Genres", vec![button("Blues")]),
+            grid("Empty", vec![])
+        ] });
+        let groups = parse_moods(&root);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].title, "Moods & moments");
+        assert_eq!(groups[0].chips.len(), 2);
+        assert_eq!(groups[1].chips[0].title, "Blues");
+    }
+
+    /// Explore's chips and its page shortcuts are the same renderer; only the category ones carry
+    /// a mood to open.
+    #[test]
+    fn keeps_only_the_mood_buttons() {
+        let button = |text: &str, id: &str, params: Option<&str>| {
+            let mut endpoint = json!({ "browseId": id });
+            if let Some(p) = params {
+                endpoint["params"] = json!(p);
+            }
+            json!({ "musicNavigationButtonRenderer": {
+                "buttonText": { "runs": [{ "text": text }] },
+                "solid": { "leftStripeColor": 4288988671u64 },
+                "clickCommand": { "browseEndpoint": endpoint }
+            } })
+        };
+        let root = json!({ "contents": [
+            button("New releases", "FEmusic_new_releases", None),
+            button("Chill", "FEmusic_moods_and_genres_category", Some("ggMPOg1uX1JOQWZFeDByc2Jm"))
+        ] });
+        let page = parse_explore(&root);
+        assert_eq!(page.moods.len(), 1);
+        assert_eq!(page.moods[0].title, "Chill");
+        assert_eq!(page.moods[0].params, "ggMPOg1uX1JOQWZFeDByc2Jm");
+        // Alpha dropped: the UI wants a CSS colour, not YouTube's ARGB word.
+        assert_eq!(page.moods[0].color, Some(0xA4_C5FF));
     }
 }
