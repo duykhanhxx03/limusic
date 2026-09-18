@@ -488,12 +488,21 @@ export const setSleepTimer = (minutes: number) => invoke<void>('set_sleep_timer'
 /** Cancel it. Safe when nothing is running. */
 export const clearSleepTimer = () => invoke<void>('clear_sleep_timer');
 
-/** When the music stops, as unix ms, or null. Count down from this rather than asking repeatedly. */
-export const sleepTimer = () => invoke<number | null>('sleep_timer');
+/** Stop the music at the end of the track playing now. Replaces any timer already running. */
+export const setSleepTimerEndOfTrack = () => invoke<void>('set_sleep_timer_end_of_track');
 
-/** Fires whenever the deadline changes — armed, cancelled, or reached. */
-export const onSleepTimer = (fn: (deadline: number | null) => void) =>
-	listen<number | null>('sleep-timer', (e) => fn(e.payload));
+/** A deadline (unix ms), or the end of the current track, or neither. */
+export interface SleepStatus {
+	deadline: number | null;
+	endOfTrack: boolean;
+}
+
+/** When the music stops. Count down from this rather than asking repeatedly. */
+export const sleepTimer = () => invoke<SleepStatus>('sleep_timer');
+
+/** Fires whenever the timer changes — armed, cancelled, or reached. */
+export const onSleepTimer = (fn: (status: SleepStatus) => void) =>
+	listen<SleepStatus>('sleep-timer', (e) => fn(e.payload));
 
 /** Drop the backend's memory of this track's video URL, after the element failed to load it. */
 export const forgetVideoStream = (videoId: string) =>

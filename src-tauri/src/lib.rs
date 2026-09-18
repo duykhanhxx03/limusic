@@ -33,7 +33,7 @@ pub const APP_NAME: &str = "YouTube Music ++";
 use std::sync::Arc;
 use std::time::Duration;
 
-use innertube::{Clients, InnerTube, Locale, Session};
+use innertube::{Clients, InnerTube, Session};
 use player::{Player, PlayerEvent};
 use tauri::{Emitter, Manager};
 
@@ -358,7 +358,8 @@ pub fn run() {
             // Session bootstrap (context/15 startup ordering): load the persisted login session
             // (cookie/dataSyncId/visitorData) from settings; fetch visitorData anonymously
             // (context/04 §A) only if we've never stored one.
-            let proxy = db.get_setting("proxy");
+            // Blank is "no proxy": Settings saves the trimmed field, so clearing it stores "".
+            let proxy = db.get_setting("proxy").map(|p| p.trim().to_owned()).filter(|p| !p.is_empty());
             let cookie = db.get_setting("session_cookie").filter(|s| !s.is_empty());
             let data_sync_id = state::persisted_data_sync_id(&db);
             let visitor_data = db.get_setting("visitor_data").filter(|s| !s.is_empty());
@@ -371,8 +372,17 @@ pub fn run() {
             }
 
             let visitor_for_prewarm = visitor_data.clone();
-            let session = Session { locale: Locale::default(), visitor_data, data_sync_id, cookie };
-            let it = InnerTube::new(session, proxy.as_deref()).expect("build InnerTube");
+            let locale = commands::content_locale(&db);
+            let session = Session { locale, visitor_data, data_sync_id, cookie };
+            // A proxy reqwest can't parse used to panic here, on every launch from then on, with no
+            // way back into Settings to fix it. Start without it and say so in the log instead.
+            let it = match InnerTube::new(session.clone(), proxy.as_deref()) {
+                Ok(it) => it,
+                Err(e) => {
+                    tracing::error!(error = %e, proxy = ?proxy, "proxy setting rejected, starting without a proxy");
+                    InnerTube::new(session, None).expect("build InnerTube")
+                }
+            };
             it.set_hide_videos(db.get_setting("hide_videos").as_deref() == Some("true"));
             // Read while `db` is still ours; the window is decorated further down, once the rest of
             // the setup that could fail is out of the way.
@@ -438,6 +448,9 @@ pub fn run() {
                 media,
             ));
             app.manage(app_state.clone());
+            // A previous run that never got to quit cleanly (a shutdown with music playing) left
+            // its last listen checkpointed; write it before anything new starts.
+            app_state.recover_listen();
 
             // The player view's <video> pulls its bytes from Rust over loopback, so the webview
             // never sees a googlevideo URL (context/11). videoproxy.rs explains why a socket and
@@ -653,6 +666,7 @@ pub fn run() {
             commands::autoeq_curve,
             commands::set_sleep_timer,
             commands::clear_sleep_timer,
+            commands::set_sleep_timer_end_of_track,
             commands::sleep_timer,
             commands::forget_video_stream,
             commands::get_settings,
@@ -759,6 +773,13 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { .. } = &event {
                 kill_web_processes(handle);
             }
+            // The song playing at quit is still a listen; it would otherwise only be written when
+            // the next track started, which never happens.
+            if let tauri::RunEvent::Exit = &event {
+                if let Some(state) = handle.try_state::<Arc<AppState>>() {
+                    state.flush_listen();
+                }
+            }
             // The hidden cipher/PoToken webviews are windows too, so closing the main window no
             // longer auto-exits the app. Quit when the main window is destroyed.
             if let tauri::RunEvent::WindowEvent {
@@ -840,10 +861,12 @@ fn spawn_event_pump(
                         let _ = app.emit("position", serde_json::json!({ "position": p }));
                     }
                     state.on_position(p).await;
+                    sleep::on_position(&state, p);
                 }
                 PlayerEvent::Duration(d) => {
                     let _ = app.emit("duration", serde_json::json!({ "duration": d }));
                     state.on_duration(d).await;
+                    sleep::on_duration(&state, d);
                 }
                 PlayerEvent::Playing(playing) => {
                     let _ = app.emit("playback-state", if playing { "playing" } else { "paused" });

@@ -20,6 +20,26 @@ use crate::state::AppState;
 
 pub use imp::{init, set_icon, set_playing};
 
+/// What the tray names the track: "Title — Artist", cut short enough for a menu row.
+pub fn now_playing_label(title: &str, artists: &str) -> String {
+    const MAX: usize = 60;
+    let full = if artists.trim().is_empty() {
+        title.trim().to_owned()
+    } else {
+        format!("{} — {}", title.trim(), artists.trim())
+    };
+    if full.chars().count() <= MAX {
+        return full;
+    }
+    let cut: String = full.chars().take(MAX - 1).collect();
+    format!("{}…", cut.trim_end())
+}
+
+/// The track now playing, shown as the tray's tooltip and the first (inert) menu row.
+pub fn set_now_playing(app: &AppHandle, title: &str, artists: &str) {
+    imp::set_now_playing(app, now_playing_label(title, artists));
+}
+
 /// Bring the main window back from close-to-tray, minimize, or the mini player. Every "come back"
 /// path — tray menu, tray click, second launch, the widget's restore button — goes through here so
 /// they can't drift apart.
@@ -105,6 +125,8 @@ mod imp {
         app: AppHandle,
         playing: bool,
         icon: Vec<Icon>,
+        /// "Title — Artist" of the current track, empty before anything has played.
+        now_playing: String,
     }
 
     impl Tray for LimusicTray {
@@ -120,6 +142,14 @@ mod imp {
             self.icon.clone()
         }
 
+        fn tool_tip(&self) -> ksni::ToolTip {
+            ksni::ToolTip {
+                title: crate::APP_NAME.into(),
+                description: self.now_playing.clone(),
+                ..Default::default()
+            }
+        }
+
         /// The entire reason this backend exists: Plasma dispatches a left-click here.
         fn activate(&mut self, _x: i32, _y: i32) {
             show_main(&self.app);
@@ -133,7 +163,16 @@ mod imp {
                     ..Default::default()
                 })
             };
-            vec![
+            let mut rows = Vec::new();
+            if !self.now_playing.is_empty() {
+                rows.push(MenuItem::from(StandardItem {
+                    label: self.now_playing.clone(),
+                    enabled: false,
+                    ..Default::default()
+                }));
+                rows.push(MenuItem::Separator);
+            }
+            rows.extend([
                 item(&format!("Show {}", crate::APP_NAME), "show"),
                 MenuItem::Separator,
                 item(if self.playing { "Pause" } else { "Play" }, "play_pause"),
@@ -142,7 +181,8 @@ mod imp {
                 MenuItem::Separator,
                 item("Restart", "restart"),
                 item("Quit", "quit"),
-            ]
+            ]);
+            rows
         }
     }
 
@@ -157,7 +197,8 @@ mod imp {
 
     pub fn init(app: &AppHandle) -> tauri::Result<()> {
         let icon = crate::appicon::current(app).map(|i| icon_pixmap(&i)).unwrap_or_default();
-        let tray = LimusicTray { app: app.clone(), playing: false, icon };
+        let tray =
+            LimusicTray { app: app.clone(), playing: false, icon, now_playing: String::new() };
         // Registering with the StatusNotifierWatcher is async and can outlive setup(); a failure
         // here costs the tray, not the app, so it's logged rather than propagated.
         tauri::async_runtime::spawn(async move {
@@ -175,6 +216,13 @@ mod imp {
         let Some(handle) = HANDLE.get() else { return };
         tauri::async_runtime::spawn(async move {
             handle.update(|t| t.playing = playing).await;
+        });
+    }
+
+    pub fn set_now_playing(_app: &AppHandle, label: String) {
+        let Some(handle) = HANDLE.get() else { return };
+        tauri::async_runtime::spawn(async move {
+            handle.update(|t| t.now_playing = label).await;
         });
     }
 
@@ -198,6 +246,7 @@ mod imp {
     /// Managed handle to the live-label item so the mpv event pump can flip "Play"/"Pause".
     struct TrayState {
         play_pause: MenuItem<Wry>,
+        now_playing: MenuItem<Wry>,
     }
 
     pub fn init(app: &AppHandle) -> tauri::Result<()> {
@@ -209,6 +258,9 @@ mod imp {
             None::<&str>,
         )?;
         let play_pause = MenuItem::with_id(app, "play_pause", "Play", true, None::<&str>)?;
+        // Inert: a label, not an action. Names the app until a track starts.
+        let now_playing =
+            MenuItem::with_id(app, "now_playing", crate::APP_NAME, false, None::<&str>)?;
         let next = MenuItem::with_id(app, "next", "Next", true, None::<&str>)?;
         let prev = MenuItem::with_id(app, "prev", "Previous", true, None::<&str>)?;
         let restart = MenuItem::with_id(app, "restart", "Restart", true, None::<&str>)?;
@@ -216,6 +268,8 @@ mod imp {
         let menu = Menu::with_items(
             app,
             &[
+                &now_playing,
+                &PredefinedMenuItem::separator(app)?,
                 &show,
                 &PredefinedMenuItem::separator(app)?,
                 &play_pause,
@@ -244,7 +298,7 @@ mod imp {
         }
         builder.build(app)?;
 
-        app.manage(TrayState { play_pause });
+        app.manage(TrayState { play_pause, now_playing });
         Ok(())
     }
 
@@ -254,9 +308,36 @@ mod imp {
         }
     }
 
+    pub fn set_now_playing(app: &AppHandle, label: String) {
+        if let Some(t) = app.try_state::<TrayState>() {
+            let _ = t.now_playing.set_text(&label);
+        }
+        if let Some(tray) = app.tray_by_id("main") {
+            let _ = tray.set_tooltip(Some(format!("{}\n{label}", crate::APP_NAME)));
+        }
+    }
+
     pub fn set_icon(app: &AppHandle, icon: &tauri::image::Image<'_>) {
         if let Some(tray) = app.tray_by_id("main") {
             let _ = tray.set_icon(Some(icon.clone()));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::now_playing_label;
+
+    #[test]
+    fn the_tray_label_names_the_track_and_fits_a_menu() {
+        assert_eq!(
+            now_playing_label("Espresso", "Sabrina Carpenter"),
+            "Espresso — Sabrina Carpenter"
+        );
+        assert_eq!(now_playing_label(" Intro ", ""), "Intro");
+        let long = now_playing_label(&"ư".repeat(80), "Artist");
+        // Counted in characters, not bytes: a Vietnamese title must not be cut mid-character.
+        assert_eq!(long.chars().count(), 60);
+        assert!(long.ends_with('…'));
     }
 }

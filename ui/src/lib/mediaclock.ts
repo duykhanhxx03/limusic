@@ -90,6 +90,14 @@ export class MediaClock {
 		return 'steady';
 	}
 
+	/** Forget everything, so the next report sets the clock outright. For a jump the reports can't
+	 *  show: the lyrics offset moving by less than [`RESET`] would otherwise read as a late or early
+	 *  sample and be filtered away. */
+	reset(): void {
+		this.primed = false;
+		this.recent = [];
+	}
+
 	/** The estimated media position at `now` (a `performance.now()` value), in seconds. */
 	valueAt(now: number): number {
 		if (this.paused) return this.frozenAt;

@@ -253,6 +253,12 @@ impl InnerTube {
         self.session.write().unwrap().visitor_data = vd;
     }
 
+    /// The country and language every request asks for: what charts, recommendations and shelf
+    /// titles are localized to. Applies from the next request on.
+    pub fn set_locale(&self, locale: Locale) {
+        self.session.write().unwrap().locale = locale;
+    }
+
     /// Build the request `context` for a client from the current session. Crate-internal — the
     /// endpoints facade calls it. Reads and drops the lock synchronously (no `.await` inside).
     pub(crate) fn context_for(&self, client: &YouTubeClient) -> crate::models::context::Context {

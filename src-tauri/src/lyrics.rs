@@ -1,5 +1,9 @@
 //! Lyrics fetching. Provider chain (plan `graceful-kindling`):
 //!
+//! 0. **SimpMusic Lyrics** (`api-lyrics.simpmusic.org`) → looked up by the YouTube videoId itself,
+//!    so there is no title/artist/length guessing at all, and most entries are word-synced. First
+//!    for both reasons, and behind the `lyrics_simpmusic` setting for the same reason Boidu is:
+//!    first means it sees every track played.
 //! 1. **Boidu** (`lyrics-api.boidu.dev`) → word-level timings, which nothing else here returns and
 //!    the karaoke sweep needs. First because of that, and behind the `lyrics_boidu` setting
 //!    because first also means it sees every track played.
@@ -159,6 +163,17 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
             Err(e) => tracing::warn!(provider = only, error = %e, "pinned: failed"),
         }
         return (hit.ok().flatten(), false);
+    }
+
+    // 0. SimpMusic Lyrics, keyed by the videoId: an exact answer for this very upload, where every
+    //    provider below is matching a title and a length and can land on another cut. A local
+    //    file has no videoId to look up.
+    if !crate::local::is_local_song(&req.video_id)
+        && state.db.get_setting("lyrics_simpmusic").as_deref() != Some("false")
+    {
+        if let Ok(Some(l)) = simpmusic_get(req).await {
+            return (Some(l), true);
+        }
     }
 
     // 1. Boidu, ahead of LRCLIB because it is the only provider here that returns word-level
@@ -632,20 +647,289 @@ async fn netease_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Err
             lines = lrc_mux(lines, klines);
         }
         if let Some(tlrc) = tlyric_str {
-            let tlines = parse_lrc(tlrc);
-            for l in &mut lines {
-                if let Some(t_time) = l.time_ms {
-                    if let Some(tl) = tlines.iter().find(|t| t.time_ms == Some(t_time)) {
-                        if !tl.text.trim().is_empty() {
-                            l.translation = Some(tl.text.clone());
-                        }
-                    }
-                }
-            }
+            attach_translations(&mut lines, &parse_lrc(tlrc));
         }
         return Ok(from_parsed("Netease Cloud Music", lines));
     }
     Ok(None)
+}
+
+/// How far a translation line's cue may sit from the original line it belongs to.
+const TRANSLATION_SLACK_MS: u64 = 1000;
+
+/// Put each translation line under the original line it translates, or none at all.
+///
+/// Matched to the nearest unused original line within a second, not on an identical cue: Netease
+/// often writes the translation's timestamps a few centiseconds off the lyric's, and an exact match
+/// silently dropped those. But a translation file can also be out of step with the lyric it came
+/// with, timed against another cut, and then the nearest line is the wrong line. So the whole set is
+/// refused when more than a quarter of its lines find no partner: a translation under the wrong
+/// line reads as broken, and none reads as a song that simply has no translation. SimpMusic applies
+/// the same 1 s / 25% rule before it trusts a translation.
+fn attach_translations(lines: &mut [LyricLine], translations: &[LyricLine]) -> bool {
+    let wanted: Vec<(u64, &str)> = translations
+        .iter()
+        .filter_map(|t| Some((t.time_ms?, t.text.trim())))
+        .filter(|(_, text)| !text.is_empty())
+        .collect();
+    if wanted.is_empty() {
+        return false;
+    }
+    let mut taken = vec![false; lines.len()];
+    let mut pairs = Vec::with_capacity(wanted.len());
+    for &(t, text) in &wanted {
+        let best = lines
+            .iter()
+            .enumerate()
+            .filter(|(i, l)| !taken[*i] && !l.text.trim().is_empty())
+            .filter_map(|(i, l)| Some((i, l.time_ms?.abs_diff(t))))
+            .filter(|(_, d)| *d <= TRANSLATION_SLACK_MS)
+            .min_by_key(|(_, d)| *d);
+        if let Some((i, _)) = best {
+            taken[i] = true;
+            pairs.push((i, text));
+        }
+    }
+    let missed = wanted.len() - pairs.len();
+    if missed * 4 > wanted.len() {
+        tracing::debug!(missed, of = wanted.len(), "lyrics: translation out of step, dropped");
+        return false;
+    }
+    for (i, text) in pairs {
+        lines[i].translation = Some(text.to_owned());
+    }
+    true
+}
+
+// --- SimpMusic Lyrics (https://github.com/maxrave-dev/lyrics) -------------------------------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SimpMusicEntry {
+    #[serde(default)]
+    synced_lyrics: Option<String>,
+    #[serde(default)]
+    rich_sync_lyrics: Option<String>,
+    #[serde(default)]
+    plain_lyric: Option<String>,
+    #[serde(default)]
+    duration_seconds: Option<f64>,
+    #[serde(default)]
+    vote: i64,
+}
+
+/// `GET /v1/{videoId}`. A 404 is a definitive "no entry"; everything else that isn't lyrics is
+/// transport trouble, reported as `Err` so it isn't cached as a miss.
+///
+/// The database is crowd-sourced, so an entry is checked before it is shown: its length has to be
+/// within tolerance of the track (when both are known), and among several entries for one video the
+/// most up-voted wins.
+async fn simpmusic_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
+    #[derive(Deserialize)]
+    struct Resp {
+        #[serde(default)]
+        data: Vec<SimpMusicEntry>,
+    }
+    let url = format!("https://api-lyrics.simpmusic.org/v1/{}", urlencoding::encode(&req.video_id));
+    let resp = crate::http::client()
+        .get(url)
+        .header("User-Agent", LRCLIB_UA)
+        .timeout(Duration::from_secs(8))
+        .send()
+        .await?;
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    let body: Resp = resp.error_for_status()?.json().await?;
+    let ours = req.duration.filter(|d| *d > 0.0);
+    let hit = body
+        .data
+        .into_iter()
+        .filter(|e| match (ours, e.duration_seconds.filter(|d| *d > 0.0)) {
+            (Some(a), Some(b)) => (a - b).abs() <= MATCH_TOLERANCE_SECS,
+            _ => true,
+        })
+        .max_by_key(|e| e.vote);
+    Ok(hit.and_then(|e| simpmusic_to_lyrics(&e)))
+}
+
+/// Word-synced over line-synced over plain, whichever the entry actually carries.
+fn simpmusic_to_lyrics(e: &SimpMusicEntry) -> Option<Lyrics> {
+    const SOURCE: &str = "SimpMusic Lyrics";
+    let present =
+        |s: &Option<String>| s.as_deref().filter(|s| !s.trim().is_empty()).map(str::to_owned);
+    if let Some(rich) = present(&e.rich_sync_lyrics) {
+        if let Some(l) = from_parsed(SOURCE, clean_lines(parse_rich_sync(&rich))) {
+            return Some(l);
+        }
+    }
+    if let Some(lrc) = present(&e.synced_lyrics) {
+        let lines = parse_lrc(&decode_entities(&lrc));
+        if let Some(l) = from_parsed(SOURCE, clean_lines(lines)) {
+            return Some(l);
+        }
+    }
+    plain_from_text(present(&e.plain_lyric).map(|p| decode_entities(&p)).as_deref(), SOURCE)
+}
+
+/// SimpMusic's word-synced format, one line per lyric line:
+///
+/// ```text
+/// [00:07.12] <00:07.12>Baby, <00:08.22>you <00:08.74>can <00:10.44>lights
+/// [00:09.544]v1:<00:09.544>If <00:09.768>you <00:11.711>
+/// ```
+///
+/// Each `<t>` is when the word *after* it starts; a trailing `<t>` with no word is when the last one
+/// ends. That is the opposite of how `parse_elrc` reads a tag (as the end of the text before it),
+/// so it gets its own parser rather than a flag on that one. `v1:` is a singer marker and is
+/// dropped. A last word with no closing tag ends where the next line starts.
+fn parse_rich_sync(text: &str) -> Vec<LyricLine> {
+    let mut lines = Vec::new();
+    for raw in text.lines() {
+        let Some(line) = parse_lrc(raw).into_iter().next() else { continue };
+        let Some(start) = line.time_ms else { continue };
+        let body = strip_voice_marker(&line.text);
+        let mut words: Vec<LyricWord> = Vec::new();
+        let mut plain = String::new();
+        let mut rest = body;
+        let mut pending: Option<u64> = None;
+        let mut closed_at: Option<u64> = None;
+        loop {
+            let tag = rest.find('<').and_then(|open| {
+                let close = rest[open..].find('>')? + open;
+                Some((open, close, parse_lrc_time(&rest[open + 1..close])?))
+            });
+            let (text_end, next) = match tag {
+                Some((open, close, t)) => (open, Some((close, t))),
+                None => (rest.len(), None),
+            };
+            // Entities are decoded per chunk, after the tags are split off: decoding the whole line
+            // first would turn a `&lt;` in the lyric into a `<` that reads as the start of a tag.
+            let chunk = decode_entities(&rest[..text_end]);
+            if !chunk.is_empty() {
+                plain.push_str(&chunk);
+                match pending.take() {
+                    Some(at) => words.push(LyricWord { text: chunk, start_ms: at, end_ms: at }),
+                    // Text ahead of the first tag belongs to the line's own cue.
+                    None if words.is_empty() && !chunk.trim().is_empty() => {
+                        words.push(LyricWord { text: chunk, start_ms: start, end_ms: start })
+                    }
+                    None => {
+                        if let Some(w) = words.last_mut() {
+                            w.text.push_str(&chunk);
+                        }
+                    }
+                }
+            }
+            let Some((close, t)) = next else { break };
+            // A word's end is the next word's start.
+            if let Some(w) = words.last_mut() {
+                if w.end_ms <= w.start_ms {
+                    w.end_ms = t.max(w.start_ms);
+                }
+            }
+            if rest[close + 1..].trim().is_empty() {
+                closed_at = Some(t);
+            }
+            pending = Some(t);
+            rest = &rest[close + 1..];
+        }
+        let text = plain.trim().to_owned();
+        let has_words = words.len() > 1 || closed_at.is_some();
+        lines.push(LyricLine {
+            time_ms: Some(start),
+            end_time_ms: closed_at,
+            text,
+            words: has_words.then_some(words),
+            translation: None,
+        });
+    }
+    lines.sort_by_key(|l| l.time_ms);
+    // Words still open at the end of their line run to the next line's cue, or a beat past their
+    // start at the end of the song.
+    let next_starts: Vec<Option<u64>> =
+        (0..lines.len()).map(|i| lines.get(i + 1).and_then(|n| n.time_ms)).collect();
+    for (line, next) in lines.iter_mut().zip(next_starts) {
+        if let Some(words) = &mut line.words {
+            if let Some(last) = words.last_mut() {
+                if last.end_ms <= last.start_ms {
+                    last.end_ms =
+                        next.filter(|n| *n > last.start_ms).unwrap_or(last.start_ms + 600);
+                }
+            }
+        }
+    }
+    lines
+}
+
+/// `v1:` / `v2:` ahead of a line's first tag: which singer has the line. Nothing here draws that.
+fn strip_voice_marker(s: &str) -> &str {
+    let t = s.trim_start();
+    match t.split_once(':') {
+        Some((v, rest))
+            if v.len() <= 3 && v.starts_with('v') && v[1..].chars().all(|c| c.is_ascii_digit()) =>
+        {
+            rest
+        }
+        _ => s,
+    }
+}
+
+/// Community-synced lyrics carry the syncer's signature as a lyric line ("Synced by Noob.exe" at
+/// 00:00). It isn't part of the song, and as the first line it would be what the view opens on.
+fn clean_lines(lines: Vec<LyricLine>) -> Vec<LyricLine> {
+    lines.into_iter().filter(|l| !is_credit_line(&l.text)).collect()
+}
+
+fn is_credit_line(text: &str) -> bool {
+    let t = text.trim().to_lowercase();
+    ["synced by", "sync by", "lyrics synced by", "timed by", "transcribed by", "lyrics by"]
+        .iter()
+        .any(|p| t.starts_with(p))
+}
+
+/// The HTML entities community lyrics arrive with (`don&#x27;t`, `&amp;`). Unknown entities are
+/// left as written.
+fn decode_entities(s: &str) -> String {
+    if !s.contains('&') {
+        return s.to_owned();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(amp) = rest.find('&') {
+        out.push_str(&rest[..amp]);
+        let after = &rest[amp..];
+        let decoded = after.find(';').filter(|end| *end <= 10).and_then(|end| {
+            let name = &after[1..end];
+            let ch = match name {
+                "amp" => Some('&'),
+                "lt" => Some('<'),
+                "gt" => Some('>'),
+                "quot" => Some('"'),
+                "apos" => Some('\''),
+                "nbsp" => Some(' '),
+                _ => name
+                    .strip_prefix("#x")
+                    .or_else(|| name.strip_prefix("#X"))
+                    .and_then(|h| u32::from_str_radix(h, 16).ok())
+                    .or_else(|| name.strip_prefix('#').and_then(|d| d.parse().ok()))
+                    .and_then(char::from_u32),
+            }?;
+            Some((ch, end))
+        });
+        match decoded {
+            Some((ch, end)) => {
+                out.push(ch);
+                rest = &after[end + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = &after[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// QQ Music provider
@@ -1248,6 +1532,107 @@ mod tests {
     }
 
     #[test]
+    fn simpmusic_rich_sync_times_each_word_from_its_own_tag() {
+        let rich = "[00:00.00] Synced by Noob.exe\n\
+            [00:07.12] <00:07.12>Baby, <00:08.22>don&#x27;t <00:08.74>lights\n\
+            [00:09.544]v1:<00:09.544>If <00:09.768>you <00:11.711>\n\
+            [00:12.00] \n\
+            [00:13.00] <00:13.00>a &lt;b&gt; <00:13.50>c";
+        let entry = SimpMusicEntry {
+            synced_lyrics: None,
+            rich_sync_lyrics: Some(rich.into()),
+            plain_lyric: None,
+            duration_seconds: Some(200.0),
+            vote: 0,
+        };
+        let l = simpmusic_to_lyrics(&entry).unwrap();
+        assert!(l.synced);
+        // The syncer's signature is gone; the empty gap line stays.
+        assert_eq!(l.lines.len(), 4);
+
+        let first = &l.lines[0];
+        assert_eq!(first.text, "Baby, don't lights");
+        let w = first.words.as_ref().unwrap();
+        assert_eq!(w.len(), 3);
+        // Each word starts at its own tag and ends where the next one starts.
+        assert_eq!((w[0].text.as_str(), w[0].start_ms, w[0].end_ms), ("Baby, ", 7120, 8220));
+        assert_eq!((w[1].text.as_str(), w[1].start_ms, w[1].end_ms), ("don't ", 8220, 8740));
+        // The last word has no closing tag, so it runs to the next line's cue.
+        assert_eq!((w[2].start_ms, w[2].end_ms), (8740, 9544));
+
+        let voiced = &l.lines[1];
+        assert_eq!(voiced.text, "If you");
+        let w = voiced.words.as_ref().unwrap();
+        assert_eq!((w[1].start_ms, w[1].end_ms), (9768, 11711));
+        assert_eq!(voiced.end_time_ms, Some(11711));
+
+        assert_eq!(l.lines[2].text, "");
+        // An entity that decodes to `<` is lyric text, not a tag.
+        assert_eq!(l.lines[3].text, "a <b> c");
+    }
+
+    #[test]
+    fn simpmusic_falls_back_from_word_to_line_to_plain() {
+        let mut e = SimpMusicEntry {
+            synced_lyrics: Some("[00:01.00] one\n[00:02.00] two &amp; three".into()),
+            rich_sync_lyrics: Some("   ".into()),
+            plain_lyric: Some("plain".into()),
+            duration_seconds: None,
+            vote: 0,
+        };
+        let l = simpmusic_to_lyrics(&e).unwrap();
+        assert!(l.synced && l.lines[1].words.is_none());
+        assert_eq!(l.lines[1].text, "two & three");
+        e.synced_lyrics = None;
+        let l = simpmusic_to_lyrics(&e).unwrap();
+        assert!(!l.synced);
+        assert_eq!(l.source, "SimpMusic Lyrics");
+    }
+
+    #[test]
+    fn helpers_for_community_lyrics() {
+        assert_eq!(strip_voice_marker("v1:<00:01.00>hi"), "<00:01.00>hi");
+        assert_eq!(strip_voice_marker("<00:01.00>v1: no"), "<00:01.00>v1: no");
+        assert_eq!(strip_voice_marker("Verse: words"), "Verse: words");
+        assert!(is_credit_line("  Lyrics synced by someone"));
+        assert!(!is_credit_line("Synchronized hearts"));
+        assert_eq!(
+            decode_entities("a &#39;b&#x27; &unknown; & c &#128512;"),
+            "a 'b' &unknown; & c 😀"
+        );
+    }
+
+    #[test]
+    fn translations_attach_to_the_nearest_line_or_not_at_all() {
+        let lines = || {
+            vec![
+                LyricLine::simple(Some(1000), "one".into()),
+                LyricLine::simple(Some(5000), "two".into()),
+                LyricLine::simple(Some(9000), "three".into()),
+                LyricLine::simple(Some(13000), "four".into()),
+            ]
+        };
+        // A few centiseconds off each cue still pairs, where an exact match found nothing.
+        let mut l = lines();
+        let close = parse_lrc("[00:01.04]un\n[00:04.97]deux\n[00:09.02]trois\n[00:13.30]quatre");
+        assert!(attach_translations(&mut l, &close));
+        assert_eq!(l[1].translation.as_deref(), Some("deux"));
+        assert_eq!(l[3].translation.as_deref(), Some("quatre"));
+
+        // One stray line out of four is tolerated (exactly 25%)...
+        let mut l = lines();
+        let one_off = parse_lrc("[00:01.00]un\n[00:05.00]deux\n[00:09.00]trois\n[00:20.00]quatre");
+        assert!(attach_translations(&mut l, &one_off));
+        assert!(l[3].translation.is_none());
+
+        // ...but a translation timed against another cut is refused whole.
+        let mut l = lines();
+        let shifted = parse_lrc("[00:03.00]un\n[00:07.00]deux\n[00:11.00]trois\n[00:15.00]quatre");
+        assert!(!attach_translations(&mut l, &shifted));
+        assert!(l.iter().all(|x| x.translation.is_none()));
+    }
+
+    #[test]
     fn lrc_mux_combines_lines_and_word_sources() {
         let primary = vec![LyricLine::simple(Some(10000), "Hello world".into())];
         let word_source = vec![LyricLine {
@@ -1316,5 +1701,11 @@ mod tests {
         // provider's 8s timeout and fail the run.
         let boidu = boidu_get(&req).await.unwrap().expect("Boidu hit");
         assert!(boidu.lines.iter().any(|l| l.words.is_some()));
+
+        // SimpMusic Lyrics looks up by videoId, so it needs a real one: Dua Lipa, "Levitating".
+        let sm = LyricsRequest { video_id: "OsfAnsMY21M".into(), duration: Some(203.0), ..req };
+        let sm = simpmusic_get(&sm).await.unwrap().expect("SimpMusic Lyrics hit");
+        println!("SimpMusic Lyrics: {} lines, synced={}", sm.lines.len(), sm.synced);
+        assert!(sm.lines.iter().any(|l| l.words.is_some()));
     }
 }

@@ -178,7 +178,7 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 /// `visitor_data`) and internal blobs (`queue_json`, `queue_index`, `queue_position`) never cross
 /// into the webview: they'd otherwise ship the login credential to the renderer on every open, and
 /// the webview can't overwrite them either.
-const UI_SETTINGS: [&str; 15] = [
+const UI_SETTINGS: [&str; 19] = [
     "volume",
     "proxy",
     "quality",
@@ -194,7 +194,32 @@ const UI_SETTINGS: [&str; 15] = [
     "music_videos",
     "sticky_shuffle",
     "system_titlebar",
+    "lyrics_simpmusic",
+    "lyrics_offset_ms",
+    "content_country",
+    "content_language",
 ];
+
+/// The country (`gl`) and language (`hl`) YouTube Music localizes to, from the two settings. Either
+/// one unset or malformed keeps YouTube's default for it (US, English), which is what every request
+/// sent before the settings existed.
+pub fn content_locale(db: &crate::db::Db) -> innertube::Locale {
+    let mut locale = innertube::Locale::default();
+    // An ISO 3166 alpha-2 code, as YouTube expects it.
+    if let Some(gl) = db
+        .get_setting("content_country")
+        .filter(|c| c.len() == 2 && c.chars().all(|ch| ch.is_ascii_alphabetic()))
+    {
+        locale.gl = gl.to_ascii_uppercase();
+    }
+    // A short BCP-47 tag: `vi`, `pt-BR`, `zh-TW`.
+    if let Some(hl) = db.get_setting("content_language").filter(|l| {
+        (2..=8).contains(&l.len()) && l.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+    }) {
+        locale.hl = hl;
+    }
+    locale
+}
 
 /// Resolve the music video for `video_id` and hand back a `limusicvideo://` URL the player view
 /// can put in a `<video src>`. `None` when YouTube has no usable video stream for it, which is the
@@ -426,11 +451,19 @@ pub fn clear_sleep_timer(state: St<'_>) -> Result<(), String> {
     Ok(())
 }
 
-/// When the music stops, as unix milliseconds, or `None`. The UI counts down from this rather than
-/// being ticked, so a window that opened late (the mini player) can ask once and draw the rest.
+/// Stop the music at the end of the track playing now. Replaces any timer already running.
 #[tauri::command]
-pub fn sleep_timer(state: St<'_>) -> Option<i64> {
-    state.sleep_timer.deadline()
+pub fn set_sleep_timer_end_of_track(state: St<'_>) -> Result<(), String> {
+    crate::sleep::set_end_of_track(state.inner());
+    Ok(())
+}
+
+/// When the music stops: a deadline in unix milliseconds, or the end of the current track, or
+/// neither. The UI counts down from this rather than being ticked, so a window that opened late
+/// (the mini player) can ask once and draw the rest.
+#[tauri::command]
+pub fn sleep_timer(state: St<'_>) -> crate::sleep::Status {
+    crate::sleep::status(&state)
 }
 
 /// Who draws the window frame, as the SPA needs to know it (issue #65). Read-only, derived: the
@@ -478,8 +511,13 @@ pub async fn set_setting(
     }
     // Cached lyrics outlive the setting that produced them, so a track fetched while Boidu was on
     // would keep its word timings (and one fetched while off would never gain them) forever.
-    if key == "lyrics_boidu" {
+    if key == "lyrics_boidu" || key == "lyrics_simpmusic" {
         state.db.clear_lyrics_cache();
+    }
+    // Every request from here on asks for the new country and language. What is already on screen
+    // was localized for the old one; the UI drops its page cache and reloads.
+    if key == "content_country" || key == "content_language" {
+        state.it.set_locale(content_locale(&state.db));
     }
     // Hand the frame back to the compositor (or take it again). macOS is not on this path: its
     // titlebar style is fixed at window creation, so the setting is hidden there.

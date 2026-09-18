@@ -132,6 +132,19 @@
 		if (arriving && !leaving) mainEl.scrollTop = homeScroll;
 		else if (leaving && !arriving) mainEl.scrollTop = 0;
 	});
+	/** A click on a link to the page already open (Home in the sidebar while on Home) navigates
+	 *  nowhere, so it scrolls that page back to the top instead: the tab-bar habit from every
+	 *  mobile app, and the quickest way back up a long feed. */
+	function scrollToTopOnSamePage(e: MouseEvent) {
+		if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+		const a = (e.target as Element | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
+		if (!a || !mainEl || a.target === '_blank') return;
+		const url = new URL(a.href, location.href);
+		if (url.origin !== location.origin) return;
+		if (url.pathname !== page.url.pathname || url.search !== page.url.search) return;
+		if (mainEl.scrollTop > 0) mainEl.scrollTo({ top: 0, behavior: 'smooth' });
+	}
+
 	// The custom app icon (#173) is a file on disk, so the titlebar has to ask Rust for it.
 	if (browser) loadAppIcon();
 
@@ -171,6 +184,7 @@
 <!-- oncontextmenu: the app's own menus handle their right-click and stop the event, so anything
      that reaches the window is a place where WebKit would have offered back / reload / inspect.
      Text fields and selections keep the native menu (see `suppressNative`). -->
+<svelte:document onclick={scrollToTopOnSamePage} />
 <svelte:window
 	ondragover={blockForeignDrag}
 	ondrop={blockForeignDrag}

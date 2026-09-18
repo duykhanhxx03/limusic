@@ -285,7 +285,8 @@
 			"updates": "Updates",
 			"report": "Report a problem",
 			"whats_new": "What's new",
-			"support": "Support"
+			"support": "Support",
+			"content": "Content"
 		},
 		"general": {
 			"language": "Interface language",
@@ -303,7 +304,11 @@
 			"proxy_hint": "Route all network requests through a custom proxy server.",
 			"proxy_placeholder": "http://host:port (blank = none)",
 			"stream_clients": "Stream clients",
-			"stream_clients_hint": "Turn a client off to skip it when resolving streams. Overridden by the {var} env var."
+			"stream_clients_hint": "Turn a client off to skip it when resolving streams. Overridden by the {var} env var.",
+			"content_country": "Country",
+			"content_country_hint": "Charts, recommendations and what YouTube Music shows on Home are for this country.",
+			"content_language": "Content language",
+			"content_language_hint": "The language YouTube Music uses for shelf titles, moods and descriptions. Separate from the interface language."
 		},
 		"themes": {
 			"accent_themes": "Accent Themes",
@@ -373,7 +378,11 @@
 			"blocked_artists_show_less": "Show less",
 			"blocked_artists_copy": "Copy JSON",
 			"lyrics_provider": "Synchronized lyrics (Boidu/LRCLIB)",
-			"lyrics_provider_hint": "Fetch community-synced lyrics for active songs."
+			"lyrics_provider_hint": "Fetch community-synced lyrics for active songs.",
+			"lyrics_simpmusic": "SimpMusic Lyrics",
+			"lyrics_simpmusic_hint": "Look up lyrics by the exact video first, often with word-by-word timing. Each track's video ID is sent to api-lyrics.simpmusic.org.",
+			"lyrics_offset": "Lyrics timing",
+			"lyrics_offset_hint": "If lines light up before you hear them, as with Bluetooth headphones, show them later. Also in the lyrics panel."
 		},
 		"data": {
 			"clear_cache": "Clear image and stream cache",
@@ -511,7 +520,12 @@
 	"lyrics": {
 		"title": "Lyrics",
 		"instrumental": "Instrumental",
-		"none_found": "No lyrics found for this track."
+		"none_found": "No lyrics found for this track.",
+		"source": "Lyrics from {source}",
+		"offset": "Lyrics timing",
+		"offset_earlier": "Show lyrics earlier",
+		"offset_later": "Show lyrics later",
+		"offset_reset": "Reset to 0"
 	},
 	"queue": {
 		"title": "Queue"
@@ -599,7 +613,8 @@
 		"custom": "Custom length",
 		"custom_placeholder": "Minutes",
 		"set": "Set",
-		"off": "Turn off"
+		"off": "Turn off",
+		"end_of_track": "End of this song"
 	},
 	"quality": {
 		"kbps": "kbps",
@@ -670,5 +685,11 @@
 		"save_rest": "Download {count} more",
 		"cancel": "Stop downloading",
 		"saved": "Downloaded"
+	},
+	"errors": {
+		"generic_title": "Couldn't load this",
+		"offline_title": "You're offline",
+		"offline_desc": "Check your connection and try again. Music you've downloaded still plays.",
+		"offline_downloads": "Downloaded music"
 	}
 }

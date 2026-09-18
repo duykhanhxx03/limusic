@@ -63,6 +63,9 @@ pub struct AppState {
     /// stalled the event pump behind `emit_queue`, `persist_queue` and `prime_lookahead` for
     /// nothing.
     history_pinged: AtomicBool,
+    /// The listen in progress, for the permanent listening history (`play_event`). Accumulated on
+    /// position ticks and written when the next track starts or the app exits.
+    listen: std::sync::Mutex<Option<Listen>>,
     /// Mirror of mpv's pause flag (set in `media_set_playing`). Position ticks must consult this
     /// instead of assuming "playing" — mpv fires `time-pos` on seeks while paused too.
     is_playing: AtomicBool,
@@ -382,6 +385,7 @@ impl AppState {
             queue: Mutex::new(QueueState::default()),
             auth: tokio::sync::Mutex::default(),
             history_pinged: AtomicBool::new(false),
+            listen: std::sync::Mutex::new(None),
             is_playing: AtomicBool::new(false),
             audio_quality: std::sync::Mutex::new(std::collections::HashMap::new()),
             download_gen: std::sync::atomic::AtomicU64::new(0),
@@ -1608,6 +1612,7 @@ impl AppState {
             q.duration = 0.0;
         }
         if let Some(item) = self.current_item().await {
+            self.begin_listen(&item);
             self.emit_now_playing(&item, "gapless");
             // Same as `start_current`: an autoplay-appended track carries no rating of its own.
             self.refresh_rating(&item.video_id, gen);
@@ -1796,6 +1801,7 @@ impl AppState {
                 }
             }
         }
+        self.begin_listen(&item);
         self.emit_now_playing(&item, &data.stream_client);
         // The rating just emitted is whatever the row was parsed with, which for a search result
         // or a radio track is nothing at all (issue #93). Ask.
@@ -2036,6 +2042,7 @@ impl AppState {
 
     fn emit_now_playing(&self, item: &SongItem, stream_client: &str) {
         let _ = self.app.emit("now-playing", self.now_playing_json(item, stream_client));
+        crate::tray::set_now_playing(&self.app, &item.title, &item.artists);
         let _ = self.app.emit("playback-state", "playing");
         // Push the same metadata to the OS media widget (context/16).
         if let Some(m) = &self.media {
@@ -2214,6 +2221,7 @@ impl AppState {
     /// gated on the `enable_history` setting + being logged in. Best-effort (errors logged).
     pub async fn on_position(&self, pos: f64) {
         self.record_position(pos);
+        self.accumulate_listen(pos);
         // Latched: nothing below can fire again for this play, so don't queue up behind the
         // queue mutex on every tick just to be told so. See `AppState::history_pinged`.
         if self.history_pinged.load(Ordering::Relaxed) {
@@ -2279,6 +2287,9 @@ impl AppState {
     /// Latest mpv-reported track duration (secs), feeding the history-ping threshold + OS scrubber.
     pub async fn on_duration(&self, secs: f64) {
         if secs.is_finite() && secs > 0.0 {
+            if let Some(l) = self.listen.lock().unwrap().as_mut() {
+                l.duration_ms = Some((secs * 1000.0) as i64);
+            }
             self.queue.lock().await.duration = secs;
             if let Some(m) = &self.media {
                 m.set_duration(secs);
@@ -2593,6 +2604,92 @@ impl AppState {
     }
 
     /// Flush the latest known position to the DB immediately (e.g. on pause).
+    /// A new play of `item` has started: write the previous listen to the history and open one for
+    /// this track. Called wherever a fresh play begins (a start and a gapless advance).
+    fn begin_listen(&self, item: &SongItem) {
+        let previous = self.listen.lock().unwrap().replace(Listen {
+            item: item.clone(),
+            started_at: now_secs(),
+            listened_ms: 0.0,
+            last_pos: None,
+            duration_ms: None,
+            checkpointed_at: 0,
+        });
+        if let Some(l) = previous {
+            self.write_listen(l);
+        }
+    }
+
+    /// Write the listen in progress, if any, and close it. For app exit: without it the last song
+    /// before quitting is never counted.
+    pub fn flush_listen(&self) {
+        let open = self.listen.lock().unwrap().take();
+        if let Some(l) = open {
+            self.write_listen(l);
+        }
+    }
+
+    /// Add the time between two position ticks to the open listen, when it was playback: ticks
+    /// that jump (a seek) or arrive while paused (mpv reports seeks while paused too) add nothing.
+    fn accumulate_listen(&self, pos: f64) {
+        let playing = self.is_playing.load(Ordering::Relaxed);
+        let mut guard = self.listen.lock().unwrap();
+        let Some(l) = guard.as_mut() else { return };
+        if let Some(last) = l.last_pos {
+            let delta = pos - last;
+            // A tick is a fraction of a second at 1×; 3 s allows for speed and a slow pump.
+            if playing && delta > 0.0 && delta < 3.0 {
+                l.listened_ms += delta * 1000.0;
+            }
+        }
+        l.last_pos = Some(pos);
+        let now = now_secs();
+        if playing && now - l.checkpointed_at >= 10 {
+            l.checkpointed_at = now;
+            if let Ok(json) = serde_json::to_string(&*l) {
+                self.db.set_setting(LISTEN_CHECKPOINT, &json);
+            }
+        }
+    }
+
+    /// Write the listen a previous run left open (see [`LISTEN_CHECKPOINT`]). Call once at startup,
+    /// before anything plays.
+    pub fn recover_listen(&self) {
+        let Some(raw) = self.db.get_setting(LISTEN_CHECKPOINT) else { return };
+        self.db.delete_setting(LISTEN_CHECKPOINT);
+        match serde_json::from_str::<Listen>(&raw) {
+            Ok(l) => self.write_listen(l),
+            Err(e) => tracing::debug!(error = %e, "listening history: unreadable checkpoint"),
+        }
+    }
+
+    fn write_listen(&self, l: Listen) {
+        // Whatever happens next, this listen is settled: a stale checkpoint must not write it again.
+        self.db.delete_setting(LISTEN_CHECKPOINT);
+        // Under five seconds is a track skipped past, not listened to.
+        if l.listened_ms < 5_000.0 {
+            return;
+        }
+        let Ok(song_json) = serde_json::to_string(&l.item) else { return };
+        let mut artist_ids: Vec<String> =
+            l.item.artist_runs.iter().filter_map(|r| r.id.clone()).collect();
+        if artist_ids.is_empty() {
+            artist_ids.extend(l.item.artist_id.clone());
+        }
+        let ev = crate::db::PlayEvent {
+            video_id: l.item.video_id.clone(),
+            started_at: l.started_at,
+            listened_ms: l.listened_ms as i64,
+            duration_ms: l.duration_ms,
+            album_id: l.item.album_id.clone(),
+            artist_ids,
+            song_json,
+        };
+        if let Err(e) = self.db.record_play_event(&ev) {
+            tracing::warn!(error = %e, "listening history: could not record a play");
+        }
+    }
+
     pub fn flush_position(&self) {
         let pos = f64::from_bits(self.latest_position.load(Ordering::SeqCst));
         self.db.set_setting("queue_position", &pos.to_string());
@@ -3393,6 +3490,26 @@ fn persist_fingerprint(q: &QueueState) -> u64 {
     q.source_name.hash(&mut hasher);
     q.radio.hash(&mut hasher);
     hasher.finish()
+}
+
+/// Settings row holding the listen in progress, rewritten every few seconds of playback. A quit that
+/// never reaches `RunEvent::Exit` (logging out or shutting down with music playing, a crash) would
+/// otherwise lose the song that was on; the next launch writes this instead.
+const LISTEN_CHECKPOINT: &str = "listen_checkpoint";
+
+/// A play in progress, for the listening history. See `AppState::listen`.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Listen {
+    item: SongItem,
+    /// Unix seconds, UTC.
+    started_at: i64,
+    /// Playback time accumulated from position ticks.
+    listened_ms: f64,
+    last_pos: Option<f64>,
+    duration_ms: Option<i64>,
+    /// Unix seconds of the last checkpoint write.
+    #[serde(skip)]
+    checkpointed_at: i64,
 }
 
 #[cfg(test)]

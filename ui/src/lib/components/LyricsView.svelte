@@ -20,9 +20,10 @@
 	import { untrack } from 'svelte';
 	import { fade, scale } from 'svelte/transition';
 	import * as api from '$lib/api';
-	import { playback } from '$lib/player.svelte';
+	import { playback, prefs } from '$lib/player.svelte';
 	import { t } from '$lib/i18n.svelte';
 	import { MediaClock } from '$lib/mediaclock';
+	import LyricsOffset from './LyricsOffset.svelte';
 	import { durationSecs, lyricsFor, peekLyrics, watchingLyrics } from '$lib/prefetch.svelte';
 
 	// `expanded` only sizes the type and centres the column. The owner of the extra room (the side
@@ -145,15 +146,22 @@
 	const clock = new MediaClock();
 
 	let lastReportAt = -1;
+	let lastOffset = 0;
 	$effect(() => {
-		const position = playback.position;
+		// The lyrics offset shifts the clock the lyrics read, not the playback it follows: a line cued
+		// at T lights up when the audio reaches T + offset. Seeking still goes to the cue itself.
+		const offset = prefs.lyricsOffsetMs / 1000;
+		const position = playback.position - offset;
 		const at = playback.positionAt;
 		const speed = playback.speed;
 		const paused = playback.paused;
 		untrack(() => {
 			const now = performance.now();
-			const fresh = at !== lastReportAt;
+			const shifted = offset !== lastOffset;
+			lastOffset = offset;
+			const fresh = at !== lastReportAt || shifted;
 			lastReportAt = at;
+			if (shifted) clock.reset();
 			if (fresh) {
 				clock.feed({ position, at: at || now, speed, paused });
 			} else if (paused !== clock.isPaused || speed !== clock.rate) {
@@ -741,9 +749,24 @@
 	{/if}
 </div>
 {#if lyrics && !loading && !compact}
-	<p class="px-4 py-2 text-xs text-muted-foreground">
-		{lyrics.source.startsWith('Source:') ? lyrics.source : `Lyrics from ${lyrics.source}`}
-	</p>
+	<!-- The offset control sits with the attribution: both are about where these lyrics came from
+	     and how well they fit. It stays out of the way until the pointer is there, and stays shown
+	     while it is set to anything but zero, so a shifted view never looks like a sync bug. -->
+	<div class="group/lyrfoot flex min-h-10 items-center justify-between gap-3 px-4 py-1.5 text-xs text-muted-foreground">
+		<p class="min-w-0 truncate">
+			{lyrics.source.startsWith('Source:') ? lyrics.source : t('lyrics.source', { source: lyrics.source })}
+		</p>
+		{#if lyrics.synced && !lyrics.instrumental}
+			<div
+				class="shrink-0 transition-opacity duration-[var(--duration-fast)] focus-within:opacity-100 group-hover/lyrfoot:opacity-100 {prefs.lyricsOffsetMs ===
+				0
+					? 'opacity-0'
+					: ''}"
+			>
+				<LyricsOffset size="sm" />
+			</div>
+		{/if}
+	</div>
 {/if}
 
 <style>

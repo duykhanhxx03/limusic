@@ -285,7 +285,8 @@
 			"updates": "Cập nhật",
 			"report": "Báo lỗi",
 			"whats_new": "Có gì mới",
-			"support": "Ủng hộ"
+			"support": "Ủng hộ",
+			"content": "Nội dung"
 		},
 		"general": {
 			"language": "Ngôn ngữ giao diện",
@@ -303,7 +304,11 @@
 			"proxy_hint": "Định tuyến mọi yêu cầu mạng qua một máy chủ proxy tuỳ chọn.",
 			"proxy_placeholder": "http://host:port (để trống = không dùng)",
 			"stream_clients": "Client lấy luồng",
-			"stream_clients_hint": "Tắt một client để bỏ qua nó khi phân giải luồng. Bị ghi đè bởi biến môi trường {var}."
+			"stream_clients_hint": "Tắt một client để bỏ qua nó khi phân giải luồng. Bị ghi đè bởi biến môi trường {var}.",
+			"content_country": "Quốc gia",
+			"content_country_hint": "Bảng xếp hạng, gợi ý và những gì YouTube Music hiện ở Trang chủ sẽ theo quốc gia này.",
+			"content_language": "Ngôn ngữ nội dung",
+			"content_language_hint": "Ngôn ngữ YouTube Music dùng cho tên các mục, tâm trạng và mô tả. Không phụ thuộc ngôn ngữ giao diện."
 		},
 		"themes": {
 			"accent_themes": "Chủ đề màu nhấn",
@@ -373,7 +378,11 @@
 			"blocked_artists_show_less": "Thu gọn",
 			"blocked_artists_copy": "Sao chép JSON",
 			"lyrics_provider": "Lời bài hát đồng bộ (Boidu/LRCLIB)",
-			"lyrics_provider_hint": "Lấy lời bài hát do cộng đồng đồng bộ cho bài đang phát."
+			"lyrics_provider_hint": "Lấy lời bài hát do cộng đồng đồng bộ cho bài đang phát.",
+			"lyrics_simpmusic": "SimpMusic Lyrics",
+			"lyrics_simpmusic_hint": "Tìm lời theo đúng video trước, thường có thời gian theo từng chữ. ID video của mỗi bài sẽ được gửi tới api-lyrics.simpmusic.org.",
+			"lyrics_offset": "Thời gian lời bài hát",
+			"lyrics_offset_hint": "Nếu lời sáng lên trước khi bạn nghe thấy, như với tai nghe Bluetooth, hãy cho hiện muộn hơn. Cũng chỉnh được trong khung lời bài hát."
 		},
 		"data": {
 			"clear_cache": "Xoá bộ nhớ đệm ảnh và luồng",
@@ -511,7 +520,12 @@
 	"lyrics": {
 		"title": "Lời bài hát",
 		"instrumental": "Nhạc không lời",
-		"none_found": "Không tìm thấy lời cho bài này."
+		"none_found": "Không tìm thấy lời cho bài này.",
+		"source": "Lời bài hát từ {source}",
+		"offset": "Thời gian lời bài hát",
+		"offset_earlier": "Hiện lời sớm hơn",
+		"offset_later": "Hiện lời muộn hơn",
+		"offset_reset": "Đặt lại về 0"
 	},
 	"queue": {
 		"title": "Hàng chờ"
@@ -599,7 +613,8 @@
 		"custom": "Thời lượng tuỳ chọn",
 		"custom_placeholder": "Số phút",
 		"set": "Đặt",
-		"off": "Tắt hẹn giờ"
+		"off": "Tắt hẹn giờ",
+		"end_of_track": "Hết bài này"
 	},
 	"quality": {
 		"kbps": "kbps",
@@ -670,5 +685,11 @@
 		"save_rest": "Tải thêm {count} bài",
 		"cancel": "Dừng tải",
 		"saved": "Đã tải"
+	},
+	"errors": {
+		"generic_title": "Không tải được nội dung này",
+		"offline_title": "Bạn đang offline",
+		"offline_desc": "Kiểm tra kết nối rồi thử lại. Nhạc đã tải xuống vẫn phát được.",
+		"offline_downloads": "Nhạc đã tải xuống"
 	}
 }

@@ -4,7 +4,8 @@
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import { AlarmClockIcon, Tick02Icon } from '@hugeicons/core-free-icons';
 	import { Input } from '$lib/components/ui/input';
-	import { sleep, setSleep, clearSleep } from '$lib/sleep.svelte';
+	import { sleep, setSleep, setSleepEndOfTrack, clearSleep } from '$lib/sleep.svelte';
+	import { playback } from '$lib/player.svelte';
 	import { t } from '$lib/i18n.svelte';
 
 	let open = $state(false);
@@ -35,7 +36,15 @@
 		if (Number.isFinite(n) && n > 0) arm(n);
 	}
 
-	const label = $derived(sleep.remaining !== null ? fmt(sleep.remaining) : null);
+	/** What is left before the music stops: the deadline's countdown, or with "end of this song" the
+	 *  song's own remaining time, which the player state already keeps current. */
+	const left = $derived(
+		sleep.endOfTrack
+			? Math.max(0, (playback.duration - playback.position) * 1000)
+			: sleep.remaining
+	);
+	const armed = $derived(sleep.remaining !== null || sleep.endOfTrack);
+	const label = $derived(left !== null && armed ? fmt(left) : null);
 </script>
 
 <!-- Closes on any click outside. Top level: `<svelte:window>` cannot sit inside an element. -->
@@ -47,8 +56,7 @@
 
 <div class="relative flex h-full items-center" data-sleep>
 	<button
-		class="flex h-full items-center gap-1 px-2 text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground {sleep.remaining !==
-		null
+		class="flex h-full items-center gap-1 px-2 text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground {armed
 			? 'text-primary'
 			: ''}"
 		onclick={() => (open = !open)}
@@ -83,6 +91,18 @@
 							: t('sleep.hours', { count: m / 60 })}
 				</button>
 			{/each}
+			<button
+				class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors hover:bg-accent/10"
+				onclick={() => {
+					setSleepEndOfTrack();
+					open = false;
+				}}
+			>
+				<span class="w-3.5">
+					{#if sleep.endOfTrack}<HugeiconsIcon icon={Tick02Icon} class="h-3.5 w-3.5" />{/if}
+				</span>
+				{t('sleep.end_of_track')}
+			</button>
 
 			<form class="flex items-center gap-2 px-3 py-2" onsubmit={armCustom}>
 				<Input
@@ -103,7 +123,7 @@
 				</button>
 			</form>
 
-			{#if sleep.remaining !== null}
+			{#if armed}
 				<div class="h-2"></div>
 				<button
 					class="w-full px-3 py-1.5 text-left text-sm text-destructive transition-colors hover:bg-accent/10"

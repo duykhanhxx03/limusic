@@ -70,6 +70,10 @@ pub struct Player {
     /// that write to it have to be re-applied together: a bare `set_property("af", ...)` from
     /// either one would drop the other's filter.
     af: std::sync::Mutex<AfState>,
+    /// The user's volume (0–100, perceptual) and a fade factor on top of it (0.0–1.0, amplitude).
+    /// Kept apart so a fade (the sleep timer's) never becomes the user's level: the slider and
+    /// the saved volume only ever see the first, and ending a fade puts the second back to 1.
+    volume: std::sync::Mutex<(i64, f64)>,
 }
 
 impl Player {
@@ -104,6 +108,15 @@ impl Player {
         // of read-ahead; 8 MiB back is minutes of backward-seek without a refetch.
         mpv.set_property("demuxer-max-bytes", 32 * 1024 * 1024_i64)?;
         mpv.set_property("demuxer-max-back-bytes", 8 * 1024 * 1024_i64)?;
+        // Reconnect a stream that drops mid-track instead of ending it. Without these, ffmpeg's
+        // http reader treats a reset connection as end of file: the track stops where the network
+        // blinked and the queue moves on as if it had finished. `reconnect_streamed` covers
+        // googlevideo's responses, which ffmpeg considers non-seekable streams; the delay cap keeps
+        // a real outage from retrying forever before the failure is reported.
+        mpv.set_property(
+            "stream-lavf-o",
+            "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=30",
+        )?;
         let mpv = Arc::new(mpv);
 
         let (tx, rx) = unbounded_channel();
@@ -119,7 +132,12 @@ impl Player {
             .spawn(move || event_loop(ev, tx))
             .expect("spawn mpv event thread");
 
-        Ok(Player { mpv, events: Some(rx), af: std::sync::Mutex::new(AfState::default()) })
+        Ok(Player {
+            mpv,
+            events: Some(rx),
+            af: std::sync::Mutex::new(AfState::default()),
+            volume: std::sync::Mutex::new((100, 1.0)),
+        })
     }
 
     /// Take the event receiver (once).
@@ -197,7 +215,24 @@ impl Player {
     /// onto a 60 dB loudness range instead (see [`perceptual_to_mpv`]), so steps stay roughly
     /// the same size and the bottom of the slider is actually quiet rather than just near-floor.
     pub fn set_volume(&self, volume: i64) -> Result<(), Error> {
-        self.mpv.set_property("volume", perceptual_to_mpv(volume))?;
+        let fade = {
+            let mut v = self.volume.lock().unwrap();
+            v.0 = volume;
+            v.1
+        };
+        self.mpv.set_property("volume", faded_volume(volume, fade))?;
+        Ok(())
+    }
+
+    /// Scale the output by `amplitude` (0.0–1.0) without touching the user's volume. 1.0 ends a
+    /// fade. Nothing observes mpv's `volume`, so the UI's slider stays where the user left it.
+    pub fn set_fade(&self, amplitude: f64) -> Result<(), Error> {
+        let volume = {
+            let mut v = self.volume.lock().unwrap();
+            v.1 = amplitude.clamp(0.0, 1.0);
+            v
+        };
+        self.mpv.set_property("volume", faded_volume(volume.0, volume.1))?;
         Ok(())
     }
 
@@ -436,6 +471,12 @@ fn event_loop(mut ev: EventContext, tx: tokio::sync::mpsc::UnboundedSender<Playe
     }
 }
 
+/// mpv's `volume` for a perceptual level scaled by an amplitude factor. mpv cubes the property
+/// (gain = (v/100)³), so an amplitude `a` is a factor of ∛a on the property.
+fn faded_volume(volume: i64, amplitude: f64) -> f64 {
+    perceptual_to_mpv(volume) * amplitude.clamp(0.0, 1.0).cbrt()
+}
+
 /// Quote a filename/URL for mpv's command parser.
 ///
 /// libmpv2's `command` builds one space-joined string and hands it to `mpv_command_string`, which
@@ -465,7 +506,7 @@ fn perceptual_to_mpv(percent: i64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{af_chain, perceptual_to_mpv, quoted, AfState, Equalizer, EQ_BANDS};
+    use super::{af_chain, faded_volume, perceptual_to_mpv, quoted, AfState, Equalizer, EQ_BANDS};
 
     fn chain(gain_db: Option<f64>, semitones: i32, eq: Option<Equalizer>) -> String {
         af_chain(&AfState { gain_db, semitones, eq })
@@ -586,6 +627,19 @@ mod tests {
         assert!(live.contains("f=16000:t=q:w=1.41:g=-6.5"), "16 kHz band wrong: {live}");
         p.set_equalizer(None).unwrap();
         assert!(!af().contains("equalizer"), "turning it off left filters: {}", af());
+
+        // 5. The reconnect options are accepted, and a fade never becomes the user's volume.
+        let lavf = p.mpv.get_property::<String>("stream-lavf-o").unwrap();
+        assert!(lavf.contains("reconnect_streamed=1"), "reconnect options missing: {lavf}");
+        let vol = || p.mpv.get_property::<f64>("volume").unwrap();
+        p.set_volume(60).unwrap();
+        let user = vol();
+        p.set_fade(0.0).unwrap();
+        assert_eq!(vol(), 0.0);
+        p.set_volume(70).unwrap(); // a volume change mid-fade stays faded
+        assert_eq!(vol(), 0.0);
+        p.set_fade(1.0).unwrap();
+        assert!(vol() > user, "ending the fade should land on the new user volume");
     }
 
     #[test]
@@ -597,6 +651,19 @@ mod tests {
         assert_eq!(quoted(r"C:\Music\x.mp3"), r#""C:\\Music\\x.mp3""#);
         // A stream URL is unchanged apart from the wrapper.
         assert_eq!(quoted("https://x/y?a=1&b=2"), "\"https://x/y?a=1&b=2\"");
+    }
+
+    #[test]
+    fn a_fade_scales_amplitude_not_the_property() {
+        // mpv cubes `volume`, so half the amplitude is ∛0.5 of the property, not half of it.
+        let full = perceptual_to_mpv(80);
+        assert_eq!(faded_volume(80, 1.0), full);
+        assert_eq!(faded_volume(80, 0.0), 0.0);
+        let half = faded_volume(80, 0.5);
+        assert!(((half / 100.0).powi(3) / (full / 100.0).powi(3) - 0.5).abs() < 1e-9);
+        // Out of range factors clamp rather than boost or go negative.
+        assert_eq!(faded_volume(80, 2.0), full);
+        assert_eq!(faded_volume(80, -1.0), 0.0);
     }
 
     #[test]

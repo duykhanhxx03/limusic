@@ -124,3 +124,17 @@ test('a provisional resume is replaced by the first real report, not averaged wi
 	assert.equal(clock.feed({ position: 60.17, at: 20_250, speed: 1, paused: false }), 'steady');
 	assert.ok(Math.abs(clock.valueAt(20_250) - 60.17) < 1e-9, 'the real report wins outright');
 });
+
+test('reset takes a small jump the filter would otherwise treat as a late report', () => {
+	// The lyrics offset moving by 100 ms: well under RESET, so without `reset` the earlier position
+	// reads as a slow report and the filter keeps the old estimate.
+	const clock = new MediaClock();
+	for (const r of reports({ from: 0, seconds: 4 })) clock.feed(r);
+	const now = 14_000;
+	const before = clock.valueAt(now);
+	clock.feed({ position: before - 0.1, at: now, speed: 1, paused: false });
+	assert.ok(Math.abs(clock.valueAt(now) - before) < 0.02, 'unreset, the shift is filtered away');
+	clock.reset();
+	assert.equal(clock.feed({ position: before - 0.1, at: now, speed: 1, paused: false }), 'reset');
+	assert.ok(Math.abs(clock.valueAt(now) - (before - 0.1)) < 1e-9, 'reset, it lands exactly');
+});

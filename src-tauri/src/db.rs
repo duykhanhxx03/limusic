@@ -146,6 +146,32 @@ impl Db {
                 song_json TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS plays_played_at ON plays(played_at);
+            -- Listening history for statistics, recaps and a year in review. Unlike `plays` (On
+            -- Repeat's rolling month) it is never pruned, and it records what was actually heard:
+            -- `listened_ms` is time that played, not where the playhead was when the track changed,
+            -- so a skip, a seek or a replay reads as what it was. `started_at` is UTC; hour-of-day
+            -- and per-day buckets are computed where the local timezone is known, not stored.
+            CREATE TABLE IF NOT EXISTS play_event (
+                id          INTEGER PRIMARY KEY,
+                video_id    TEXT NOT NULL,
+                started_at  INTEGER NOT NULL,
+                listened_ms INTEGER NOT NULL,
+                duration_ms INTEGER,
+                album_id    TEXT,
+                song_json   TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS play_event_started ON play_event(started_at);
+            CREATE INDEX IF NOT EXISTS play_event_video ON play_event(video_id);
+            -- One row per credited artist, with the time copied in so a range query over artists
+            -- needs no join. Foreign keys are not enforced on this connection, so clearing the
+            -- history has to delete from both tables.
+            CREATE TABLE IF NOT EXISTS play_event_artist (
+                event_id   INTEGER NOT NULL,
+                artist_id  TEXT NOT NULL,
+                started_at INTEGER NOT NULL,
+                PRIMARY KEY (event_id, artist_id)
+            ) WITHOUT ROWID;
+            CREATE INDEX IF NOT EXISTS play_event_artist_time ON play_event_artist(started_at, artist_id);
             CREATE TABLE IF NOT EXISTS local_tracks (
                 path          TEXT PRIMARY KEY,
                 title         TEXT NOT NULL,
@@ -219,6 +245,18 @@ impl Db {
         let _ = conn.execute("ALTER TABLE stream_url_cache ADD COLUMN audio_mime TEXT", []);
         let _ = conn.execute("ALTER TABLE stream_url_cache ADD COLUMN audio_bitrate INTEGER", []);
         let _ = conn.execute("ALTER TABLE stream_url_cache ADD COLUMN ping_client TEXT", []);
+        // SimpMusic Lyrics now answers ahead of every other provider, but a track whose lyrics were
+        // fetched before it existed is served from this cache forever and would never reach it.
+        // Once per database: the marker row inserts only on the launch that adds it.
+        if conn
+            .execute(
+                "INSERT OR IGNORE INTO settings(key, value) VALUES('lyrics_cache_epoch', '2')",
+                [],
+            )
+            .is_ok_and(|n| n == 1)
+        {
+            let _ = conn.execute("DELETE FROM lyrics_cache", []);
+        }
         // Local files are no longer recorded as plays (see `AppState::on_position`), but 0.3.1
         // recorded them for a while, so clear out anything already sitting in On Repeat's table.
         let _ = conn.execute("DELETE FROM plays WHERE video_id LIKE 'LOCAL:%'", []);
@@ -894,6 +932,36 @@ impl Db {
         let _ = conn.execute("DELETE FROM plays WHERE played_at < ?1", [now - window]);
     }
 
+    /// Record one stretch of listening to one track in the permanent history (`play_event`), with
+    /// a row per credited artist. One transaction, so a crash can't leave an event without its
+    /// artists.
+    pub fn record_play_event(&self, ev: &PlayEvent) -> rusqlite::Result<()> {
+        let mut conn = self.0.lock().unwrap();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT INTO play_event(video_id, started_at, listened_ms, duration_ms, album_id, song_json)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                ev.video_id,
+                ev.started_at,
+                ev.listened_ms,
+                ev.duration_ms,
+                ev.album_id,
+                ev.song_json
+            ],
+        )?;
+        let id = tx.last_insert_rowid();
+        {
+            let mut insert = tx.prepare(
+                "INSERT OR IGNORE INTO play_event_artist(event_id, artist_id, started_at) VALUES(?1, ?2, ?3)",
+            )?;
+            for artist in &ev.artist_ids {
+                insert.execute(rusqlite::params![id, artist, ev.started_at])?;
+            }
+        }
+        tx.commit()
+    }
+
     /// The most-played songs since `since`, as `(song_json, play_count)` ranked by plays and then
     /// by recency. Each row's JSON comes from that song's latest play: SQLite resolves a bare
     /// column against the row matching the single `max()` in the query.
@@ -1134,9 +1202,79 @@ pub struct LocalTrack {
     pub mtime: i64,
 }
 
+/// One row of `play_event`, as `record_play_event` writes it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayEvent {
+    pub video_id: String,
+    /// Unix seconds, UTC.
+    pub started_at: i64,
+    pub listened_ms: i64,
+    pub duration_ms: Option<i64>,
+    pub album_id: Option<String>,
+    pub artist_ids: Vec<String>,
+    pub song_json: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_lyrics_cache_is_cleared_once_for_the_new_provider() {
+        let path =
+            std::env::temp_dir().join(format!("limusic-lyrics-epoch-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        // A database from before the epoch marker, with a cached answer in it.
+        {
+            let d = Db::open(&path).unwrap();
+            d.put_lyrics("v", Some("{}"), 1);
+            d.0.lock()
+                .unwrap()
+                .execute("DELETE FROM settings WHERE key = 'lyrics_cache_epoch'", [])
+                .unwrap();
+        }
+        let d = Db::open(&path).unwrap();
+        assert_eq!(d.get_lyrics("v", 1, 60), None, "the upgrade drops what was cached before");
+        d.put_lyrics("v", Some("{}"), 1);
+        drop(d);
+        let d = Db::open(&path).unwrap();
+        assert!(d.get_lyrics("v", 1, 60).is_some(), "later launches keep the cache");
+        drop(d);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_play_event_keeps_its_artists_and_is_never_pruned() {
+        let d = db();
+        let ev = PlayEvent {
+            video_id: "v1".into(),
+            started_at: 1_000,
+            listened_ms: 95_000,
+            duration_ms: Some(200_000),
+            album_id: Some("MPREb_x".into()),
+            // A duplicate credit (the same channel twice in a collab line) is one row.
+            artist_ids: vec!["UCa".into(), "UCb".into(), "UCa".into()],
+            song_json: "{}".into(),
+        };
+        d.record_play_event(&ev).unwrap();
+        // `plays` pruning does not reach it.
+        d.record_play("other", "{}", 10_000_000, 60);
+        let conn = d.0.lock().unwrap();
+        let (n, listened): (i64, i64) = conn
+            .query_row("SELECT COUNT(*), SUM(listened_ms) FROM play_event", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!((n, listened), (1, 95_000));
+        let artists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM play_event_artist WHERE started_at BETWEEN 0 AND 2000",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(artists, 2);
+    }
 
     fn db() -> Db {
         Db::open(std::path::Path::new(":memory:")).unwrap()

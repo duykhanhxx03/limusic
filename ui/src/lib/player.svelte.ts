@@ -56,7 +56,27 @@ export const np = $state({ open: false, tab: 'queue' as 'queue' | 'lyrics' });
  * local state). Hydrated once in `initApp`; the modal writes here too, so a toggle takes effect
  * without a reload.
  */
-export const prefs = $state({ musicVideos: false });
+export const prefs = $state({
+	musicVideos: false,
+	/** Lyrics timing offset in ms. Positive shows each line later, for audio that reaches the ears
+	 *  late (Bluetooth). Only the lyrics clock sees it; the seek bar and seeking do not. */
+	lyricsOffsetMs: 0
+});
+
+/** The furthest the lyrics offset goes either way. Bluetooth latency is a few hundred ms; past a few
+ *  seconds this is a wrong-cut lyric, which an offset is the wrong fix for. */
+export const LYRICS_OFFSET_LIMIT_MS = 5000;
+
+let offsetSave: ReturnType<typeof setTimeout> | undefined;
+/** Set the lyrics offset. Applies at once; saved once the nudging stops. */
+export function setLyricsOffset(ms: number) {
+	const v = Math.max(-LYRICS_OFFSET_LIMIT_MS, Math.min(LYRICS_OFFSET_LIMIT_MS, Math.round(ms)));
+	prefs.lyricsOffsetMs = v;
+	clearTimeout(offsetSave);
+	offsetSave = setTimeout(() => {
+		api.setSetting('lyrics_offset_ms', String(v)).catch(() => {});
+	}, 400);
+}
 
 /** videoId → the in-flight or settled loopback URL for its music video (null when it has none).
  *
@@ -1293,7 +1313,11 @@ export function initApp(mini = false): () => void {
 		});
 	});
 	api.getSettings()
-		.then((s) => (prefs.musicVideos = s.music_videos === 'true'))
+		.then((s) => {
+			prefs.musicVideos = s.music_videos === 'true';
+			const offset = Number.parseInt(s.lyrics_offset_ms ?? '', 10);
+			if (Number.isFinite(offset)) prefs.lyricsOffsetMs = offset;
+		})
 		.catch(() => {});
 	api.getAccount()
 		.then((a) => {

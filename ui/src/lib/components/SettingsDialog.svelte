@@ -24,7 +24,15 @@
 	import { HELP_COMBO } from '$lib/shortcuts';
 	import { copyText } from '$lib/clipboard';
 	import * as api from '$lib/api';
-	import { blocked, prefs, ui, toast, unblockArtist } from '$lib/player.svelte';
+	import { auth, blocked, prefs, ui, toast, unblockArtist } from '$lib/player.svelte';
+	import { clearCached } from '$lib/pagecache';
+	import {
+		DEFAULT_COUNTRY,
+		DEFAULT_LANGUAGE,
+		countryOptions,
+		languageOptions
+	} from '$lib/contentlocale';
+	import LyricsOffset from '$lib/components/LyricsOffset.svelte';
 	import { dl, formatBytes, remove as removeDownload } from '$lib/downloads.svelte';
 	import { win } from '$lib/win.svelte';
 	import ColorPicker from '$lib/components/ColorPicker.svelte';
@@ -357,6 +365,34 @@
 		await api.setSetting('hide_videos', settings.hide_videos);
 	}
 
+	const countries = $derived(countryOptions(currentLocale.id));
+	const languages = $derived(languageOptions(currentLocale.id));
+	const contentCountry = $derived(settings.content_country || DEFAULT_COUNTRY);
+	const contentLanguage = $derived(settings.content_language || DEFAULT_LANGUAGE);
+
+	/** YouTube's country or language for everything fetched from here on. What is already on screen
+	 *  was localized for the old one, so the page cache goes and the current page reloads — the same
+	 *  thing an account switch does. */
+	async function setContentLocale(key: 'content_country' | 'content_language', value: string) {
+		if (!value || settings[key] === value) return;
+		settings[key] = value;
+		try {
+			await api.setSetting(key, value);
+			clearCached();
+			auth.epoch++;
+		} catch (e) {
+			toast.error(String(e));
+		}
+	}
+
+	const simpMusicOn = $derived(settings.lyrics_simpmusic !== 'false');
+	async function setSimpMusic(on: boolean) {
+		settings.lyrics_simpmusic = on ? 'true' : 'false';
+		await api.setSetting('lyrics_simpmusic', settings.lyrics_simpmusic);
+		// Rust drops its lyrics cache on this setting; the webview's copy has to go with it.
+		forgetLyrics();
+	}
+
 	async function setBoidu(on: boolean) {
 		settings.lyrics_boidu = on ? 'true' : 'false';
 		await api.setSetting('lyrics_boidu', settings.lyrics_boidu);
@@ -546,6 +582,21 @@
 							</div>
 						</section>
 						<section class={GROUP}>
+							<h3 class={LABEL}>{t('settings.sections.content')}</h3>
+							<div class={CARD}>
+								{@render row({
+									title: t('settings.general.content_country'),
+									desc: t('settings.general.content_country_hint'),
+									control: countryPicker
+								})}
+								{@render row({
+									title: t('settings.general.content_language'),
+									desc: t('settings.general.content_language_hint'),
+									control: contentLanguagePicker
+								})}
+							</div>
+						</section>
+						<section class={GROUP}>
 							<h3 class={LABEL}>{t('settings.sections.activity')}</h3>
 							<div class={CARD}>
 								{@render row({
@@ -731,9 +782,21 @@
 							<h3 class={LABEL}>{t('settings.sections.lyrics')}</h3>
 							<div class={CARD}>
 								{@render row({
+									title: t('settings.playback.lyrics_simpmusic'),
+									desc: t('settings.playback.lyrics_simpmusic_hint'),
+									control: simpMusicSwitch,
+									tall: true
+								})}
+								{@render row({
 									title: t('settings.playback.lyrics_provider'),
 									desc: t('settings.playback.lyrics_provider_hint'),
 									control: boiduSwitch,
+									tall: true
+								})}
+								{@render row({
+									title: t('settings.playback.lyrics_offset'),
+									desc: t('settings.playback.lyrics_offset_hint'),
+									control: lyricsOffset,
 									tall: true
 								})}
 							</div>
@@ -897,6 +960,44 @@
 {#snippet musicVideoSwitch()}<Switch checked={musicVideosOn} onCheckedChange={setMusicVideos} />{/snippet}
 {#snippet hideVideoSwitch()}<Switch checked={hideVideosOn} onCheckedChange={setHideVideos} />{/snippet}
 {#snippet boiduSwitch()}<Switch checked={boiduOn} onCheckedChange={setBoidu} />{/snippet}
+{#snippet simpMusicSwitch()}<Switch checked={simpMusicOn} onCheckedChange={setSimpMusic} />{/snippet}
+{#snippet lyricsOffset()}<LyricsOffset />{/snippet}
+{#snippet countryPicker()}
+	<Select.Root
+		type="single"
+		value={contentCountry}
+		onValueChange={(v) => setContentLocale('content_country', v)}
+	>
+		<Select.Trigger class="w-44 shrink-0" aria-label={t('settings.general.content_country')}>
+			<span class="flex-1 truncate text-left">
+				{countries.find((c) => c.code === contentCountry)?.name ?? contentCountry}
+			</span>
+		</Select.Trigger>
+		<Select.Content class="max-h-72">
+			{#each countries as c (c.code)}
+				<Select.Item value={c.code} label={c.name}>{c.name}</Select.Item>
+			{/each}
+		</Select.Content>
+	</Select.Root>
+{/snippet}
+{#snippet contentLanguagePicker()}
+	<Select.Root
+		type="single"
+		value={contentLanguage}
+		onValueChange={(v) => setContentLocale('content_language', v)}
+	>
+		<Select.Trigger class="w-44 shrink-0" aria-label={t('settings.general.content_language')}>
+			<span class="flex-1 truncate text-left">
+				{languages.find((l) => l.code === contentLanguage)?.name ?? contentLanguage}
+			</span>
+		</Select.Trigger>
+		<Select.Content class="max-h-72">
+			{#each languages as l (l.code)}
+				<Select.Item value={l.code} label={l.name}>{l.name}</Select.Item>
+			{/each}
+		</Select.Content>
+	</Select.Root>
+{/snippet}
 {#snippet bannerSwitch()}<Switch checked={updateBannerOn} onCheckedChange={setUpdateBanner} />{/snippet}
 {#snippet openPlayerSwitch()}<Switch
 		checked={appearance.openPlayerOnPlay}
