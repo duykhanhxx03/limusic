@@ -34,7 +34,10 @@ import {
 	Sprite,
 	Texture,
 	Ticker,
-	UniformGroup
+	UniformGroup,
+	type Filter,
+	type FilterSystem,
+	type RenderSurface
 } from 'pixi.js';
 import type { LyricLine } from '$lib/api';
 import type { MediaClock } from '$lib/mediaclock';
@@ -120,6 +123,40 @@ void main() {
 let program: GlProgram | null = null;
 const sweepProgram = () => (program ??= GlProgram.from({ vertex: VERTEX, fragment: FRAGMENT, name: 'lyric-sweep' }));
 
+// --- blur -----------------------------------------------------------------------------------
+
+/**
+ * Pixi's blur (8.20) with the clears its WebGL path leaves out.
+ *
+ * Each direction is three passes, taking turns between two textures: the filter's input and a
+ * scratch texture from Pixi's pool. The default (non-legacy) path draws its in-between passes
+ * without clearing the texture first, and only the blur's area is drawn. Pooled textures are
+ * power-of-two sized, larger than that area, and outside it they keep whatever was drawn there
+ * last, in this stage other lines' text. The blur's samples are not clamped to its area, so the
+ * next pass reads that old text across the area's right and bottom edges (at the left and top the
+ * texture's own clamp-to-edge falls on the area's transparent first pixel). The result was a faint
+ * light line down the right of a blurred line and along its bottom, like the edge of a box around
+ * the words. A cached row clips it off with its `boundsArea`. The sung line is drawn straight to the
+ * screen while its blur eases out, so it flashed there after a line change. Before rows were
+ * cached, every blurred line could show it, and it stayed until something moved.
+ *
+ * Here every pass but the last clears the texture it draws into. The last pass draws to the
+ * target it was given, cleared or not as asked. That is the only change: the look is the same
+ * blur as before. (`legacy: true` would clear as well, but it spreads the strength differently,
+ * and the blurred lines would change.)
+ */
+class ClearingBlurFilter extends BlurFilter {
+	override apply(system: FilterSystem, input: Texture, output: RenderSurface, clearMode: boolean) {
+		const clearing = Object.create(system, {
+			applyFilter: {
+				value: (filter: Filter, from: Texture, to: RenderSurface, clear: boolean) =>
+					system.applyFilter(filter, from, to, to === output ? clear : true)
+			}
+		}) as FilterSystem;
+		super.apply(clearing, input, output, clearMode);
+	}
+}
+
 // --- motion helpers -------------------------------------------------------------------------
 
 /** A damped spring toward a target that can be told to wait before following a new one. */
@@ -194,6 +231,24 @@ function pixelGrid(dpr: number): number {
 	return 0;
 }
 
+/** The names in a `font-family` list, or a `FontFace`'s family, unquoted and in lower case. */
+function familyNames(list: string): string[] {
+	return list
+		.split(',')
+		.map((name) => name.trim().replace(/^(["'])(.*)\1$/, '$2').toLowerCase())
+		.filter(Boolean);
+}
+
+/** Whether every face `font` needs for `text` has loaded. A font the set cannot load at all
+ *  counts as loaded: there is nothing to wait for. */
+function faceLoaded([font, text]: [font: string, text: string]): boolean {
+	try {
+		return document.fonts.check(font, text);
+	} catch {
+		return true;
+	}
+}
+
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
 /** CSS `ease-in-out`, near enough: the app's token for a content swap. */
@@ -216,6 +271,13 @@ const REWRAP_MS = 200;
  *  their fill and breath move them a quarter of a pixel at most in that time, too little to see
  *  the steps, and a sung word or a scroll still gets every frame. */
 const DOTS_MS = 50;
+/** New lines wait at most this long for their faces to load (`awaitFaces`). A face that takes
+ *  longer lays them out again when it arrives (`onFontsLoaded`). */
+const FACE_WAIT_MS = 500;
+/** Transparent device pixels between the cells of a row's atlas, and around its edge. A quad
+ *  sampled off the pixel grid (moving, lifted, scaled) reads a texel or so past its cell. With
+ *  the gutter that texel is always empty, not the next cell's. */
+const GUTTER = 2;
 
 const reducedMotion =
 	typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -351,7 +413,7 @@ export class LyricStage {
 	private browsing = false;
 	private browseTimer: ReturnType<typeof setTimeout> | undefined;
 
-	/** Lines waiting for the ones on screen to fade out. */
+	/** Lines waiting for the ones on screen to fade out, or for their faces (`awaitFaces`). */
 	private pending: LyricLine[] | null = null;
 	private swap: { phase: 'out' | 'in'; at: number } | null = null;
 
@@ -365,6 +427,16 @@ export class LyricStage {
 	private readonly measurer = document.createElement('canvas').getContext('2d')!;
 	private readonly resizeObserver: ResizeObserver;
 	private readonly themeObserver: MutationObserver;
+	/** The faces that lines about to be laid out are set in, while they load (`awaitFaces`), and
+	 *  the font families they are for. */
+	private faces: { families: string; done: Promise<void> } | null = null;
+	/** Every face that had loaded when the lines were last laid out. */
+	private seenFaces = new WeakSet<FontFace>();
+	/** Whether the lines were last laid out with every face their text needs already loaded. When
+	 *  they were, no later load can change a measurement, whatever else of the family it brings
+	 *  in: an interface loading a Cyrillic subset of the lyric font used to lay every line out
+	 *  again, and flash it. */
+	private covered = false;
 	private dead = false;
 
 	private constructor(app: Application, opts: StageOptions) {
@@ -391,21 +463,26 @@ export class LyricStage {
 		this.resizeObserver.observe(this.host);
 		// Theme switches restyle <html>; the text colour and the heading font follow them.
 		this.themeObserver = new MutationObserver(() => {
-			const before = `${this.color}|${this.m.family}`;
+			const before = this.color;
 			this.readTheme();
-			const m = this.metrics();
-			if (m.family !== this.m.family) {
-				this.m = m;
-				this.relayout(false);
-			} else if (`${this.color}|${this.m.family}` !== before) {
+			if (this.color !== before) {
 				for (const row of this.rows) this.tint(row);
 				this.kick();
+			}
+			// A new font sets the lines again once its faces have loaded. Until then they stay in
+			// the old one, and so do the metrics: a row built in the meantime has to match the
+			// widths it was measured with.
+			const m = this.metrics();
+			const families = `${m.family}|${m.transFamily}`;
+			if (families !== `${this.m.family}|${this.m.transFamily}` && families !== this.faces?.families) {
+				this.awaitFaces(this.pending ?? this.lines, m);
 			}
 		});
 		this.themeObserver.observe(document.documentElement, {
 			attributes: true,
 			attributeFilter: ['class', 'style', 'data-theme']
 		});
+		document.fonts.addEventListener('loading', this.onFontsLoading);
 	}
 
 	destroy() {
@@ -417,6 +494,8 @@ export class LyricStage {
 		clearTimeout(this.rewrapTimer);
 		this.resizeObserver.disconnect();
 		this.themeObserver.disconnect();
+		document.fonts.removeEventListener('loading', this.onFontsLoading);
+		this.faces = null;
 		this.host.removeEventListener('wheel', this.onWheel);
 		this.app.canvas.removeEventListener('webglcontextlost', this.lost);
 		for (const row of [...this.rows, ...this.leaving]) this.dropRow(row);
@@ -429,19 +508,22 @@ export class LyricStage {
 		if (lines === (this.pending ?? this.lines)) return;
 		this.active = -1;
 		this.interlude = null;
+		// Laid out once the faces they are set in have loaded (`awaitFaces`), and, if something
+		// is on screen, once that has left.
+		this.pending = lines;
 		if (this.rows.length && !reducedMotion) {
-			// Something is on screen: it leaves first, and the new lines are laid out once it has.
-			this.pending = lines;
 			if (this.swap?.phase !== 'out') this.swap = { phase: 'out', at: performance.now() };
 			this.kick();
-			return;
 		}
-		this.showLines(lines);
+		this.awaitFaces(lines, this.metrics());
 	}
 
 	private showLines(lines: LyricLine[]) {
 		this.pending = null;
 		this.lines = lines;
+		// Taken again: the ascents in the metrics come from the faces as well, and those may have
+		// loaded (or, with the font, changed) since.
+		this.m = this.metrics();
 		this.relayout(false);
 		this.swap = lines.length && !reducedMotion ? { phase: 'in', at: performance.now() } : null;
 		this.kick();
@@ -449,8 +531,9 @@ export class LyricStage {
 
 	setActive(active: number, interlude: Interlude | null) {
 		if (this.pending) {
-			// These indices are into the lines not laid out yet. Applied to the rows still fading
-			// out they would light the wrong line, so keep them for the layout the swap does.
+			// These indices are into the lines not laid out yet. Applied to the rows still on
+			// screen they would light the wrong line, so keep them for the layout that shows the
+			// new ones (`showLines`).
 			this.active = active;
 			this.interlude = interlude;
 			return;
@@ -558,6 +641,86 @@ export class LyricStage {
 		};
 	}
 
+	/** Lay `lines` out in the fonts of `m` once the faces they need have loaded: the lyric type and
+	 *  the translations' italic, each in every subset (`unicode-range`) their text reaches. Before
+	 *  then a canvas measures and draws in a fallback, and a line measured in one face and drawn in
+	 *  another no longer fits the cells it was given. What waits is the `pending` lines
+	 *  (`setLines`), or else the lines on screen, for a new font (the theme observer). Faces that
+	 *  are already in cost no wait. Whatever has not loaded in `FACE_WAIT_MS`, or fails, is left
+	 *  to `onFontsLoaded`. */
+	/** The fonts `tokenize` and `build` set for these lines, each with the characters it has to
+	 *  draw. The size does not choose the face. */
+	private faceNeeds(lines: LyricLine[], m: Metrics): [font: string, text: string][] {
+		let words = 'Hg♪'; // also what `metrics` measures, and what a line with no text shows
+		let translations = 'Hg';
+		for (const line of lines) {
+			words += line.text;
+			for (const w of line.words ?? []) words += w.text;
+			if (line.translation) translations += line.translation;
+		}
+		return [
+			[`700 ${m.size}px ${m.family}`, [...new Set(words)].join('')],
+			[`italic 400 ${m.transSize}px ${m.transFamily}`, [...new Set(translations)].join('')]
+		];
+	}
+
+	private awaitFaces(lines: LyricLine[], m: Metrics) {
+		const wanted = this.faceNeeds(lines, m);
+		if (wanted.every(faceLoaded)) {
+			this.faces = null;
+			this.facesIn();
+			return;
+		}
+		const done: Promise<void> = Promise.race([
+			Promise.all(
+				wanted.map(([font, text]) =>
+					new Promise((resolve) => resolve(document.fonts.load(font, text))).catch(() => undefined)
+				)
+			),
+			new Promise((resolve) => setTimeout(resolve, FACE_WAIT_MS))
+		]).then(() => {
+			if (this.faces?.done !== done || this.dead) return;
+			this.faces = null;
+			this.facesIn();
+		});
+		this.faces = { families: `${m.family}|${m.transFamily}`, done };
+	}
+
+	/** Whatever waited for the faces (`awaitFaces`). */
+	private facesIn() {
+		if (!this.pending) {
+			this.m = this.metrics();
+			this.relayout(false);
+		} else if (this.swap?.phase === 'out') {
+			// The fade-out lays them out when it ends (`update`), or has ended and is waiting.
+			this.kick();
+		} else {
+			this.showLines(this.pending);
+		}
+	}
+
+	/** The page started loading faces. WebKitGTK never fires the standard 'loadingdone' (nor
+	 *  'loadingerror'), only 'loading', but the set's `ready` settles once the load is over. */
+	private readonly onFontsLoading = () => {
+		void document.fonts.ready.then(this.onFontsLoaded);
+	};
+
+	/** Faces have loaded. If one is in a lyric font and the lines were laid out before it had,
+	 *  they were measured, and perhaps drawn, in a fallback: lay them out again. */
+	private readonly onFontsLoaded = () => {
+		// Lines waiting to be laid out are measured when they are.
+		if (this.dead || this.faces || this.pending || !this.lines.length || this.covered) return;
+		const names = new Set([...familyNames(this.m.family), ...familyNames(this.m.transFamily)]);
+		let fresh = false;
+		document.fonts.forEach((face) => {
+			if (fresh || face.status !== 'loaded' || this.seenFaces.has(face)) return;
+			fresh = familyNames(face.family).some((name) => names.has(name));
+		});
+		if (!fresh) return;
+		this.m = this.metrics();
+		this.relayout(false);
+	};
+
 	private resize() {
 		const { clientWidth: w, clientHeight: h } = this.host;
 		if (!w || !h) return;
@@ -608,6 +771,15 @@ export class LyricStage {
 			this.m = this.metrics();
 		}
 		this.rewrapAt = performance.now();
+		// The faces these measurements are taken in. One that loads after them lays the lines out
+		// again (`onFontsLoaded`), including one already loading now, which fires no 'loading'.
+		let loading = false;
+		document.fonts.forEach((face) => {
+			if (face.status === 'loaded') this.seenFaces.add(face);
+			else if (face.status === 'loading') loading = true;
+		});
+		if (loading) void document.fonts.ready.then(this.onFontsLoaded);
+		this.covered = this.faceNeeds(this.lines, this.m).every(faceLoaded);
 		for (const row of [...this.rows, ...this.leaving]) this.dropRow(row);
 		this.rows = [];
 		this.leaving = [];
@@ -871,27 +1043,44 @@ export class LyricStage {
 		if (!tokens.length) return;
 
 		// Pack every token into its own cell: words that touch in the layout (syllables) must not
-		// sample each other's glyphs through their padding.
+		// sample each other's glyphs through their padding. The cells sit `GUTTER` apart and in
+		// from the atlas's edge.
+		const wordFont = `700 ${m.size * dpr}px ${m.family}`;
+		const transFont = `italic 400 ${m.transSize * dpr}px ${m.transFamily}`;
+		const measurer = this.measurer;
+		let measuring = '';
 		const cells: { x: number; y: number; w: number; h: number }[] = [];
 		const limit = Math.ceil((m.colW + pad * 2) * dpr);
-		let cx = 0;
-		let cy = 0;
+		let cx = GUTTER;
+		let cy = GUTTER;
 		let rowH = 0;
 		for (const t of tokens) {
 			const lh = t.translation ? m.transLineH : m.lineH;
-			const w = Math.ceil((t.w + pad * 2) * dpr);
+			// The run as it is drawn below. More than a device pixel wider than its layout width,
+			// that was measured in another face (see `awaitFaces`), and the cell widens with it so
+			// no glyph is cut off or reaches past the padding.
+			const font = t.translation ? transFont : wordFont;
+			if (font !== measuring) {
+				measurer.font = measuring = font;
+				setSpacing(measurer, t.translation ? 0 : m.tracking * dpr);
+			}
+			const drawn = measurer.measureText(t.text).width / dpr;
+			const run = drawn > t.w + 1 / dpr ? drawn : t.w;
+			const w = Math.ceil((run + pad * 2) * dpr);
 			const h = Math.ceil((lh + pad * 2) * dpr);
-			if (cx > 0 && cx + w > limit) {
-				cx = 0;
-				cy += rowH;
+			if (cx > GUTTER && cx + w + GUTTER > limit) {
+				cx = GUTTER;
+				cy += rowH + GUTTER;
 				rowH = 0;
 			}
 			cells.push({ x: cx, y: cy, w, h });
-			cx += w;
+			cx += w + GUTTER;
 			rowH = Math.max(rowH, h);
 		}
-		const width = Math.max(1, Math.min(limit, cells.reduce((a, c) => Math.max(a, c.x + c.w), 0)));
-		const height = Math.max(1, cy + rowH);
+		// As wide as the widest cell needs, even past `limit`: a token wider than the column (a
+		// line with no spaces) was cut off at it, and its quad smeared the atlas's last column.
+		const width = cells.reduce((a, c) => Math.max(a, c.x + c.w), 0) + GUTTER;
+		const height = cy + rowH + GUTTER;
 
 		const held = tokens.some((t) => t.timed && t.end - t.start >= HELD_MS);
 		const canvas = document.createElement('canvas');
@@ -908,9 +1097,7 @@ export class LyricStage {
 		for (let k = 0; k < tokens.length; k++) {
 			const t = tokens[k];
 			const c = cells[k];
-			const font = t.translation
-				? `italic 400 ${m.transSize * dpr}px ${m.transFamily}`
-				: `700 ${m.size * dpr}px ${m.family}`;
+			const font = t.translation ? transFont : wordFont;
 			const baseline = Math.round((t.translation ? m.transAscent : m.ascent) * dpr);
 			ctx.font = font;
 			ctx.fillStyle = '#fff';
@@ -926,10 +1113,16 @@ export class LyricStage {
 			}
 		}
 
-		const source = new CanvasSource({ resource: canvas, resolution: 1 });
+		// Clamp-to-edge, Pixi's default, said here because it matters: repeating, a quad's edge
+		// would blend in the atlas's opposite side. No mipmaps either (`autoGenerateMipmaps`
+		// defaults off): a smaller level would average neighbouring cells into each other.
+		const style = { addressMode: 'clamp-to-edge', autoGenerateMipmaps: false } as const;
+		const source = new CanvasSource({ resource: canvas, resolution: 1, ...style });
 		const texture = new Texture({ source });
 		row.sources.push(source);
-		const glowSource = glowCanvas ? new CanvasSource({ resource: glowCanvas, resolution: 1 }) : null;
+		const glowSource = glowCanvas
+			? new CanvasSource({ resource: glowCanvas, resolution: 1, ...style })
+			: null;
 		if (glowSource) row.sources.push(glowSource);
 		// Uploaded now, the canvases can let go of their pixels: kept, each is a second copy of the
 		// row's atlas in memory for as long as the row is built. Nothing reads them again. These
@@ -1143,13 +1336,18 @@ export class LyricStage {
 
 		let fade = 1;
 		let rise = 0;
+		let waiting = false;
 		if (this.swap) {
 			moving = true;
 			const t = now - this.swap.at;
 			if (this.swap.phase === 'out') {
 				const k = clamp01(t / SWAP_OUT_MS);
 				fade = 1 - k;
-				if (k >= 1) {
+				if (k >= 1 && this.faces) {
+					// Out, and the new lines are still waiting for their faces (`awaitFaces`).
+					// Nothing shows until they arrive, and their arrival asks for the next frame.
+					waiting = true;
+				} else if (k >= 1) {
 					this.showLines(this.pending ?? this.lines);
 					fade = this.swap ? 0 : 1;
 				}
@@ -1162,6 +1360,7 @@ export class LyricStage {
 		}
 		if (this.app.stage.alpha !== fade) this.app.stage.alpha = fade;
 		if (this.app.stage.y !== rise) this.app.stage.y = rise;
+		if (waiting) return 'rest';
 
 		// Read after the swap, which may have laid out new lines (and, with a rewrap pending, for
 		// new metrics).
@@ -1240,7 +1439,7 @@ export class LyricStage {
 			const body = row.body;
 			if (row.blur > 0.05) {
 				if (!row.filter) {
-					row.filter = new BlurFilter({ strength: 0, quality: 3, resolution: m.dpr });
+					row.filter = new ClearingBlurFilter({ strength: 0, quality: 3, resolution: m.dpr });
 					// Pixi clips a filter to the canvas, measured from where it draws to. Into a
 					// cached row's texture, that is the texture's corner rather than the row's place
 					// on screen, and a row taller than the canvas would lose its lower part.

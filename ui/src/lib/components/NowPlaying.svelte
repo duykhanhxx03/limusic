@@ -475,7 +475,11 @@
 						</Tabs.Content>
 					{:else}
 						<Tabs.Content value="lyrics" class="flex min-h-0 flex-col">
-							{#if settled}
+							<!-- Not while theater mode is up: it covers this view and draws the same lines
+							     itself, and this stage went on drawing its karaoke underneath, a second
+							     canvas at the display rate. Coming back it mounts again from the shared
+							     lyrics cache and lands on the sung line, as opening the tab does. -->
+							{#if settled && !ui.theaterOpen}
 								<div class="flex min-h-0 flex-1 flex-col" in:fade={{ duration: 160 }}>
 									<LyricsView expanded={big} />
 								</div>
