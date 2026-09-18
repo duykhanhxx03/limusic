@@ -373,6 +373,8 @@
 			"music_videos_hint": "Show video stream when available instead of audio only.",
 			"hide_videos": "Hide videos in search",
 			"hide_videos_hint": "Only show audio tracks and official releases in search results.",
+			"sponsorblock": "Skip non-music sections",
+			"sponsorblock_hint": "Jumps over a music video's talking intro, skits and outro, as marked by the SponsorBlock community. Only a hashed fragment of the video's ID leaves the app.",
 			"blocked_artists": "Blocked artists",
 			"blocked_artists_hint": "Blocked artists are left out of radio, autoplay and recommendations. Playlists and albums you open still play everything in them.",
 			"blocked_artists_empty": "Nobody blocked yet. Use \"Block artist\" from a track's ⋯ menu.",
@@ -688,6 +690,10 @@
 		"save_rest": "Download {count} more",
 		"cancel": "Stop downloading",
 		"saved": "Downloaded"
+	},
+	"sponsorblock": {
+		"skipped": "Skipped a non-music section",
+		"undo": "Undo"
 	},
 	"search": {
 		"recent": "Recent searches",

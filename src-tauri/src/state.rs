@@ -12,7 +12,7 @@ use innertube::{
     MAIN_CLIENT,
 };
 use player::Player;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 
 use crate::db::{now_secs, Db, StoredAccount};
@@ -80,6 +80,8 @@ pub struct AppState {
     /// Sleep timer state. Lives here so the command layer and the firing task share one deadline;
     /// see sleep.rs for why the clock is not in the webview.
     pub sleep_timer: crate::sleep::SleepTimer,
+    /// The playing track's non-music sections, to skip (sponsorblock.rs).
+    pub sponsorblock: crate::sponsorblock::SponsorBlock,
     /// Latest mpv position (f64 bits) + wall-clock secs of the last DB write, for throttled
     /// resume-position persistence.
     latest_position: AtomicU64,
@@ -390,6 +392,7 @@ impl AppState {
             audio_quality: std::sync::Mutex::new(std::collections::HashMap::new()),
             download_gen: std::sync::atomic::AtomicU64::new(0),
             sleep_timer: Default::default(),
+            sponsorblock: Default::default(),
             generation: AtomicU64::new(0),
             rate_epoch: AtomicU64::new(0),
             pending_seek: std::sync::Mutex::new(None),
@@ -2042,6 +2045,11 @@ impl AppState {
 
     fn emit_now_playing(&self, item: &SongItem, stream_client: &str) {
         let _ = self.app.emit("now-playing", self.now_playing_json(item, stream_client));
+        // Every track start passes through here, gapless advances included, which is what the
+        // skip lookup needs. The lookup outlives this call, so it takes the managed handle.
+        if let Some(me) = self.app.try_state::<std::sync::Arc<AppState>>() {
+            crate::sponsorblock::track_changed(me.inner(), &item.video_id);
+        }
         crate::tray::set_now_playing(&self.app, &item.title, &item.artists);
         let _ = self.app.emit("playback-state", "playing");
         // Push the same metadata to the OS media widget (context/16).

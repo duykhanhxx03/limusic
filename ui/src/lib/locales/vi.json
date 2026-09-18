@@ -373,6 +373,8 @@
 			"music_videos_hint": "Hiện luồng video khi có, thay vì chỉ âm thanh.",
 			"hide_videos": "Ẩn video trong tìm kiếm",
 			"hide_videos_hint": "Chỉ hiện bản audio và bản phát hành chính thức trong kết quả tìm kiếm.",
+			"sponsorblock": "Bỏ qua đoạn không phải nhạc",
+			"sponsorblock_hint": "Nhảy qua phần dẫn chuyện, tiểu phẩm và đoạn kết của MV mà cộng đồng SponsorBlock đã đánh dấu. Chỉ một phần mã băm của ID video được gửi đi.",
 			"blocked_artists": "Nghệ sĩ bị chặn",
 			"blocked_artists_hint": "Nghệ sĩ bị chặn sẽ không xuất hiện trong radio, tự động phát và gợi ý. Danh sách phát và album bạn tự mở vẫn phát đầy đủ.",
 			"blocked_artists_empty": "Chưa chặn ai. Dùng \"Chặn nghệ sĩ\" trong menu ⋯ của một bài hát.",
@@ -688,6 +690,10 @@
 		"save_rest": "Tải thêm {count} bài",
 		"cancel": "Dừng tải",
 		"saved": "Đã tải"
+	},
+	"sponsorblock": {
+		"skipped": "Đã bỏ qua đoạn không phải nhạc",
+		"undo": "Hoàn tác"
 	},
 	"search": {
 		"recent": "Tìm kiếm gần đây",

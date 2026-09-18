@@ -512,6 +512,11 @@ export const sleepTimer = () => invoke<SleepStatus>('sleep_timer');
 export const onSleepTimer = (fn: (status: SleepStatus) => void) =>
 	listen<SleepStatus>('sleep-timer', (e) => fn(e.payload));
 
+/** A non-music section of a music video was skipped (sponsorblock.rs): from `start` to `end`, in
+ *  seconds of the track. Seeking back to `start` plays it — the backend skips each one once. */
+export const onSponsorSkipped = (fn: (s: { start: number; end: number }) => void) =>
+	listen<{ start: number; end: number }>('sponsor-skipped', (e) => fn(e.payload));
+
 /** Drop the backend's memory of this track's video URL, after the element failed to load it. */
 export const forgetVideoStream = (videoId: string) =>
 	invoke<void>('forget_video_stream', { videoId });

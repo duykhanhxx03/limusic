@@ -3242,6 +3242,7 @@ dependencies = [
  "rustypipe-botguard",
  "serde",
  "serde_json",
+ "sha2",
  "souvlaki",
  "tauri",
  "tauri-build",

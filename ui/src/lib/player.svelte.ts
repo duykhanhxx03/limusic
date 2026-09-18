@@ -1150,25 +1150,43 @@ export function toggleSidebar() {
 	localStorage.setItem('sidebar_collapsed', ui.sidebarCollapsed ? '1' : '0');
 }
 
-export type Toast = { msg: string; kind: 'info' | 'success' | 'error' };
+export type Toast = {
+	msg: string;
+	kind: 'info' | 'success' | 'error';
+	/** One button on the toast (an undo). */
+	action?: { label: string; run: () => void };
+};
 
 // A counter, not the toast itself: $state proxies the stored object, so `ui.toast === t` is never
 // true and the toast would never clear. It also means a repeated message can't cut its own retry short.
 let seq = 0;
 
-function show(msg: string, kind: Toast['kind']) {
+function show(msg: string, kind: Toast['kind'], action?: Toast['action']) {
 	const id = ++seq;
-	ui.toast = { msg, kind };
-	setTimeout(() => {
-		if (seq === id) ui.toast = null;
-	}, 2500);
+	ui.toast = { msg, kind, action };
+	// Longer when there is something to press: 2.5 s is enough to read a notice, not to decide to
+	// undo it and move the pointer there.
+	setTimeout(
+		() => {
+			if (seq === id) ui.toast = null;
+		},
+		action ? 5000 : 2500
+	);
 }
 
-/** Sonner-shaped. Bare `toast(msg)` is a neutral notice; .success/.error pick the icon. */
+/** Dismiss whatever toast is up (a toast's own action does, once pressed). */
+export function dismissToast() {
+	seq++;
+	ui.toast = null;
+}
+
+/** Sonner-shaped. Bare `toast(msg)` is a neutral notice; .success/.error pick the icon, and
+ *  .action carries one button. */
 export const toast = Object.assign((msg: string) => show(msg, 'info'), {
 	info: (msg: string) => show(msg, 'info'),
 	success: (msg: string) => show(msg, 'success'),
-	error: (msg: string) => show(msg, 'error')
+	error: (msg: string) => show(msg, 'error'),
+	action: (msg: string, label: string, run: () => void) => show(msg, 'info', { label, run })
 });
 
 export function openShare(item: BrowseItem) {
@@ -1290,6 +1308,11 @@ export function initApp(mini = false): () => void {
 		}),
 		api.onPlaybackError((msg) => toast.error(msg)),
 		api.onPlaybackNotice((msg) => toast(msg)), // auto-skipped an unplayable track
+		// A music video's talking intro or outro, skipped. Undo is a seek back: the backend
+		// skips each section once, so it plays through this time.
+		api.onSponsorSkipped(({ start }) =>
+			toast.action(t('sponsorblock.skipped'), t('sponsorblock.undo'), () => api.seek(start))
+		),
 		api.onCoverError((msg) => toast.error(msg)), // playlist artwork YouTube wouldn't take
 		api.onLocalChanged(forgetLocal), // a local file turned out to be gone — drop it everywhere
 		api.onAuthChanged((a) => {

@@ -190,7 +190,7 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 /// enough that the list stays a list rather than a log.
 const SEARCH_HISTORY_LIMIT: usize = 30;
 
-const UI_SETTINGS: [&str; 20] = [
+const UI_SETTINGS: [&str; 21] = [
     "volume",
     "proxy",
     "quality",
@@ -211,6 +211,7 @@ const UI_SETTINGS: [&str; 20] = [
     "content_country",
     "content_language",
     "charts_country",
+    "sponsorblock",
 ];
 
 /// The country (`gl`) and language (`hl`) YouTube Music localizes to, from the two settings. Either

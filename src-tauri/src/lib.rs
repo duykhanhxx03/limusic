@@ -18,6 +18,7 @@ mod orchestrator;
 mod potoken;
 mod session;
 mod sleep;
+mod sponsorblock;
 mod state;
 #[cfg(target_os = "windows")]
 mod taskbar;
@@ -871,11 +872,13 @@ fn spawn_event_pump(
                     }
                     state.on_position(p).await;
                     sleep::on_position(&state, p);
+                    sponsorblock::on_position(&state, p);
                 }
                 PlayerEvent::Duration(d) => {
                     let _ = app.emit("duration", serde_json::json!({ "duration": d }));
                     state.on_duration(d).await;
                     sleep::on_duration(&state, d);
+                    sponsorblock::on_duration(&state, d);
                 }
                 PlayerEvent::Playing(playing) => {
                     let _ = app.emit("playback-state", if playing { "playing" } else { "paused" });

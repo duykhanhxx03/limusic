@@ -47,7 +47,7 @@
 	import KeyboardShortcuts from '$lib/components/KeyboardShortcuts.svelte';
 	import HomeFeed from '$lib/components/HomeFeed.svelte';
 	import { Button } from '$lib/components/ui/button';
-	import { auth, chooseNpTab, initApp, np, playback, ui } from '$lib/player.svelte';
+	import { auth, chooseNpTab, dismissToast, initApp, np, playback, ui } from '$lib/player.svelte';
 	import { win, initWin } from '$lib/win.svelte';
 	import { initZoom } from '$lib/zoom';
 	import { initShortcuts } from '$lib/shortcuts';
@@ -364,6 +364,19 @@
 				/>
 			{/if}
 			{t.msg}
+			{#if t.action}
+				{@const action = t.action}
+				<button
+					type="button"
+					class="-my-1 ml-1 cursor-pointer rounded-md px-2 py-1 text-sm font-semibold text-primary transition-colors hover:bg-primary/10"
+					onclick={() => {
+						action.run();
+						dismissToast();
+					}}
+				>
+					{action.label}
+				</button>
+			{/if}
 		</div>
 	{/if}
 {/if}

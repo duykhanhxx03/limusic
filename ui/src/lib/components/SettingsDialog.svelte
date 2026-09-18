@@ -386,6 +386,12 @@
 		}
 	}
 
+	const sponsorOn = $derived(settings.sponsorblock !== 'false');
+	async function setSponsor(on: boolean) {
+		settings.sponsorblock = on ? 'true' : 'false';
+		await api.setSetting('sponsorblock', settings.sponsorblock);
+	}
+
 	const simpMusicOn = $derived(settings.lyrics_simpmusic !== 'false');
 	async function setSimpMusic(on: boolean) {
 		settings.lyrics_simpmusic = on ? 'true' : 'false';
@@ -767,6 +773,12 @@
 									control: hideVideoSwitch,
 									tall: true
 								})}
+								{@render row({
+									title: t('settings.playback.sponsorblock'),
+									desc: t('settings.playback.sponsorblock_hint'),
+									control: sponsorSwitch,
+									tall: true
+								})}
 							</div>
 						</section>
 						<section class={GROUP}>
@@ -960,6 +972,7 @@
 	/>{/snippet}
 {#snippet musicVideoSwitch()}<Switch checked={musicVideosOn} onCheckedChange={setMusicVideos} />{/snippet}
 {#snippet hideVideoSwitch()}<Switch checked={hideVideosOn} onCheckedChange={setHideVideos} />{/snippet}
+{#snippet sponsorSwitch()}<Switch checked={sponsorOn} onCheckedChange={setSponsor} />{/snippet}
 {#snippet boiduSwitch()}<Switch checked={boiduOn} onCheckedChange={setBoidu} />{/snippet}
 {#snippet simpMusicSwitch()}<Switch checked={simpMusicOn} onCheckedChange={setSimpMusic} />{/snippet}
 {#snippet lyricsOffset()}<LyricsOffset />{/snippet}
