@@ -78,6 +78,9 @@ pub struct LyricsRequest {
     pub album: Option<String>,
     /// Track length in seconds (mpv's), tightens LRCLIB matching. `None`/0 when unknown yet.
     pub duration: Option<f64>,
+    /// A music video rather than the audio track, when something has already said which. Lyrics
+    /// are mostly timed on the audio release, which the video runs longer than (`on_this_video`).
+    pub is_video: Option<bool>,
 }
 
 /// `LIMUSIC_LYRICS_ONLY=<boidu|netease|qq|kugou>` pins the chain to that one provider and bypasses
@@ -173,7 +176,7 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
     if !crate::local::is_local_song(&req.video_id)
         && state.db.get_setting("lyrics_simpmusic").as_deref() != Some("false")
     {
-        if let Ok(Some(l)) = simpmusic_get(req).await {
+        if let Ok(Some(l)) = simpmusic_get(state, req).await {
             return (Some(l), true);
         }
     }
@@ -428,6 +431,11 @@ fn from_parsed(source: &str, mut lines: Vec<LyricLine>) -> Option<Lyrics> {
         }
         if line.words.as_ref().is_some_and(Vec::is_empty) {
             line.words = None;
+        }
+        // The line's own text, for everything that shows a line rather than its words (the mini
+        // player, a copied lyric): the same spaced sources left runs of spaces in it too.
+        if line.text.contains("  ") {
+            line.text = line.text.split_whitespace().collect::<Vec<_>>().join(" ");
         }
     }
     Some(Lyrics {
@@ -841,7 +849,35 @@ struct SimpMusicEntry {
 /// The database is crowd-sourced, so an entry is checked before it is shown: its length has to be
 /// within tolerance of the track (when both are known), and among several entries for one video the
 /// most up-voted wins.
-async fn simpmusic_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
+async fn simpmusic_get(
+    state: &AppState,
+    req: &LyricsRequest,
+) -> Result<Option<Lyrics>, reqwest::Error> {
+    let Some(e) = simpmusic_entry(req).await? else { return Ok(None) };
+    let timed = [&e.rich_sync_lyrics, &e.synced_lyrics]
+        .iter()
+        .any(|s| s.as_deref().is_some_and(|s| !s.trim().is_empty()));
+    // Only timed lyrics can be timed to the wrong cut, so only they cost the lookup.
+    let non_music =
+        if timed { crate::sponsorblock::non_music(state, &req.video_id).await } else { Vec::new() };
+    // What the video is only matters when SponsorBlock can't place the song and the entry has a
+    // later timeline to move onto, which is rare enough to ask YouTube when nobody has said yet.
+    let is_video = match req.is_video {
+        Some(v) => v,
+        None if non_music.is_empty() && simpmusic_later_by(&e).is_some() => {
+            is_music_video(state, &req.video_id).await
+        }
+        None => false,
+    };
+    let l = simpmusic_lyrics(&e, &non_music, is_video);
+    if l.is_none() && timed {
+        tracing::debug!(video_id = %req.video_id, "lyrics: SimpMusic timed for another cut, skipped");
+    }
+    Ok(l)
+}
+
+/// The entry for this video: of those within `MATCH_TOLERANCE_SECS` of its length, the best voted.
+async fn simpmusic_entry(req: &LyricsRequest) -> Result<Option<SimpMusicEntry>, reqwest::Error> {
     #[derive(Deserialize)]
     struct Resp {
         #[serde(default)]
@@ -859,34 +895,226 @@ async fn simpmusic_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::E
     }
     let body: Resp = resp.error_for_status()?.json().await?;
     let ours = req.duration.filter(|d| *d > 0.0);
-    let hit = body
+    Ok(body
         .data
         .into_iter()
         .filter(|e| match (ours, e.duration_seconds.filter(|d| *d > 0.0)) {
             (Some(a), Some(b)) => (a - b).abs() <= MATCH_TOLERANCE_SECS,
             _ => true,
         })
-        .max_by_key(|e| e.vote);
-    Ok(hit.and_then(|e| simpmusic_to_lyrics(&e)))
+        .max_by_key(|e| e.vote))
 }
 
-/// Word-synced over line-synced over plain, whichever the entry actually carries.
-fn simpmusic_to_lyrics(e: &SimpMusicEntry) -> Option<Lyrics> {
-    const SOURCE: &str = "SimpMusic Lyrics";
-    let present =
-        |s: &Option<String>| s.as_deref().filter(|s| !s.trim().is_empty()).map(str::to_owned);
-    if let Some(rich) = present(&e.rich_sync_lyrics) {
-        if let Some(l) = from_parsed(SOURCE, clean_lines(parse_rich_sync(&rich))) {
-            return Some(l);
+/// Word-synced over line-synced over plain, whichever the entry carries — and, for the timed ones,
+/// whichever fits the video (`on_this_video`). `None` when its timing belongs to another cut, so
+/// the chain moves on to a provider that has this one.
+fn simpmusic_lyrics(
+    e: &SimpMusicEntry,
+    non_music: &[(f64, f64)],
+    is_video: bool,
+) -> Option<Lyrics> {
+    let (rich, synced) = simpmusic_timed(e);
+    if rich.is_none() && synced.is_none() {
+        return simpmusic_plain(e);
+    }
+    from_parsed(SIMPMUSIC, on_this_video(rich, synced, non_music, is_video)?)
+}
+
+const SIMPMUSIC: &str = "SimpMusic Lyrics";
+
+/// How far the entry's line-synced form runs behind its word-synced one, when it does by a fixed
+/// shift (`shared_offset`).
+fn simpmusic_later_by(e: &SimpMusicEntry) -> Option<i64> {
+    let (Some(rich), Some(synced)) = simpmusic_timed(e) else { return None };
+    shared_offset(&vocal_cues(&rich), &vocal_cues(&synced)).filter(|&d| d > 0)
+}
+
+/// Whether YouTube Music calls `video_id` a music video. Its watch queue opens on the video itself,
+/// typed. A request that fails answers no, which leaves the lyrics as the entry has them.
+async fn is_music_video(state: &AppState, video_id: &str) -> bool {
+    let Some(client) = state.clients.get(innertube::METADATA_CLIENT) else { return false };
+    match state.it.next(client, Some(video_id), None).await {
+        Ok(next) => next.items.iter().any(|i| i.video_id == video_id && i.is_video),
+        Err(e) => {
+            tracing::debug!(video_id, error = %e, "lyrics: couldn't ask what the video is");
+            false
         }
     }
-    if let Some(lrc) = present(&e.synced_lyrics) {
-        let lines = parse_lrc(&decode_entities(&lrc));
-        if let Some(l) = from_parsed(SOURCE, clean_lines(lines)) {
-            return Some(l);
+}
+
+/// An entry's two timed forms, parsed: word-synced and line-synced. Either may be missing.
+fn simpmusic_timed(e: &SimpMusicEntry) -> (Option<Vec<LyricLine>>, Option<Vec<LyricLine>>) {
+    fn present(s: &Option<String>) -> Option<&str> {
+        s.as_deref().filter(|s| !s.trim().is_empty())
+    }
+    let rich = present(&e.rich_sync_lyrics)
+        .map(|r| clean_lines(parse_rich_sync(r)))
+        .filter(|l| !l.is_empty());
+    let synced = present(&e.synced_lyrics)
+        .map(|lrc| clean_lines(parse_lrc(&decode_entities(lrc))))
+        .filter(|l| !l.is_empty());
+    (rich, synced)
+}
+
+fn simpmusic_plain(e: &SimpMusicEntry) -> Option<Lyrics> {
+    let plain = e.plain_lyric.as_deref().filter(|s| !s.trim().is_empty());
+    plain_from_text(plain.map(decode_entities).as_deref(), SIMPMUSIC)
+}
+
+/// A shift below this is noise between two people's timing of the same cut, not two cuts.
+const CUT_OFFSET_MIN_MS: u64 = 1000;
+/// How close a shifted line has to land on a line of the other timeline to count as the same line.
+const LINE_MATCH_MS: u64 = 500;
+/// Lines compared when looking for a shared offset: enough to be sure, few enough to be cheap.
+const OFFSET_SAMPLE: usize = 20;
+/// How far a video's opening scene may disagree with the timelines' offset and still stand for it.
+const SCENE_AGREE_MS: u64 = 1500;
+
+/// The word-synced lines if they fit the video that is playing, moved onto it if they were timed
+/// on another cut of the song, or the line-synced ones — or `None` when nothing in the entry fits.
+///
+/// SimpMusic's entries are community-made per video, and the two timed forms in one entry do not
+/// always come from the same cut. For Sơn Tùng's "Đừng Làm Trái Tim Anh Đau" music video, the
+/// words were timed against the 281 s audio release while the lines follow the 326 s video, whose
+/// first 16.4 s are a spoken scene: every word ran 16.4 s ahead of the singing. Two pieces of
+/// evidence settle which timeline belongs to the video:
+///
+/// - A lyric can't be sung inside a section SponsorBlock marks as not music. Timing that puts two
+///   or more lines there was made on another cut.
+/// - A music video is its song plus scenes around it, so of two timelines a fixed shift apart,
+///   the later one is the video's. (Checked on six Vietnamese music videos: it picks the timing
+///   LRCLIB's video-length entries agree with in both cases where the forms disagree.)
+///
+/// The second holds without SponsorBlock too, as long as this is known to be a music video:
+/// "Muộn Rồi Mà Sao Còn" has no SponsorBlock sections, and its words run on the 276 s release while
+/// the video opens with 8.91 s of scene (measured by cross-correlating the two audio tracks). The
+/// entry's English line translation follows the video, and the shared offset comes out at 9.03 s.
+/// On an audio track, or with no second timeline to compare, the word-synced lines stand, which
+/// is what every entry did before this existed.
+fn on_this_video(
+    rich: Option<Vec<LyricLine>>,
+    synced: Option<Vec<LyricLine>>,
+    non_music: &[(f64, f64)],
+    is_video: bool,
+) -> Option<Vec<LyricLine>> {
+    if non_music.is_empty() {
+        let later = match (&rich, &synced) {
+            (Some(r), Some(s)) if is_video => {
+                shared_offset(&vocal_cues(r), &vocal_cues(s)).filter(|&d| d > 0)
+            }
+            _ => None,
+        };
+        return match later {
+            Some(shift) => rich.map(|mut r| {
+                shift_lines(&mut r, shift);
+                r
+            }),
+            None => rich.or(synced),
+        };
+    }
+    let fits = |lines: &[LyricLine], shift: i64| sung_in_non_music(lines, shift, non_music) < 2;
+    if let (Some(r), Some(s)) = (&rich, &synced) {
+        if let Some(shift) = shared_offset(&vocal_cues(r), &vocal_cues(s)) {
+            let (here, moved) = (fits(r, 0), fits(r, shift));
+            let take_moved = match (here, moved) {
+                (true, true) => shift > 0,
+                (here, moved) if here != moved => moved,
+                _ => return None, // neither timeline fits this video
+            };
+            let mut r = rich.unwrap();
+            if take_moved {
+                shift_lines(&mut r, opening_scene(non_music, shift));
+            }
+            return Some(r);
         }
     }
-    plain_from_text(present(&e.plain_lyric).map(|p| decode_entities(&p)).as_deref(), SOURCE)
+    if let Some(r) = rich.filter(|r| fits(r, 0)) {
+        return Some(r);
+    }
+    synced.filter(|s| fits(s, 0))
+}
+
+/// The shift onto a video that opens on a non-music scene: that scene's end, when SponsorBlock
+/// marks one from the top and it agrees with `shift` to within `SCENE_AGREE_MS`; `shift` otherwise.
+///
+/// Both measure how long the video runs before the release's first sample, but the offset between
+/// two timelines is only as tight as the looser of them, and the second form is often a translation
+/// or captions. Against the audio offsets measured by cross-correlating four videos with their
+/// releases, the scene's end was off by 0.02–0.21 s and the timelines' offset by up to 0.75 s
+/// ("bad guy", whose second form is closed captions).
+fn opening_scene(non_music: &[(f64, f64)], shift: i64) -> i64 {
+    if shift <= 0 {
+        return shift;
+    }
+    non_music
+        .iter()
+        .find(|&&(start, _)| start <= 1.0)
+        .map(|&(_, end)| (end * 1000.0).round() as i64)
+        .filter(|end| end.abs_diff(shift) <= SCENE_AGREE_MS)
+        .unwrap_or(shift)
+}
+
+/// Cue times of the lines that are sung (a cue and some text), in ms.
+fn vocal_cues(lines: &[LyricLine]) -> Vec<u64> {
+    lines.iter().filter(|l| !l.text.trim().is_empty()).filter_map(|l| l.time_ms).collect()
+}
+
+/// The fixed shift (ms, added to `a`) that puts most of `a`'s lines onto `b`'s, when there is one
+/// worth acting on: at least a second, and agreed on by seven in ten of the lines compared. Two
+/// timings of one cut disagree by less than that, and two unrelated line sets agree on no shift.
+/// Matched by time, not by index or text, because the two forms need not have the same lines —
+/// or the same language: one entry pairs Vietnamese words with an English line translation.
+fn shared_offset(a: &[u64], b: &[u64]) -> Option<i64> {
+    let a = &a[..a.len().min(OFFSET_SAMPLE)];
+    let b = &b[..b.len().min(OFFSET_SAMPLE + 5)];
+    if a.len() < 5 || b.is_empty() {
+        return None;
+    }
+    // For a shift: how many of `a`'s lines land on one of `b`'s, and how far off they land in all.
+    let fit = |d: i64| {
+        let misses = a
+            .iter()
+            .filter_map(|&x| b.iter().map(|&y| (x as i64 + d - y as i64).unsigned_abs()).min());
+        misses.filter(|&m| m <= LINE_MATCH_MS).fold((0usize, 0u64), |(n, sum), m| (n + 1, sum + m))
+    };
+    // Most lines matched, then the tightest match. The second matters for evenly spaced lines: a
+    // shift of whole lines lands most of them *near* a line too, and only the true shift lands
+    // them on one. (Smallest shift was the tie-break at first, and it picked such an alias.)
+    let mut best: Option<(usize, u64, i64)> = None;
+    for &x in a {
+        for &y in b {
+            let d = y as i64 - x as i64;
+            let (n, miss) = fit(d);
+            if best.is_none_or(|(bn, bm, _)| n > bn || (n == bn && miss < bm)) {
+                best = Some((n, miss, d));
+            }
+        }
+    }
+    let (n, _, d) = best?;
+    (d.unsigned_abs() >= CUT_OFFSET_MIN_MS && n * 10 >= a.len() * 7).then_some(d)
+}
+
+/// How many sung lines, moved by `shift` ms, fall inside a non-music section (half a second in
+/// from either edge, so a line that starts as the music does is not counted against it).
+fn sung_in_non_music(lines: &[LyricLine], shift: i64, non_music: &[(f64, f64)]) -> usize {
+    vocal_cues(lines)
+        .into_iter()
+        .map(|t| (t as i64 + shift) as f64 / 1000.0)
+        .filter(|t| non_music.iter().any(|&(a, b)| *t > a + 0.5 && *t < b - 0.5))
+        .count()
+}
+
+/// Move every cue in `lines` — line starts, line ends, words — by `shift` ms.
+fn shift_lines(lines: &mut [LyricLine], shift: i64) {
+    let mv = |t: u64| (t as i64 + shift).max(0) as u64;
+    for l in lines {
+        l.time_ms = l.time_ms.map(mv);
+        l.end_time_ms = l.end_time_ms.map(mv);
+        for w in l.words.iter_mut().flatten() {
+            w.start_ms = mv(w.start_ms);
+            w.end_ms = mv(w.end_ms);
+        }
+    }
 }
 
 /// SimpMusic's word-synced format, one line per lyric line:
@@ -1710,6 +1938,12 @@ mod tests {
             let l = from_parsed("X", parse_rich_sync(raw)).unwrap();
             l.lines[0].words.as_ref().unwrap().iter().map(|w| w.text.clone()).collect()
         };
+        let text =
+            |raw: &str| from_parsed("X", parse_rich_sync(raw)).unwrap().lines[0].text.clone();
+        assert_eq!(
+            text("[00:43.81] <00:43.81> Uhm, <00:44.20>   <00:44.25> đau <00:44.38>   <00:44.43> hết <00:44.55>"),
+            "Uhm, đau hết"
+        );
         assert_eq!(
             words("[00:43.81] <00:43.81> Uhm, <00:44.20>   <00:44.25> đau <00:44.38>   <00:44.43> hết <00:44.55>"),
             ["Uhm, ", "đau ", "hết"]
@@ -1726,6 +1960,143 @@ mod tests {
         );
     }
 
+    /// Lines at these cues (seconds), each with one word, the way a rich-sync entry parses.
+    fn timed(cues: &[f64]) -> Vec<LyricLine> {
+        cues.iter()
+            .map(|&t| {
+                let ms = (t * 1000.0).round() as u64;
+                LyricLine {
+                    time_ms: Some(ms),
+                    end_time_ms: Some(ms + 900),
+                    text: "la".into(),
+                    words: Some(vec![LyricWord {
+                        text: "la".into(),
+                        start_ms: ms,
+                        end_ms: ms + 900,
+                    }]),
+                    translation: None,
+                }
+            })
+            .collect()
+    }
+    fn first_cue(lines: &[LyricLine]) -> f64 {
+        lines[0].time_ms.unwrap() as f64 / 1000.0
+    }
+    /// A realistic run of verse cues starting at `start`.
+    fn verse(start: f64) -> Vec<f64> {
+        (0..24).map(|i| start + i as f64 * 3.7 + if i % 3 == 1 { 0.4 } else { 0.0 }).collect()
+    }
+
+    /// "Đừng Làm Trái Tim Anh Đau", the music video: the words were timed on the 281 s audio
+    /// release (first line 30.37 s), the lines on the 326 s video (46.78 s), whose first 16.4 s
+    /// SponsorBlock marks as not music. Both fit; the later one is the video's.
+    #[test]
+    fn words_timed_on_the_audio_release_move_onto_the_video() {
+        let rich = verse(30.37);
+        let synced: Vec<f64> = rich.iter().map(|t| t + 16.41).collect();
+        let non_music = [(0.0, 16.43), (292.84, 325.66)];
+        let out =
+            on_this_video(Some(timed(&rich)), Some(timed(&synced)), &non_music, true).unwrap();
+        // By the opening scene's end, 16.43 s. The audio tracks put the song 16.48 s in.
+        assert!((first_cue(&out) - 46.80).abs() < 0.01, "got {}", first_cue(&out));
+        // The words move with their lines: the karaoke sweep follows the new timing too.
+        assert_eq!(out[0].words.as_ref().unwrap()[0].start_ms, out[0].time_ms.unwrap());
+        // Without SponsorBlock the video still runs later than the release its words were timed on.
+        let out = on_this_video(Some(timed(&rich)), Some(timed(&synced)), &[], true).unwrap();
+        assert!((first_cue(&out) - 46.78).abs() < 0.01, "got {}", first_cue(&out));
+        // On an audio track there is no such rule, and nothing is moved.
+        let out = on_this_video(Some(timed(&rich)), Some(timed(&synced)), &[], false).unwrap();
+        assert!((first_cue(&out) - 30.37).abs() < 0.01);
+    }
+
+    /// "bad guy", the music video: the second form is closed captions, loose enough that the two
+    /// timelines' offset comes out at 13.33 s. The song starts 14.08 s into the video (measured on
+    /// the audio tracks), and SponsorBlock's opening scene ends at 14.1 s.
+    #[test]
+    fn the_opening_scene_places_the_song_more_tightly_than_loose_lines() {
+        let rich = [
+            14.03, 17.6, 21.24, 24.81, 28.33, 31.87, 34.77, 39.01, 41.9, 43.52, 45.23, 47.0, 49.37,
+            50.52, 52.29, 54.23, 56.28, 66.92, 74.6, 78.22,
+        ];
+        let captions = [
+            3.33, 5.1, 6.6, 9.1, 13.36, 27.46, 28.56, 31.16, 32.13, 34.43, 35.56, 38.16, 41.56,
+            42.6, 45.2, 46.26, 48.6, 49.56, 52.26, 55.16, 57.13, 58.43, 60.23, 62.43, 63.66,
+        ];
+        let ms = |v: &[f64]| v.iter().map(|t| (t * 1000.0).round() as u64).collect::<Vec<_>>();
+        assert_eq!(shared_offset(&ms(&rich), &ms(&captions)), Some(13330));
+        let non_music = [(0.0, 14.1), (194.0, 205.9)];
+        let out =
+            on_this_video(Some(timed(&rich)), Some(timed(&captions)), &non_music, true).unwrap();
+        assert!((first_cue(&out) - (14.03 + 14.08)).abs() < 0.1, "got {}", first_cue(&out));
+        // A scene that disagrees with the timelines by more than a second and a half is something
+        // else (a spoken intro over music, say), and the timelines' own offset stands.
+        let out = on_this_video(Some(timed(&rich)), Some(timed(&captions)), &[(0.0, 11.0)], true)
+            .unwrap();
+        assert!((first_cue(&out) - (14.03 + 13.33)).abs() < 0.01, "got {}", first_cue(&out));
+    }
+
+    /// "Muộn Rồi Mà Sao Còn", the music video: no SponsorBlock sections at all. The words are the
+    /// 276 s release's (29.05 s), the English line translation follows the 288 s video. The video's
+    /// singing starts 8.91 s after the release's, measured by cross-correlating the two audio
+    /// tracks; the offset the translation gives is within 0.15 s of that.
+    #[test]
+    fn a_music_video_without_sponsorblock_takes_the_later_timeline() {
+        let rich = [
+            29.05, 31.6, 35.34, 37.32, 39.17, 41.4, 43.14, 45.07, 46.82, 49.78, 52.85, 54.46,
+            56.31, 58.17, 60.27, 62.39, 64.01, 65.29, 67.81, 69.68,
+        ];
+        let english = [
+            38.43, 40.89, 42.86, 44.61, 46.41, 48.14, 50.47, 52.15, 53.95, 55.85, 59.11, 61.8,
+            63.46, 65.28, 67.38, 69.2, 71.23, 73.07, 76.89, 78.68, 80.68, 82.52, 84.59, 86.36,
+            88.23,
+        ];
+        let out = on_this_video(Some(timed(&rich)), Some(timed(&english)), &[], true).unwrap();
+        assert!((first_cue(&out) - (29.05 + 8.91)).abs() < 0.15, "got {}", first_cue(&out));
+        // The Vietnamese words are what shows, only moved.
+        assert_eq!(out.len(), rich.len());
+    }
+
+    /// "Chạy Ngay Đi": the same disagreement the other way round. The words (28.3 s, which
+    /// LRCLIB's video-length entries agree with) are the later timeline, so they stay put.
+    #[test]
+    fn words_already_on_the_video_stay_put() {
+        let rich = verse(28.3);
+        let mut synced: Vec<f64> = rich.iter().map(|t| t - 13.2).collect();
+        synced.insert(0, 6.01); // a line the words don't have
+        let out =
+            on_this_video(Some(timed(&rich)), Some(timed(&synced)), &[(0.0, 10.2)], true).unwrap();
+        assert!(
+            (first_cue(&out) - 28.3).abs() < 0.01,
+            "got {} of {:?}",
+            first_cue(&out),
+            out.iter().take(3).map(|l| l.time_ms).collect::<Vec<_>>()
+        );
+    }
+
+    /// "See tình": words sung inside the spoken intro can't be the video's timing. The lines fit,
+    /// so they are what shows.
+    #[test]
+    fn words_sung_over_a_spoken_scene_give_way_to_lines_that_fit() {
+        let rich = verse(0.17);
+        let synced = verse(43.0);
+        let non_music = [(0.0, 33.5), (209.7, 236.5)];
+        let out =
+            on_this_video(Some(timed(&rich)), Some(timed(&synced)), &non_music, true).unwrap();
+        assert!((first_cue(&out) - 43.0).abs() < 0.01, "got {}", first_cue(&out));
+        // And with nothing that fits, the provider steps aside for the next one.
+        assert!(on_this_video(Some(timed(&rich)), None, &non_music, true).is_none());
+    }
+
+    #[test]
+    fn two_timings_of_one_cut_are_not_a_shift() {
+        let a = verse(21.05);
+        let b: Vec<f64> = a.iter().map(|t| t - 0.37).collect();
+        let ms = |v: &[f64]| v.iter().map(|t| (t * 1000.0).round() as u64).collect::<Vec<_>>();
+        assert_eq!(shared_offset(&ms(&a), &ms(&b)), None, "0.37 s is two people timing one cut");
+        let c: Vec<f64> = a.iter().map(|t| t + 16.41).collect();
+        assert_eq!(shared_offset(&ms(&a), &ms(&c)), Some(16410));
+    }
+
     #[test]
     fn simpmusic_rich_sync_times_each_word_from_its_own_tag() {
         let rich = "[00:00.00] Synced by Noob.exe\n\
@@ -1740,7 +2111,7 @@ mod tests {
             duration_seconds: Some(200.0),
             vote: 0,
         };
-        let l = simpmusic_to_lyrics(&entry).unwrap();
+        let l = simpmusic_lyrics(&entry, &[], false).unwrap();
         assert!(l.synced);
         // The syncer's signature is gone; the empty gap line stays.
         assert_eq!(l.lines.len(), 4);
@@ -1775,11 +2146,11 @@ mod tests {
             duration_seconds: None,
             vote: 0,
         };
-        let l = simpmusic_to_lyrics(&e).unwrap();
+        let l = simpmusic_lyrics(&e, &[], false).unwrap();
         assert!(l.synced && l.lines[1].words.is_none());
         assert_eq!(l.lines[1].text, "two & three");
         e.synced_lyrics = None;
-        let l = simpmusic_to_lyrics(&e).unwrap();
+        let l = simpmusic_lyrics(&e, &[], false).unwrap();
         assert!(!l.synced);
         assert_eq!(l.source, "SimpMusic Lyrics");
     }
@@ -1867,6 +2238,7 @@ mod tests {
             artists: "Ed Sheeran".into(),
             album: None,
             duration: Some(233.0),
+            is_video: None,
         };
         let mut alive = 0;
         for (name, hit) in [
@@ -1899,7 +2271,8 @@ mod tests {
 
         // SimpMusic Lyrics looks up by videoId, so it needs a real one: Dua Lipa, "Levitating".
         let sm = LyricsRequest { video_id: "OsfAnsMY21M".into(), duration: Some(203.0), ..req };
-        let sm = simpmusic_get(&sm).await.unwrap().expect("SimpMusic Lyrics hit");
+        let entry = simpmusic_entry(&sm).await.unwrap().expect("SimpMusic Lyrics entry");
+        let sm = simpmusic_lyrics(&entry, &[], false).expect("SimpMusic Lyrics hit");
         println!("SimpMusic Lyrics: {} lines, synced={}", sm.lines.len(), sm.synced);
         assert!(sm.lines.iter().any(|l| l.words.is_some()));
     }

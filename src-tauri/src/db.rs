@@ -260,7 +260,10 @@ impl Db {
         //   2 — SimpMusic Lyrics went ahead of every other provider.
         //   3 — a catalogue search hit has to carry the right title, not only the right length. A
         //       Vietnamese track had been cached with a Chinese song's lyrics of the same length.
-        const LYRICS_CACHE_EPOCH: &str = "3";
+        //   4 — SimpMusic lyrics timed on another cut of the song are moved onto the video, or
+        //       passed over. Music videos had been cached with words 16 s ahead of the singing.
+        //   5 — the same for music videos SponsorBlock knows nothing about.
+        const LYRICS_CACHE_EPOCH: &str = "5";
         let epoch: Option<String> = conn
             .query_row("SELECT value FROM settings WHERE key = 'lyrics_cache_epoch'", [], |r| {
                 r.get(0)

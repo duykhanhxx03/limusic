@@ -1927,6 +1927,19 @@ impl AppState {
         tracing::debug!(index = next_idx, "gapless lookahead primed");
     }
 
+    /// Whether `video_id` is a music video rather than an audio track, if that is known yet. A
+    /// resolve settles it (`/player` types the video, and the stream cache keeps the answer); before
+    /// that only a row that says "video" counts, because a row that doesn't may simply not say.
+    /// Lyrics ask ahead of the resolve when they prefetch the next track.
+    pub async fn is_music_video(&self, video_id: &str) -> Option<bool> {
+        // Any row, expired or not: a URL goes stale, what the video is doesn't.
+        if let Some(v) = self.db.get_stream(video_id, 0).and_then(|c| c.is_video) {
+            return Some(v);
+        }
+        let q = self.queue.lock().await;
+        q.items.iter().any(|i| i.video_id == video_id && i.is_video).then_some(true)
+    }
+
     async fn current_item(&self) -> Option<SongItem> {
         let q = self.queue.lock().await;
         q.items.get(q.current).cloned()

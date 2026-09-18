@@ -73,32 +73,55 @@ pub fn track_changed(state: &Arc<AppState>, video_id: &str) {
         let mut c = state.sponsorblock.current.lock().unwrap();
         *c = Current { video_id: video_id.to_owned(), ..Default::default() };
     }
-    if !enabled(state) || crate::local::is_local_song(video_id) {
-        return;
-    }
-    let cached = state.sponsorblock.cache.lock().unwrap().get(video_id).cloned();
-    if let Some(segments) = cached {
+    if let Some(segments) = cached(state, video_id) {
         install(state, video_id, segments);
         return;
     }
     let state = state.clone();
     let video_id = video_id.to_owned();
     tauri::async_runtime::spawn(async move {
-        match fetch(&video_id).await {
-            Ok(segments) => {
-                {
-                    let mut cache = state.sponsorblock.cache.lock().unwrap();
-                    if cache.len() >= CACHE_LIMIT {
-                        cache.clear(); // ponytail: crude, but a session rarely plays 64 MVs
-                    }
-                    cache.insert(video_id.clone(), segments.clone());
-                }
-                install(&state, &video_id, segments);
-            }
-            // Offline, or the service is down: the video plays whole, which is what it did before.
-            Err(e) => tracing::debug!(error = %e, video_id, "sponsorblock: lookup failed"),
+        if let Some(segments) = lookup(&state, &video_id).await {
+            install(&state, &video_id, segments);
         }
     });
+}
+
+/// The video's non-music sections as `(start, end)` seconds, for the lyrics: a lyric sung inside
+/// one is timed to some other cut of the song (lyrics.rs). Shares the skipper's cache, so the track
+/// that is about to play is asked about once for both. Empty when switched off, for a local file,
+/// or when the service can't be reached — "no evidence", never an error.
+pub async fn non_music(state: &AppState, video_id: &str) -> Vec<(f64, f64)> {
+    let segments = match cached(state, video_id) {
+        Some(s) => s,
+        None => lookup(state, video_id).await.unwrap_or_default(),
+    };
+    segments.into_iter().map(|s| (s.start, s.end)).collect()
+}
+
+fn cached(state: &AppState, video_id: &str) -> Option<Vec<Segment>> {
+    state.sponsorblock.cache.lock().unwrap().get(video_id).cloned()
+}
+
+/// Ask the service, cache the answer. `None` when not asked (off, local file) or it failed.
+async fn lookup(state: &AppState, video_id: &str) -> Option<Vec<Segment>> {
+    if !enabled(state) || crate::local::is_local_song(video_id) {
+        return None;
+    }
+    match fetch(video_id).await {
+        Ok(segments) => {
+            let mut cache = state.sponsorblock.cache.lock().unwrap();
+            if cache.len() >= CACHE_LIMIT {
+                cache.clear(); // ponytail: crude, but a session rarely plays 64 MVs
+            }
+            cache.insert(video_id.to_owned(), segments.clone());
+            Some(segments)
+        }
+        // Offline, or the service is down: the video plays whole, which is what it did before.
+        Err(e) => {
+            tracing::debug!(error = %e, video_id, "sponsorblock: lookup failed");
+            None
+        }
+    }
 }
 
 fn install(state: &AppState, video_id: &str, segments: Vec<Segment>) {

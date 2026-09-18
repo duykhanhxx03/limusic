@@ -1630,9 +1630,10 @@ pub async fn get_lyrics(
     album: Option<String>,
     duration: Option<f64>,
 ) -> Result<Option<crate::lyrics::Lyrics>, String> {
+    let is_video = state.is_music_video(&video_id).await;
     Ok(crate::lyrics::get_lyrics(
         state.inner(),
-        crate::lyrics::LyricsRequest { video_id, title, artists, album, duration },
+        crate::lyrics::LyricsRequest { video_id, title, artists, album, duration, is_video },
     )
     .await)
 }
