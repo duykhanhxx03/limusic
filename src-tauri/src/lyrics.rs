@@ -17,13 +17,21 @@
 //! 5. Plain fallbacks: LRCLIB fuzzy search → LRCLIB plain (from step 2's response) → YT plain
 //!    (WEB_REMIX browse) → the fuzzy search's plain text.
 //!
+//! The numbers are the order answers are *read* in, which is not quite the order requests go out.
+//! SimpMusic is asked alongside `next()`, and YouTube's own lyrics browses start before the step
+//! that reads them, so their waits overlap the steps ahead of them (`fetch`). Boidu, LRCLIB and the
+//! three catalogues are still each asked only once everything ranked above them has come up empty:
+//! asking them side by side would tell third parties about tracks they never needed to hear of.
+//!
 //! Results are cached in SQLite (`lyrics_cache`): hits forever, "no lyrics" verdicts for 24h.
 //! A run where every provider merely *errored* (offline) caches nothing, so lyrics come back
 //! when the network does. Everything is best-effort — a lyrics failure is never a user error.
 
 use std::collections::HashSet;
+use std::future::Future;
 use std::time::Duration;
 
+use innertube::NextResult;
 use serde::{Deserialize, Serialize};
 use unicode_normalization::UnicodeNormalization;
 
@@ -117,6 +125,13 @@ pub async fn get_lyrics(state: &AppState, req: LyricsRequest) -> Option<Lyrics> 
 /// than merely erroring (offline must not poison the cache with a 24h "no lyrics").
 async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, bool) {
     let mut definitive = false;
+    let forced = forced_provider();
+    let local = crate::local::is_local_song(&req.video_id);
+    // Whether step 0 below asks SimpMusic. A local file has no videoId to look up, and a pinned
+    // provider runs alone.
+    let simpmusic = !local
+        && forced.is_none()
+        && state.db.get_setting("lyrics_simpmusic").as_deref() != Some("false");
 
     // 0. `next()` up front: it carries the lyrics browseId AND — via its seed item — the exact
     //    length of the cut this videoId plays. The queue item often has no duration (card plays;
@@ -125,21 +140,44 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
     //    A local file has no videoId to ask about — its duration came off the file itself, and
     //    YouTube has no lyrics browseId for it. Skip straight to LRCLIB (title + artist), which is
     //    the only provider that can answer for it anyway.
-    let next = if crate::local::is_local_song(&req.video_id) {
-        None
-    } else {
-        match state
+    //
+    //    SimpMusic's entries are asked for at the same time, not after. They are looked up by the
+    //    videoId alone; the length `next()` brings only picks among them, and that can wait until
+    //    both have answered. YouTube's plain lyrics go out the moment `next()` names them, because
+    //    a SimpMusic hit reads them (`join_syllables`) and would otherwise wait on one more round
+    //    trip. A SimpMusic miss keeps them for step 4b instead of asking again.
+    let youtube = async {
+        if local {
+            return (None, None);
+        }
+        let next = match state
             .it
             .next(state.clients.get(innertube::METADATA_CLIENT).unwrap(), Some(&req.video_id), None)
             .await
         {
-            Ok(n) => Some(n),
+            Ok(n) => n,
             Err(e) => {
                 tracing::debug!(error = %e, "lyrics: next() failed");
-                None
+                return (None, None);
             }
+        };
+        let plain = match (&next.lyrics_browse_id, state.clients.get(innertube::METADATA_CLIENT)) {
+            (Some(bid), Some(client)) if simpmusic => {
+                let (it, client, bid) = (state.it.clone(), client.clone(), bid.clone());
+                Some(Ahead::start(async move { it.lyrics_plain(&client, &bid).await }))
+            }
+            _ => None,
+        };
+        (Some(next), plain)
+    };
+    let entries = async {
+        if simpmusic {
+            Some(simpmusic_entries(&req.video_id).await)
+        } else {
+            None
         }
     };
+    let ((next, plain), entries) = tokio::join!(youtube, entries);
     let browse_id = next.as_ref().and_then(|n| n.lyrics_browse_id.clone());
     if req.duration.is_none() {
         req.duration = next.as_ref().and_then(|n| {
@@ -152,7 +190,7 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
     // Pinned to one provider: run it alone and report whatever it says, hit or miss, so a silent
     // fallthrough to LRCLIB can't be mistaken for the pinned provider working. Sits below the
     // duration lookup above on purpose, so the match tightening gets exercised too.
-    if let Some(only) = forced_provider() {
+    if let Some(only) = forced {
         let hit = match only.as_str() {
             "boidu" => boidu_get(req).await,
             "netease" => netease_get(req).await,
@@ -172,19 +210,15 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
     }
 
     // 0. SimpMusic Lyrics, keyed by the videoId: an exact answer for this very upload, where every
-    //    provider below is matching a title and a length and can land on another cut. A local
-    //    file has no videoId to look up.
-    if !crate::local::is_local_song(&req.video_id)
-        && state.db.get_setting("lyrics_simpmusic").as_deref() != Some("false")
-    {
-        if let Ok(Some(mut l)) = simpmusic_get(state, req).await {
+    //    provider below is matching a title and a length and can land on another cut. Its entries
+    //    were fetched alongside `next()` above; one is picked now that the length is known.
+    if let Some(Ok(entries)) = entries {
+        if let Some(mut l) = simpmusic_get(state, req, entries, next.as_ref()).await {
             // An entry can set a word's syllables down as words of their own, and only a text that
             // spells the song out tells the two apart (`join_syllables`). YouTube's own lyrics for
             // the track are one, from the service that is playing it anyway.
-            if let (Some(bid), Some(client)) =
-                (&browse_id, state.clients.get(innertube::METADATA_CLIENT))
-            {
-                if let Ok(Some(p)) = state.it.lyrics_plain(client, bid).await {
+            if let Some(plain) = plain {
+                if let Some(Ok(Some(p))) = plain.get().await {
                     join_syllables(&mut l.lines, &p.text);
                 }
             }
@@ -202,6 +236,18 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
         }
     }
 
+    // Steps 2 and 3 go out together: YouTube's timed lyrics are asked for while LRCLIB is, and
+    // read only if LRCLIB has no synced answer, as before. Asking YouTube early tells it nothing
+    // new (it is playing the track), and when LRCLIB wins the request is dropped unread. LRCLIB
+    // itself is still only asked once Boidu has come up empty.
+    let timed = match (&browse_id, state.clients.get(innertube::LYRICS_TIMED_CLIENT)) {
+        (Some(bid), Some(client)) => {
+            let (it, client, bid) = (state.it.clone(), client.clone(), bid.clone());
+            Some(Ahead::start(async move { it.lyrics_timed(&client, &bid).await }))
+        }
+        _ => None,
+    };
+
     // 2. LRCLIB exact match.
     let lr = lrclib_get(req).await;
     if let Ok(hit) = &lr {
@@ -217,11 +263,9 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
     if next.is_some() {
         definitive = true; // a next() answer with no lyrics tab IS "YT has no lyrics"
     }
-    if let (Some(bid), Some(client)) =
-        (&browse_id, state.clients.get(innertube::LYRICS_TIMED_CLIENT))
-    {
-        match state.it.lyrics_timed(client, bid).await {
-            Ok(lines) if !lines.is_empty() => {
+    if let Some(timed) = timed {
+        match timed.get().await {
+            Some(Ok(lines)) if !lines.is_empty() => {
                 return (
                     Some(Lyrics {
                         source: "YouTube Music".into(),
@@ -235,8 +279,8 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
                     true,
                 );
             }
-            Ok(_) => {}
-            Err(e) => tracing::debug!(error = %e, "lyrics: timed browse failed"),
+            Some(Ok(_)) | None => {}
+            Some(Err(e)) => tracing::debug!(error = %e, "lyrics: timed browse failed"),
         }
     }
 
@@ -274,21 +318,23 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
         }
     }
 
-    // 4b. Plain from YT (WEB_REMIX).
-    if let Some(bid) = &browse_id {
-        if let Some(client) = state.clients.get(innertube::METADATA_CLIENT) {
-            match state.it.lyrics_plain(client, bid).await {
-                Ok(Some(p)) => {
-                    // Footer is YT's own attribution ("Source: Musixmatch") — surface it.
-                    let source = p.footer.unwrap_or_else(|| "YouTube Music".into());
-                    if let Some(l) = plain_from_text(Some(&p.text), &source) {
-                        return (Some(l), true);
-                    }
-                }
-                Ok(None) => {}
-                Err(e) => tracing::debug!(error = %e, "lyrics: plain browse failed"),
+    // 4b. Plain from YT (WEB_REMIX): the request step 0 started when SimpMusic was asked, or one
+    //     made now when it wasn't.
+    let plain = match (plain, &browse_id, state.clients.get(innertube::METADATA_CLIENT)) {
+        (Some(early), _, _) => early.get().await,
+        (None, Some(bid), Some(client)) => Some(state.it.lyrics_plain(client, bid).await),
+        _ => None,
+    };
+    match plain {
+        Some(Ok(Some(p))) => {
+            // Footer is YT's own attribution ("Source: Musixmatch") — surface it.
+            let source = p.footer.unwrap_or_else(|| "YouTube Music".into());
+            if let Some(l) = plain_from_text(Some(&p.text), &source) {
+                return (Some(l), true);
             }
         }
+        Some(Ok(None)) | None => {}
+        Some(Err(e)) => tracing::debug!(error = %e, "lyrics: plain browse failed"),
     }
 
     // 4c. Plain from the fuzzy search.
@@ -299,6 +345,30 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
     }
 
     (None, definitive)
+}
+
+/// A request started before the step that reads it, so its wait overlaps the steps in between.
+///
+/// It runs as a task of its own because those steps await other requests, and a future nobody
+/// polls makes no progress. Dropping it aborts the task: a chain that returns early has found its
+/// lyrics and has no use for the answer.
+struct Ahead<T>(tauri::async_runtime::JoinHandle<T>);
+
+impl<T: Send + 'static> Ahead<T> {
+    fn start(request: impl Future<Output = T> + Send + 'static) -> Self {
+        Self(tauri::async_runtime::spawn(request))
+    }
+
+    /// The answer, or `None` when the task died without one.
+    async fn get(mut self) -> Option<T> {
+        (&mut self.0).await.ok()
+    }
+}
+
+impl<T> Drop for Ahead<T> {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 // --- LRCLIB (https://lrclib.net/docs) -------------------------------------------------------
@@ -854,17 +924,18 @@ struct SimpMusicEntry {
     vote: i64,
 }
 
-/// `GET /v1/{videoId}`. A 404 is a definitive "no entry"; everything else that isn't lyrics is
-/// transport trouble, reported as `Err` so it isn't cached as a miss.
+/// Lyrics from the video's SimpMusic `entries`, or `None` when none of them fits it.
 ///
 /// The database is crowd-sourced, so an entry is checked before it is shown: its length has to be
 /// within tolerance of the track (when both are known), and among several entries for one video the
-/// most up-voted wins.
+/// most up-voted wins (`simpmusic_pick`). `next` is the chain's own `next()` answer for the video.
 async fn simpmusic_get(
     state: &AppState,
     req: &LyricsRequest,
-) -> Result<Option<Lyrics>, reqwest::Error> {
-    let Some(e) = simpmusic_entry(req).await? else { return Ok(None) };
+    entries: Vec<SimpMusicEntry>,
+    next: Option<&NextResult>,
+) -> Option<Lyrics> {
+    let e = simpmusic_pick(entries, req.duration)?;
     let timed = [&e.rich_sync_lyrics, &e.synced_lyrics]
         .iter()
         .any(|s| s.as_deref().is_some_and(|s| !s.trim().is_empty()));
@@ -872,29 +943,29 @@ async fn simpmusic_get(
     let non_music =
         if timed { crate::sponsorblock::non_music(state, &req.video_id).await } else { Vec::new() };
     // What the video is only matters when SponsorBlock can't place the song and the entry has a
-    // later timeline to move onto, which is rare enough to ask YouTube when nobody has said yet.
-    let is_video = match req.is_video {
-        Some(v) => v,
-        None if non_music.is_empty() && simpmusic_later_by(&e).is_some() => {
-            is_music_video(state, &req.video_id).await
-        }
-        None => false,
-    };
+    // later timeline to move onto (`on_this_video`). When nobody has said, the `next()` answer the
+    // chain already holds does, at no cost.
+    let is_video = req.is_video.unwrap_or_else(|| is_music_video(next, &req.video_id));
     let l = simpmusic_lyrics(&e, &non_music, is_video);
     if l.is_none() && timed {
         tracing::debug!(video_id = %req.video_id, "lyrics: SimpMusic timed for another cut, skipped");
     }
-    Ok(l)
+    l
 }
 
-/// The entry for this video: of those within `MATCH_TOLERANCE_SECS` of its length, the best voted.
-async fn simpmusic_entry(req: &LyricsRequest) -> Result<Option<SimpMusicEntry>, reqwest::Error> {
+/// `GET /v1/{videoId}`: every entry for the video. A 404 is a definitive "no entry" (an empty
+/// list); everything else that isn't lyrics is transport trouble, reported as `Err` so it isn't
+/// cached as a miss.
+///
+/// Nothing is filtered here. The track's length often only arrives with `next()`, which this runs
+/// alongside, so `simpmusic_pick` chooses once both are in.
+async fn simpmusic_entries(video_id: &str) -> Result<Vec<SimpMusicEntry>, reqwest::Error> {
     #[derive(Deserialize)]
     struct Resp {
         #[serde(default)]
         data: Vec<SimpMusicEntry>,
     }
-    let url = format!("https://api-lyrics.simpmusic.org/v1/{}", urlencoding::encode(&req.video_id));
+    let url = format!("https://api-lyrics.simpmusic.org/v1/{}", urlencoding::encode(video_id));
     let resp = crate::http::client()
         .get(url)
         .header("User-Agent", LRCLIB_UA)
@@ -902,18 +973,23 @@ async fn simpmusic_entry(req: &LyricsRequest) -> Result<Option<SimpMusicEntry>, 
         .send()
         .await?;
     if resp.status() == reqwest::StatusCode::NOT_FOUND {
-        return Ok(None);
+        return Ok(Vec::new());
     }
     let body: Resp = resp.error_for_status()?.json().await?;
-    let ours = req.duration.filter(|d| *d > 0.0);
-    Ok(body
-        .data
+    Ok(body.data)
+}
+
+/// The entry for a video `duration` seconds long: of those within `MATCH_TOLERANCE_SECS` of it,
+/// the best voted. With no length on either side there is nothing to rule an entry out on.
+fn simpmusic_pick(entries: Vec<SimpMusicEntry>, duration: Option<f64>) -> Option<SimpMusicEntry> {
+    let ours = duration.filter(|d| *d > 0.0);
+    entries
         .into_iter()
         .filter(|e| match (ours, e.duration_seconds.filter(|d| *d > 0.0)) {
             (Some(a), Some(b)) => (a - b).abs() <= MATCH_TOLERANCE_SECS,
             _ => true,
         })
-        .max_by_key(|e| e.vote))
+        .max_by_key(|e| e.vote)
 }
 
 /// Word-synced over line-synced over plain, whichever the entry carries — and, for the timed ones,
@@ -933,24 +1009,11 @@ fn simpmusic_lyrics(
 
 const SIMPMUSIC: &str = "SimpMusic Lyrics";
 
-/// How far the entry's line-synced form runs behind its word-synced one, when it does by a fixed
-/// shift (`shared_offset`).
-fn simpmusic_later_by(e: &SimpMusicEntry) -> Option<i64> {
-    let (Some(rich), Some(synced)) = simpmusic_timed(e) else { return None };
-    shared_offset(&vocal_cues(&rich), &vocal_cues(&synced)).filter(|&d| d > 0)
-}
-
-/// Whether YouTube Music calls `video_id` a music video. Its watch queue opens on the video itself,
-/// typed. A request that fails answers no, which leaves the lyrics as the entry has them.
-async fn is_music_video(state: &AppState, video_id: &str) -> bool {
-    let Some(client) = state.clients.get(innertube::METADATA_CLIENT) else { return false };
-    match state.it.next(client, Some(video_id), None).await {
-        Ok(next) => next.items.iter().any(|i| i.video_id == video_id && i.is_video),
-        Err(e) => {
-            tracing::debug!(video_id, error = %e, "lyrics: couldn't ask what the video is");
-            false
-        }
-    }
+/// Whether YouTube Music calls `video_id` a music video. Its watch queue (`next`) opens on the
+/// video itself, typed; "hide music videos" never drops that row. No answer is a no, which leaves
+/// the lyrics as the entry has them.
+fn is_music_video(next: Option<&NextResult>, video_id: &str) -> bool {
+    next.is_some_and(|n| n.items.iter().any(|i| i.video_id == video_id && i.is_video))
 }
 
 /// An entry's two timed forms, parsed: word-synced and line-synced. Either may be missing.
@@ -2343,6 +2406,81 @@ mod tests {
         assert_eq!(muxed[0].translation.as_deref(), Some("Halo dunia"));
     }
 
+    /// SimpMusic's entries are fetched before `next()` has said how long the track is, and picked
+    /// once it has: the length rules entries out, and the vote decides among the rest.
+    #[test]
+    fn simpmusic_entries_are_picked_once_the_length_is_known() {
+        let entry = |duration: Option<f64>, vote| SimpMusicEntry {
+            synced_lyrics: None,
+            rich_sync_lyrics: None,
+            plain_lyric: None,
+            duration_seconds: duration,
+            vote,
+        };
+        let entries = || {
+            let cuts = [(Some(200.0), 9), (Some(233.0), 1), (Some(237.0), 3), (None, 2)];
+            cuts.into_iter().map(|(d, vote)| entry(d, vote)).collect::<Vec<_>>()
+        };
+        let vote = |e: Option<SimpMusicEntry>| e.map(|e| e.vote);
+        // 200 s is another cut, whatever its votes. Of the rest, 237 s is close enough and wins.
+        assert_eq!(vote(simpmusic_pick(entries(), Some(233.0))), Some(3));
+        // An entry with no length of its own is not ruled out.
+        assert_eq!(vote(simpmusic_pick(entries(), Some(300.0))), Some(2));
+        // No length on our side: every entry stands, and the best voted wins.
+        assert_eq!(vote(simpmusic_pick(entries(), None)), Some(9));
+        assert_eq!(vote(simpmusic_pick(entries(), Some(0.0))), Some(9));
+        assert_eq!(vote(simpmusic_pick(Vec::new(), Some(233.0))), None);
+    }
+
+    /// Whether the track is a music video comes from the chain's own `next()` answer, which used
+    /// to be asked for a second time just for this.
+    #[test]
+    fn the_watch_queue_says_whether_the_seed_is_a_music_video() {
+        let row = |id: &str, is_video| innertube::SongItem {
+            video_id: id.into(),
+            is_video,
+            ..Default::default()
+        };
+        let next = |items| NextResult {
+            items,
+            continuation: None,
+            lyrics_browse_id: None,
+            automix_playlist_id: None,
+            rating: None,
+        };
+        let video = next(vec![row("seed", true), row("other", false)]);
+        assert!(is_music_video(Some(&video), "seed"));
+        // Another row being a video says nothing about the seed.
+        let audio = next(vec![row("seed", false), row("other", true)]);
+        assert!(!is_music_video(Some(&audio), "seed"));
+        // No answer from YouTube leaves the entry's lyrics as they are.
+        assert!(!is_music_video(None, "seed"));
+    }
+
+    /// A request sent ahead runs before anyone reads it, hands its answer over when read, and is
+    /// cancelled when the chain returns without reading it.
+    #[tokio::test]
+    async fn a_request_sent_ahead_runs_unread_and_stops_when_dropped() {
+        let wait = Duration::from_secs(5);
+        let (sent, ran) = tokio::sync::oneshot::channel();
+        let ahead = Ahead::start(async move {
+            let _ = sent.send(());
+            7
+        });
+        tokio::time::timeout(wait, ran).await.expect("never ran unread").unwrap();
+        assert_eq!(ahead.get().await, Some(7));
+
+        let (held, dropped) = tokio::sync::oneshot::channel::<()>();
+        let ahead = Ahead::start(async move {
+            let _held = held;
+            std::future::pending::<()>().await
+        });
+        drop(ahead);
+        // The sender goes when the aborted task does, without ever sending.
+        let got = tokio::time::timeout(wait, dropped).await.expect("still running after drop");
+        assert!(got.is_err());
+    }
+
     /// Are the external providers still alive? Hits all four for real, so it is NOT in the default
     /// run (context/17: network tests are opt-in, or `cargo test` fails offline):
     ///   cargo test -p limusic-app --lib -- --ignored --nocapture
@@ -2400,7 +2538,8 @@ mod tests {
 
         // SimpMusic Lyrics looks up by videoId, so it needs a real one: Dua Lipa, "Levitating".
         let sm = LyricsRequest { video_id: "OsfAnsMY21M".into(), duration: Some(203.0), ..req };
-        let entry = simpmusic_entry(&sm).await.unwrap().expect("SimpMusic Lyrics entry");
+        let entries = simpmusic_entries(&sm.video_id).await.unwrap();
+        let entry = simpmusic_pick(entries, sm.duration).expect("SimpMusic Lyrics entry");
         let sm = simpmusic_lyrics(&entry, &[], false).expect("SimpMusic Lyrics hit");
         println!("SimpMusic Lyrics: {} lines, synced={}", sm.lines.len(), sm.synced);
         assert!(sm.lines.iter().any(|l| l.words.is_some()));

@@ -137,7 +137,14 @@ impl PoTokenGenerator {
     }
 
     /// Per-video streaming token for the `&pot=` URL param (context/04). Builds/reuses the
-    /// minter; call ONLY when a web-client stream URL actually resolved (post-decipher).
+    /// minter; call ONLY for a web-client format that actually came back from /player.
+    ///
+    /// The orchestrator runs this alongside deciphering that format's URL rather than after it,
+    /// and drops it unfinished if deciphering fails. Being dropped mid-bootstrap is safe: both
+    /// bootstraps on this path (`ensure_minter` and the rebuild in `mint_streaming`) clear the
+    /// minter they replace before they start, so the `minter` guard is left empty and the next
+    /// caller rebuilds. The BotGuard thread finishes the runtime and discards it once nobody is
+    /// left to take it (botguard.rs, `Cmd::Bootstrap`).
     pub async fn get_streaming_po_token(
         &self,
         video_id: &str,
@@ -187,6 +194,11 @@ impl PoTokenGenerator {
     ) -> Result<tokio::sync::MutexGuard<'a, Option<Minter>>, botguard::Error> {
         let mut guard = self.minter.lock().await;
         if !guard.as_ref().is_some_and(|m| m.valid_for(visitor_data)) {
+            // Cleared before the bootstrap, not replaced after it: the bootstrap frees the old
+            // runtime on the BotGuard thread first thing, and if this future is then dropped
+            // (see `get_streaming_po_token`) a minter left here would still pass `valid_for` for
+            // its own visitorData, after an account switch and back, with no isolate behind it.
+            *guard = None;
             *guard = Some(self.create_minter(visitor_data).await?);
         }
         Ok(guard)
@@ -233,6 +245,10 @@ impl PoTokenGenerator {
                     _ => "mint timed out".to_owned(),
                 };
                 tracing::debug!(error = why, "per-video mint failed, rebuilding minter once");
+                // The rebuild frees this minter's isolate before it builds the next one, so the
+                // minter must not outlive it here: dropped mid-rebuild, it would pass `valid_for`
+                // until its expiry and fail every mint with "botguard runtime is gone".
+                *guard = None;
                 let fresh = self.create_minter(visitor_data).await?;
                 let pot = timeout(CALL_TIMEOUT, fresh.inner.mint(video_id))
                     .await

@@ -334,6 +334,18 @@ impl QueueState {
         self.current = index;
         self.played_from = self.played_from.min(index);
     }
+
+    /// The whole queue as the UI takes it: the `queue-changed` event and `get_queue`.
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "items": &self.items,
+            "currentIndex": self.current,
+            "playedFrom": self.played_from,
+            "shuffle": self.shuffle_orig.is_some(),
+            "repeat": self.repeat,
+            "sourceName": &self.source_name,
+        })
+    }
 }
 
 /// How long a resolved googlevideo URL is treated as usable. YouTube's links last about six hours;
@@ -1431,10 +1443,20 @@ impl AppState {
         let Some(client) = self.clients.get(innertube::METADATA_CLIENT) else { return };
         let mut pages = 0;
         // The first page goes out at once so the panel visibly starts filling; after that the
-        // walk emits at most once a second. Every page is a *full* payload (the rows changed),
-        // and a 50-page walk of a 5,000-track playlist sends ~67 MB of JSON through
-        // `webview.eval` if each one is announced. The final state is emitted after the loop.
+        // walk emits at most once a second. Pages that only went onto the end of the queue (the
+        // playing playlist with shuffle off, the usual case) go out as just their rows. Anything
+        // else moved rows the panel already holds, so it has to be a *full* payload, and a
+        // 50-page walk of a 5,000-track playlist sends ~67 MB of JSON through `webview.eval` if
+        // each one is announced: those wait five seconds instead. The final state is emitted
+        // after the loop.
+        //
+        // `unsent` counts every row since the last emit. If something else announced the queue
+        // in between (a track change, an edit), it already carried some of them, and the count
+        // overshoots. `emit_queue_appended` sees the UI does not hold the rows in front of that
+        // many and sends the whole list once rather than showing the rows twice.
         let mut last_emit: Option<std::time::Instant> = None;
+        let mut unsent = 0;
+        let mut tail_only = true;
         for _ in 0..MAX_PAGES {
             let page = match self.it.playlist_continuation(client, &token).await {
                 Ok(page) => page,
@@ -1459,9 +1481,11 @@ impl AppState {
                     item.queued_from = from.clone();
                 }
             }
+            unsent += items.len();
             {
                 let mut q = self.queue.lock().await;
-                append_page(&mut q, items, matches!(fill, Fill::Playing));
+                // Per page, not once per walk: shuffle can be toggled while it runs.
+                tail_only &= append_page(&mut q, items, matches!(fill, Fill::Playing));
                 // An append can retarget a primed repeat-all wrap (index 0 → the new tail); drop
                 // the lookahead when it stops pointing at what plays next, same check as
                 // `insert_queued_song`. `append_page` leaves a still-valid slot alone, so the
@@ -1473,9 +1497,12 @@ impl AppState {
                 }
             }
             pages += 1;
-            if last_emit.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(1)) {
+            let every = std::time::Duration::from_secs(if tail_only { 1 } else { 5 });
+            if last_emit.is_none_or(|t| t.elapsed() >= every) {
                 last_emit = Some(std::time::Instant::now());
-                self.emit_queue().await;
+                self.emit_walked(unsent, tail_only).await;
+                unsent = 0;
+                tail_only = true;
             }
             self.prime_lookahead(gen).await;
             match page.continuation {
@@ -1487,8 +1514,21 @@ impl AppState {
         // else reads it mid-walk.
         if pages > 0 {
             tracing::info!(pages, "playlist fill appended pages");
-            self.emit_queue().await; // whatever the throttle above held back
+            if unsent > 0 {
+                self.emit_walked(unsent, tail_only).await; // whatever the throttle above held back
+            }
             self.persist_queue().await;
+        }
+    }
+
+    /// Announce the `rows` a playlist walk ([`Self::fill_playlist`]) appended since it last did:
+    /// just those rows when every one of them went onto the end of the queue, the whole list
+    /// otherwise.
+    async fn emit_walked(&self, rows: usize, tail_only: bool) {
+        if tail_only {
+            self.emit_queue_appended(rows).await;
+        } else {
+            self.emit_queue().await;
         }
     }
 
@@ -1589,7 +1629,7 @@ impl AppState {
             // advance into.
             self.queue.lock().await.lookahead_loaded = None;
             if self.start_current(gen).await {
-                self.prime_lookahead(gen).await;
+                self.spawn_prime_lookahead(gen);
             }
             return;
         }
@@ -1664,15 +1704,18 @@ impl AppState {
             // Retry once for WEB_REMIX-served and cache-served URLs. A failure from a fallback
             // client, or a second failure of the same id, advances as before.
             if (c == MAIN_CLIENT || c == "cache") && !already_retried {
+                // Bump before clearing the lookahead, like every other load path. A dead URL fails
+                // within a second, so the lookahead primed after this track started is often still
+                // resolving, and `enqueue_lookahead` counts on that order to drop it.
+                let gen = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
                 {
                     let mut q = self.queue.lock().await;
                     q.retried = Some(vid.clone());
                     q.lookahead_loaded = None; // start_current's loadfile replaces mpv's playlist
                 }
                 tracing::info!(video_id = %vid, "retrying failed track via fallback clients");
-                let gen = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
                 if self.start_current(gen).await {
-                    self.prime_lookahead(gen).await;
+                    self.spawn_prime_lookahead(gen);
                 }
                 return true;
             }
@@ -1832,6 +1875,12 @@ impl AppState {
     /// ponytail: at most 3 removals per prime so a network outage can't eat the whole queue.
     async fn prime_lookahead(self: &std::sync::Arc<Self>, gen: u64) {
         for _ in 0..3 {
+            // Superseded before the resolve even started, which a detached prime can be (a skip or
+            // the next track end got in first): the newer generation primes for itself, and a
+            // round trip here would only fetch a stream `enqueue_lookahead` throws away.
+            if self.generation.load(Ordering::SeqCst) != gen {
+                return;
+            }
             let next_idx = {
                 let q = self.queue.lock().await;
                 // Repeat-one primes nothing: mpv loops the file itself (next_index → None).
@@ -1876,6 +1925,21 @@ impl AppState {
         }
     }
 
+    /// [`Self::prime_lookahead`] on its own task, for the load paths the mpv event pump awaits
+    /// (`on_track_ended`, `on_track_failed`).
+    ///
+    /// The prime resolves the next stream over the network, 0.3–2 s, and the pump drains no mpv
+    /// events until the handler returns: the new track's `duration` and first `position` ticks wait
+    /// behind it, so the progress bar sits on the old track's time. Only the prime leaves. The
+    /// `start_current` in front of it stays on the pump, because the next event mpv sends is about
+    /// the track it loads, and `on_track_failed` decides whether to retry from the client
+    /// `start_current` records. The generation checks in `prime_lookahead` and
+    /// `enqueue_lookahead` make a prime that a skip or the next track end superseded drop itself.
+    fn spawn_prime_lookahead(self: &std::sync::Arc<Self>, gen: u64) {
+        let me = self.clone();
+        tauri::async_runtime::spawn(async move { me.prime_lookahead(gen).await });
+    }
+
     /// Second half of [`Self::prime_lookahead`]: hand the resolved stream to mpv and record it.
     async fn enqueue_lookahead(
         self: &std::sync::Arc<Self>,
@@ -1884,10 +1948,15 @@ impl AppState {
         next_video: &str,
         data: PlaybackData,
     ) {
+        let mut q = self.queue.lock().await;
+        // Under the lock, not before taking it. Every load path bumps the generation and then
+        // clears `lookahead_loaded` under this lock, so here either the bump shows or the clear
+        // comes later and wipes what this records. Checked before the lock, a load landing while
+        // this waited let a superseded prime record a slot mpv's replaced playlist no longer holds,
+        // and the load's own prime then stopped at "already primed".
         if self.generation.load(Ordering::SeqCst) != gen {
             return;
         }
-        let mut q = self.queue.lock().await;
         // The queue can change under a resolve (a "Play next" add inserts at current+1) —
         // enqueueing then would gaplessly play the wrong song. Verify the slot still holds the
         // same track.
@@ -2171,27 +2240,37 @@ impl AppState {
                 "current": q.items.get(q.current),
             })
         } else {
-            serde_json::json!({
-                "items": &q.items,
-                "currentIndex": q.current,
-                "playedFrom": q.played_from,
-                "shuffle": q.shuffle_orig.is_some(),
-                "repeat": q.repeat,
-                "sourceName": &q.source_name,
-            })
+            q.to_json()
         };
         let _ = self.app.emit(if unchanged { "queue-index" } else { "queue-changed" }, payload);
     }
 
     /// A pure tail append: ship the added rows, not the whole list.
     ///
-    /// `emit_queue` sends every row whenever the fingerprint changed, and an autoplay top-up
-    /// changes it every time. Since the list only grew at the end, the panel can push the new rows
-    /// onto the array it already holds. `len` is what the queue is now, so a UI that missed an
-    /// event can tell (its own length will not match) and re-sync with `get_queue` instead of
-    /// drifting silently.
+    /// `emit_queue` sends every row whenever the fingerprint changed, and an autoplay top-up or a
+    /// page of a playlist walk changes it every time. Since the list only grew at the end, the
+    /// panel can push the new rows onto the array it already holds. `len` is what the queue is
+    /// now, so a UI that missed an event can tell (its own length will not match) and re-sync
+    /// with `get_queue` instead of drifting silently.
+    ///
+    /// The rows go out alone only when everything in front of them is exactly the list the UI was
+    /// last sent, and that is checked here, under the lock the payload is built from. The caller
+    /// saw a pure append under an earlier lock, and an edit that keeps the length (a drag, turning
+    /// shuffle on) can land in between: the UI's length check would pass, it would stack the
+    /// reordered tail onto its old order, and the edit's own `emit_queue` would then find the
+    /// fingerprint unchanged and never correct it. The same check catches a walk whose first
+    /// queue never went out (`start_current` failed before announcing it) and a count that
+    /// overshoots because something else already sent some of the rows. Each of those gets the
+    /// whole list instead.
     async fn emit_queue_appended(&self, added: usize) {
         let q = self.queue.lock().await;
+        // Load-bearing: without it the next `emit_queue` thinks the rows are unchanged and sends a
+        // `queue-index` for a list that grew, leaving the panel stale.
+        let sent = self.last_queue_fingerprint.swap(queue_fingerprint(&q.items), Ordering::Relaxed);
+        if !holds_all_but_tail(&q.items, added, sent) {
+            let _ = self.app.emit("queue-changed", q.to_json());
+            return;
+        }
         let start = q.items.len().saturating_sub(added);
         let payload = serde_json::json!({
             "items": &q.items[start..],
@@ -2199,9 +2278,6 @@ impl AppState {
             "currentIndex": q.current,
             "playedFrom": q.played_from,
         });
-        // Load-bearing: without it the next `emit_queue` thinks the rows are unchanged and sends a
-        // `queue-index` for a list that grew, leaving the panel stale.
-        self.last_queue_fingerprint.store(queue_fingerprint(&q.items), Ordering::Relaxed);
         let _ = self.app.emit("queue-appended", payload);
     }
 
@@ -2231,15 +2307,7 @@ impl AppState {
     }
 
     pub async fn queue_snapshot(&self) -> serde_json::Value {
-        let q = self.queue.lock().await;
-        serde_json::json!({
-            "items": &q.items,
-            "currentIndex": q.current,
-            "playedFrom": q.played_from,
-            "shuffle": q.shuffle_orig.is_some(),
-            "repeat": q.repeat,
-            "sourceName": &q.source_name,
-        })
+        self.queue.lock().await.to_json()
     }
 
     /// A position tick from mpv. Once the current track passes the play threshold (context/01
@@ -3358,7 +3426,10 @@ fn shuffle_upcoming(items: &mut [SongItem], current: usize) {
 /// "Add to queue" passes `playing: false` — those tracks join the manual block their first page is
 /// in (not the tail of the queue) and keep their own order, since shuffle is about the playlist
 /// that's playing, not about what the user lined up behind it.
-fn append_page(q: &mut QueueState, page: Vec<SongItem>, playing: bool) {
+///
+/// Answers whether the page only went onto the end of `items`, every row before it left where it
+/// was. The walk can then announce just the new rows instead of the whole list.
+fn append_page(q: &mut QueueState, page: Vec<SongItem>, playing: bool) -> bool {
     if let Some(orig) = q.shuffle_orig.as_mut() {
         orig.extend(page.iter().cloned());
     }
@@ -3367,10 +3438,14 @@ fn append_page(q: &mut QueueState, page: Vec<SongItem>, playing: bool) {
         if q.shuffle_orig.is_some() {
             let pivot = q.lookahead_loaded.filter(|&i| i > q.current).unwrap_or(q.current);
             shuffle_upcoming(&mut q.items, pivot);
+            return false;
         }
+        true
     } else {
         let at = enqueue_at(q);
+        let tail = at == q.items.len();
         q.items.splice(at..at, page);
+        tail
     }
 }
 
@@ -3504,6 +3579,12 @@ fn queue_fingerprint(items: &[SongItem]) -> u64 {
     hasher.finish()
 }
 
+/// Whether a UI last sent the list fingerprinted `sent` holds all of `items` but the last `added`
+/// rows, in order, so those rows can be sent on their own (`emit_queue_appended`).
+fn holds_all_but_tail(items: &[SongItem], added: usize, sent: u64) -> bool {
+    queue_fingerprint(&items[..items.len().saturating_sub(added)]) == sent
+}
+
 /// Dirty key for `queue_json`, which stores more than the rows. `queue_index` carries
 /// current/playedFrom/repeat, so anything else the blob holds has to force a blob rewrite by
 /// itself. `shuffle_upcoming` only touches rows after `current`, so toggling shuffle while the
@@ -3543,10 +3624,10 @@ struct Listen {
 mod tests {
     use super::{
         append_page, backfill_metadata, drop_duplicates, enqueue_at, format_duration, get_url,
-        history_threshold, is_mix, loudness_gain, merge_radio, next_index, persist_fingerprint,
-        play_next_index, put_url, queue_fingerprint, radio_seed_for, shuffle_new_queue,
-        shuffle_upcoming, splice_radio_into, trim_played, unshuffled, upcoming_queued, QueueState,
-        RepeatMode, VideoUrls, KEEP_PLAYED,
+        history_threshold, holds_all_but_tail, is_mix, loudness_gain, merge_radio, next_index,
+        persist_fingerprint, play_next_index, put_url, queue_fingerprint, radio_seed_for,
+        shuffle_new_queue, shuffle_upcoming, splice_radio_into, trim_played, unshuffled,
+        upcoming_queued, QueueState, RepeatMode, VideoUrls, KEEP_PLAYED,
     };
 
     /// The whole point of the video-URL map is answering a reopen without a round trip, so a live
@@ -3636,6 +3717,24 @@ mod tests {
         let c = vec![row2(Some("1")), row2(Some("2"))];
         let d = vec![row2(Some("2")), row2(Some("1"))];
         assert_ne!(queue_fingerprint(&c), queue_fingerprint(&d));
+    }
+
+    // A walk decides a page was a pure append under one lock and announces it under the next, so
+    // an edit that keeps the length can land in between. Only the rows the UI actually holds may
+    // decide whether the tail goes out alone: a length match is not enough.
+    #[test]
+    fn holds_all_but_tail_needs_the_exact_rows_the_ui_was_sent() {
+        let row = |id: &str| innertube::SongItem { video_id: id.into(), ..Default::default() };
+        let sent = queue_fingerprint(&[row("a"), row("b")]);
+        assert!(holds_all_but_tail(&[row("a"), row("b"), row("c"), row("d")], 2, sent));
+        // A drag or a shuffle between the append and the emit: same length, other order.
+        assert!(!holds_all_but_tail(&[row("b"), row("a"), row("c"), row("d")], 2, sent));
+        // The UI was last sent another queue of the same length (a start that failed to announce).
+        assert!(!holds_all_but_tail(&[row("x"), row("y"), row("c"), row("d")], 2, sent));
+        // An overshooting count: the UI already has "c", so it must not be sent again.
+        let sent = queue_fingerprint(&[row("a"), row("b"), row("c")]);
+        assert!(!holds_all_but_tail(&[row("a"), row("b"), row("c"), row("d")], 2, sent));
+        assert!(holds_all_but_tail(&[row("a"), row("b"), row("c"), row("d")], 1, sent));
     }
 
     // `shuffle_upcoming` only reorders rows after `current`, so toggling shuffle while the last
@@ -3893,7 +3992,8 @@ mod tests {
                 lookahead_loaded: Some(1), // "b" is already loaded into mpv
                 ..QueueState::default()
             };
-            append_page(&mut q, page(), true);
+            // Rows the panel holds moved, so the walk must send the whole list.
+            assert!(!append_page(&mut q, page(), true));
 
             assert_eq!(q.items.len(), 103);
             assert_eq!(q.items[0].video_id, "a"); // playing
@@ -3922,7 +4022,8 @@ mod tests {
             current: 0,
             ..QueueState::default()
         };
-        append_page(&mut q, vec![song("c", false), song("d", false)], true);
+        // A pure tail append, which the walk announces as just the new rows.
+        assert!(append_page(&mut q, vec![song("c", false), song("d", false)], true));
         let ids: Vec<_> = q.items.iter().map(|i| i.video_id.as_str()).collect();
         assert_eq!(ids, ["a", "b", "c", "d"]);
         assert!(q.shuffle_orig.is_none());
@@ -3941,11 +4042,19 @@ mod tests {
             current: 0,
             ..QueueState::default()
         };
-        append_page(&mut q, vec![added("x2"), added("x3")], false);
+        // "b" moved down, so this is not a tail append.
+        assert!(!append_page(&mut q, vec![added("x2"), added("x3")], false));
         let ids: Vec<_> = q.items.iter().map(|i| i.video_id.as_str()).collect();
         assert_eq!(ids, ["a", "x1", "x2", "x3", "b"]);
         // Still on the snapshot, so un-shuffle keeps them.
         assert_eq!(q.shuffle_orig.as_ref().unwrap().len(), 5);
+
+        // With nothing behind the block, its next page is on the end of the queue after all.
+        let mut q =
+            QueueState { items: vec![song("a", false), added("x1")], ..QueueState::default() };
+        assert!(append_page(&mut q, vec![added("x2")], false));
+        let ids: Vec<_> = q.items.iter().map(|i| i.video_id.as_str()).collect();
+        assert_eq!(ids, ["a", "x1", "x2"]);
     }
 
     // The played run ("Previously played") is `played_from..current`, and only moving the pointer

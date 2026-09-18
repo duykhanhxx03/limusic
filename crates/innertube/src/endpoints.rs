@@ -26,6 +26,19 @@ pub const FILTER_ALBUM: &str = "EgWKAQIYAWoKEAkQChAFEAMQBA%3D%3D";
 pub const FILTER_ARTIST: &str = "EgWKAQIgAWoKEAkQChAFEAMQBA%3D%3D";
 pub const FILTER_COMMUNITY_PLAYLIST: &str = "EgeKAQQoAEABagoQAxAEEAoQCRAF";
 
+/// What [`InnerTube::playlist_add`] did, in the shape the UI gets it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PlaylistAdd {
+    /// `false` when the playlist already held the track: YouTube refuses the add (see
+    /// `edit_rejection`) rather than storing a second copy, so there is no new row to draw.
+    pub added: bool,
+    /// The new row's `playlistSetVideoId`, the handle a later remove needs. `None` on a refusal,
+    /// and on an add whose response stopped carrying it, which leaves the caller to find the row
+    /// by refetching the playlist.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub set_video_id: Option<String>,
+}
+
 impl InnerTube {
     /// `/player` for one client. context/03, context/06.
     ///
@@ -753,24 +766,26 @@ impl InnerTube {
 
     /// Add a video to a playlist. context/01 `browse/edit_playlist`.
     ///
-    /// Returns `false` when the track is already in the playlist: YouTube refuses the add (see
-    /// `edit_rejection`) rather than storing a second copy.
+    /// Answers whether a row was stored and, when it was, that row's `setVideoId`, which the
+    /// response carries so the caller need not refetch the playlist to be able to remove it again.
     pub async fn playlist_add(
         &self,
         client: &YouTubeClient,
         playlist_id: &str,
         video_id: &str,
-    ) -> Result<bool, Error> {
+    ) -> Result<PlaylistAdd, Error> {
         match self
-            .edit_playlist(
+            .edit_playlist_value(
                 client,
                 playlist_id,
-                serde_json::json!({ "action": "ACTION_ADD_VIDEO", "addedVideoId": video_id }),
+                vec![serde_json::json!({ "action": "ACTION_ADD_VIDEO", "addedVideoId": video_id })],
             )
             .await
         {
-            Ok(()) => Ok(true),
-            Err(Error::AlreadyInPlaylist) => Ok(false),
+            Ok(value) => {
+                Ok(PlaylistAdd { added: true, set_video_id: added_set_video_id(&value, video_id) })
+            }
+            Err(Error::AlreadyInPlaylist) => Ok(PlaylistAdd { added: false, set_video_id: None }),
             Err(e) => Err(e),
         }
     }
@@ -1099,6 +1114,18 @@ fn edit_rejection(v: &serde_json::Value) -> Option<Error> {
     })
 }
 
+/// The `setVideoId` YouTube gave the row an add just stored, off the edit's response. Matched on
+/// the video id when the result names one, so an answer that ever reports more than one edit
+/// cannot hand the row another track's handle.
+fn added_set_video_id(response: &serde_json::Value, video_id: &str) -> Option<String> {
+    metadata::find_all(response, "playlistEditVideoAddedResultData")
+        .into_iter()
+        .filter(|added| {
+            added.get("videoId").and_then(serde_json::Value::as_str).unwrap_or(video_id) == video_id
+        })
+        .find_map(|added| added.get("setVideoId")?.as_str().map(str::to_owned))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1146,6 +1173,42 @@ mod tests {
 
         let failed = json!({ "status": "STATUS_FAILED" });
         assert!(matches!(edit_rejection(&failed), Some(Error::Other(_))));
+    }
+
+    /// The handle the new row is removed by comes back with the add itself. Without it the page
+    /// has to find the row by refetching, and a row past the first 100 is never found at all.
+    #[test]
+    fn an_add_answers_the_new_rows_set_video_id() {
+        // A trimmed capture of the live response, the same one `duplicate_add_is_rejected` uses.
+        let ok = json!({ "playlistEditResults": [{ "playlistEditVideoAddedResultData": {
+            "setVideoId": "56B44F6D10557CC6", "videoId": "dQw4w9WgXcQ" } }],
+            "status": "STATUS_SUCCEEDED" });
+        assert_eq!(added_set_video_id(&ok, "dQw4w9WgXcQ").as_deref(), Some("56B44F6D10557CC6"));
+
+        // Another track's result is never taken for this one's.
+        assert_eq!(added_set_video_id(&ok, "someOtherId"), None);
+
+        // A result that leaves out the video id still names the only row this add made.
+        let bare = json!({ "playlistEditResults": [{ "playlistEditVideoAddedResultData": {
+            "setVideoId": "56B44F6D10557CC6" } }], "status": "STATUS_SUCCEEDED" });
+        assert_eq!(added_set_video_id(&bare, "dQw4w9WgXcQ").as_deref(), Some("56B44F6D10557CC6"));
+
+        // No result at all is no handle: the caller falls back to refetching the playlist.
+        let silent = json!({ "status": "STATUS_SUCCEEDED" });
+        assert_eq!(added_set_video_id(&silent, "dQw4w9WgXcQ"), None);
+    }
+
+    /// The UI reads `added` and `set_video_id` by these names, and an absent handle is left out
+    /// rather than sent as `null`, the same as `SongItem::set_video_id`.
+    #[test]
+    fn a_playlist_add_serializes_the_way_the_ui_reads_it() {
+        let added = PlaylistAdd { added: true, set_video_id: Some("56B44F6D10557CC6".into()) };
+        assert_eq!(
+            serde_json::to_value(&added).unwrap(),
+            json!({ "added": true, "set_video_id": "56B44F6D10557CC6" })
+        );
+        let refused = PlaylistAdd { added: false, set_video_id: None };
+        assert_eq!(serde_json::to_value(&refused).unwrap(), json!({ "added": false }));
     }
 
     #[test]

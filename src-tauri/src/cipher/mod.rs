@@ -30,6 +30,11 @@ use fetcher::PlayerJsFetcher;
 const CIPHER_LABEL: &str = "limusic-cipher";
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
 const LOAD_TIMEOUT: Duration = Duration::from_secs(15);
+/// Bound on fetching player.js, which happens under the build lock. The shared HTTP client sets
+/// no timeout of its own, so a stalled connection would otherwise hold every resolve that needs
+/// the cipher behind it, not just the one that hit the stall. Generous, because an uncached
+/// player.js is about 3 MB.
+const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Discovery/validation (context/05): prove the injected exports actually WORK before the
 /// orchestrator commits to this player, by running each on a sample input.
@@ -68,6 +73,17 @@ struct Inner {
     discovered: bool,
     /// When the webview last did work, for the idle teardown. `Some` whenever `bridge` is.
     last_used: Option<Instant>,
+    /// Moves on every invalidation and every completed build. A decipher attempt that fails
+    /// carries the value it ran under into its self-heal, which stands down if it has moved: some
+    /// other resolve has already healed or rebuilt, and healing again would destroy the webview
+    /// that resolve may be evaluating on right now.
+    generation: u64,
+    /// Builds (everything `ensure_analyzed` does under the build lock) that have run to the end,
+    /// whether they worked or not. A caller reads it before queueing for the lock, and so can tell
+    /// once it holds the lock whether a build finished while it waited.
+    builds: u64,
+    /// Why the last of those builds failed, if it did (see [`Self::failed_since`]).
+    build_error: Option<String>,
 }
 
 impl Inner {
@@ -92,6 +108,46 @@ impl Inner {
     fn idle_for(&self, idle: Duration) -> bool {
         !self.last_used.is_some_and(|t| t.elapsed() < idle)
     }
+
+    /// Destroy the webview, if there is one. `last_used` goes with it, since there is nothing
+    /// left for the idle teardown to time.
+    fn drop_bridge(&mut self) {
+        if let Some(b) = self.bridge.take() {
+            let _ = b.destroy();
+            self.last_used = None;
+        }
+    }
+
+    /// Forget the analysis and the webview, so the next `ensure_analyzed` re-fetches player.js
+    /// and rebuilds from scratch. Only ever called under the build lock
+    /// (see [`CipherDeobfuscator::build`]).
+    fn invalidate(&mut self) {
+        self.analyzed = false;
+        self.discovered = false;
+        self.drop_bridge();
+        self.generation += 1;
+        // The next build starts from a fresh player.js, so an earlier failure says nothing about it.
+        self.build_error = None;
+    }
+
+    /// The error of a build that finished, and failed, after the caller saw `seen` builds. That
+    /// caller queued behind it, and takes its error rather than running the same build again
+    /// straight away. Resolves are never cancelled, so otherwise the playing track, the lookahead
+    /// and any downloads would each wait out a whole failed attempt in turn (about 12 s for a
+    /// webview that never comes up), where before the build lock they failed together. The next
+    /// caller to arrive after the failure tries afresh.
+    fn failed_since(&self, seen: u64) -> Option<String> {
+        if self.builds == seen {
+            return None;
+        }
+        self.build_error.clone()
+    }
+
+    /// Count a finished build, and remember its error for the callers queued behind it.
+    fn record_build(&mut self, result: &Result<(), String>) {
+        self.builds += 1;
+        self.build_error = result.as_ref().err().cloned();
+    }
 }
 
 pub struct CipherDeobfuscator {
@@ -99,6 +155,28 @@ pub struct CipherDeobfuscator {
     fetcher: PlayerJsFetcher,
     config: Arc<PlayerConfigStore>,
     inner: Mutex<Inner>,
+    /// Serialises everything that analyses, builds or invalidates: `ensure_analyzed` when it owes
+    /// work, the self-heal in `deobfuscate_stream_url`, and `on_stream_rejected`.
+    ///
+    /// The webview lives under one fixed label, and `Bridge::create` starts by reclaiming that
+    /// label. Two resolves that both found the webview missing (the playing track and the
+    /// lookahead, or a download) each destroyed the other's window mid-load, and both fell through
+    /// to the non-web clients. The invalidations need it too: landing in the middle of a build,
+    /// they were undone by that build's commit, which marked the stale analysis fresh again.
+    ///
+    /// Double-checked: `ensure_analyzed` takes it only when work is owed and asks again once it
+    /// holds it, so a resolve whose STS (or webview) is already in hand never queues behind a
+    /// build. The build it waited behind has usually done its work. If that build failed instead,
+    /// the caller returns its error rather than repeating it (see [`Inner::failed_since`]).
+    ///
+    /// Lock order is `build`, then `inner`. `inner` is only held for short sections with no
+    /// `.await` inside them, and never while waiting for `build`. `build` is never held across a
+    /// call into `ensure_analyzed` or `try_deobfuscate`, which take it themselves: a tokio
+    /// `Mutex` is not re-entrant, so that would deadlock. Nothing awaited under it (the player.js
+    /// fetch, the webview's create, load and evals on the main thread) takes either lock.
+    /// `teardown_if_idle` takes only `inner`, which is safe because a build empties the bridge
+    /// slot before it starts and refills it only when it finishes.
+    build: Mutex<()>,
 }
 
 impl CipherDeobfuscator {
@@ -107,11 +185,14 @@ impl CipherDeobfuscator {
             fetcher: PlayerJsFetcher::new(app_data_dir),
             config,
             inner: Mutex::new(Inner::default()),
+            build: Mutex::new(()),
             app,
         }
     }
 
     /// STS of the player.js we decipher with (preferred over any other source). context/05.
+    ///
+    /// Once analysis is in hand this never waits for a webview build (see [`Self::build`]).
     pub async fn signature_timestamp(&self) -> Option<i32> {
         if self.ensure_analyzed(false).await.is_err() {
             return None;
@@ -130,41 +211,59 @@ impl CipherDeobfuscator {
         if !self.inner.lock().await.sig_available {
             return None;
         }
-        if let Some(u) = self.try_deobfuscate(cipher).await {
-            return Some(u);
-        }
+        let failed_on = match self.try_deobfuscate(cipher).await {
+            Ok(u) => return Some(u),
+            Err(generation) => generation,
+        };
         // One self-heal retry: a stale player.js can silently produce a wrong signature. context/05.
-        tracing::warn!(video_id, "decipher failed — refetching player.js and retrying once");
-        self.fetcher.invalidate();
+        //
+        // Under the build lock, so the invalidation lands between builds and never inside one, and
+        // only if nothing has healed or rebuilt since this attempt ran (see `Inner::generation`).
+        // The lock pins `generation`, which only moves under it, and is dropped again before the
+        // retry, whose `ensure_analyzed` takes it to rebuild.
         {
-            let mut inner = self.inner.lock().await;
-            inner.analyzed = false; // force re-fetch + re-analysis
-            inner.discovered = false;
-            if let Some(b) = inner.bridge.take() {
-                let _ = b.destroy();
+            let _build = self.build.lock().await;
+            let heal = self.inner.lock().await.generation == failed_on;
+            if heal {
+                tracing::warn!(
+                    video_id,
+                    "decipher failed — refetching player.js and retrying once"
+                );
+                self.fetcher.invalidate();
+                self.inner.lock().await.invalidate();
+            } else {
+                tracing::debug!(
+                    video_id,
+                    "decipher failed, but another resolve has healed since — retrying on its webview"
+                );
             }
         }
-        self.try_deobfuscate(cipher).await
+        self.try_deobfuscate(cipher).await.ok()
     }
 
-    async fn try_deobfuscate(&self, cipher: &str) -> Option<String> {
-        self.ensure_analyzed(true).await.ok()?;
-        let (s, sp, base) = parse_cipher(cipher)?;
-        let bridge = {
+    /// One decipher attempt. On failure, the error is the [`Inner::generation`] the attempt ran
+    /// under, for the caller's self-heal to compare.
+    async fn try_deobfuscate(&self, cipher: &str) -> Result<String, u64> {
+        let ensured = self.ensure_analyzed(true).await;
+        let (bridge, generation) = {
             let mut inner = self.inner.lock().await;
             inner.last_used = Some(Instant::now());
-            inner.bridge.clone()?
+            (inner.bridge.clone(), inner.generation)
+        };
+        let (Ok(()), Some(bridge), Some((s, sp, base))) = (ensured, bridge, parse_cipher(cipher))
+        else {
+            return Err(generation);
         };
         let js = format!(
             "(function(){{try{{return String(window._cipherSigFunc({}));}}catch(e){{return null;}}}})()",
             js_string(&s)
         );
-        let sig = match bridge.eval_json(js, CALL_TIMEOUT).await.ok()? {
-            Value::String(sig) if !sig.is_empty() => sig,
-            _ => return None,
+        let sig = match bridge.eval_json(js, CALL_TIMEOUT).await {
+            Ok(Value::String(sig)) if !sig.is_empty() => sig,
+            _ => return Err(generation),
         };
         let sep = if base.contains('?') { '&' } else { '?' };
-        Some(format!("{base}{sep}{sp}={}", urlencoding::encode(&sig)))
+        Ok(format!("{base}{sep}{sp}={}", urlencoding::encode(&sig)))
     }
 
     /// Replace `&n=` with its throttling-deobfuscated value. Returns the URL UNCHANGED on any
@@ -206,16 +305,14 @@ impl CipherDeobfuscator {
     /// Self-heal after a 403 on a deciphered URL: refresh the config table + invalidate player.js.
     /// Returns true if something changed (caller may clear WEB_REMIX failure memory). context/05, 06.
     pub async fn on_stream_rejected(&self) -> bool {
+        // The registry refresh is network I/O and touches none of our state, so it runs before
+        // the build lock rather than holding every decipher up behind it.
         let table_changed = self.config.refresh_after_stream_rejection().await;
+        // The invalidation waits out any build in flight (see `build`); the next ensure_analyzed
+        // then rebuilds from a fresh player.js.
+        let _build = self.build.lock().await;
         self.fetcher.invalidate();
-        {
-            let mut inner = self.inner.lock().await;
-            inner.analyzed = false; // next ensure_analyzed rebuilds
-            inner.discovered = false;
-            if let Some(b) = inner.bridge.take() {
-                let _ = b.destroy();
-            }
-        }
+        self.inner.lock().await.invalidate();
         table_changed
     }
 
@@ -242,14 +339,11 @@ impl CipherDeobfuscator {
     // ponytail: called from the periodic task in lib.rs that already ticks for PoToken.
     pub async fn teardown_if_idle(&self, idle: Duration) {
         let mut inner = self.inner.lock().await;
-        if !inner.idle_for(idle) {
+        if inner.bridge.is_none() || !inner.idle_for(idle) {
             return;
         }
-        if let Some(b) = inner.bridge.take() {
-            let _ = b.destroy();
-            inner.last_used = None;
-            tracing::debug!("cipher webview torn down (idle)");
-        }
+        inner.drop_bridge();
+        tracing::debug!("cipher webview torn down (idle)");
     }
 
     /// Ensure player.js analysis (STS + config lookup) is fresh for the current config epoch.
@@ -259,16 +353,34 @@ impl CipherDeobfuscator {
     /// the analysis alone satisfies `signature_timestamp`. Callers that only need STS pass `false`
     /// and never pay for a web process (see [`Self::prewarm`]).
     async fn ensure_analyzed(&self, want_bridge: bool) -> Result<(), String> {
+        // Double-checked (see `build`): the common case owes nothing and leaves without touching
+        // the build lock. Once it is held, ask again, with the epoch read afresh, because the
+        // build we queued behind has usually done our work.
+        let Some(seen) = self.work_owed(self.config.config_epoch(), want_bridge).await else {
+            return Ok(());
+        };
+        let _build = self.build.lock().await;
         let epoch = self.config.config_epoch();
-        {
-            let inner = self.inner.lock().await;
-            let bridge_ok = inner.bridge.as_ref().is_some_and(|b| b.exists());
-            if !inner.owes_work(epoch, want_bridge, bridge_ok) {
-                return Ok(());
-            }
+        if self.work_owed(epoch, want_bridge).await.is_none() {
+            return Ok(());
         }
+        if let Some(e) = self.inner.lock().await.failed_since(seen) {
+            return Err(e);
+        }
+        let result = self.analyze_and_build(epoch, want_bridge).await;
+        self.inner.lock().await.record_build(&result);
+        result
+    }
+
+    /// The work [`Self::ensure_analyzed`] owes, run under the build lock. Split out so that every
+    /// way it can end, the early returns included, is recorded in one place for the callers
+    /// queued behind it.
+    async fn analyze_and_build(&self, epoch: u64, want_bridge: bool) -> Result<(), String> {
         // Fetch player.js and look up its config — the only way in on the 2025+ players.
-        let player = self.fetcher.fetch().await.map_err(|e| e.to_string())?;
+        let player = tokio::time::timeout(FETCH_TIMEOUT, self.fetcher.fetch())
+            .await
+            .map_err(|_| format!("player.js fetch timed out after {FETCH_TIMEOUT:?}"))?
+            .map_err(|e| e.to_string())?;
         let cfg = self.config.get(&player.hash);
         if cfg.is_none() {
             // Unknown player hash — pull the registries off the hot path; a validated config for it
@@ -289,9 +401,7 @@ impl CipherDeobfuscator {
         // entry landing for this hash (then `cfg` is `Some` and we fall through). context/05, KI-1.
         if cfg.is_none() {
             let mut inner = self.inner.lock().await;
-            if let Some(b) = inner.bridge.take() {
-                let _ = b.destroy();
-            }
+            inner.drop_bridge();
             inner.sts = sts;
             inner.built_epoch = epoch;
             inner.n_available = false;
@@ -306,18 +416,20 @@ impl CipherDeobfuscator {
             );
             return Ok(());
         }
-        // Analysis-only caller: record what we learned and stop short of the web process.
-        // Discovery stays unset, so the first decipher call falls through to the build below.
-        if !want_bridge {
+        // Record what we learned before any webview work. Discovery stays unset, so the first
+        // decipher call falls through to the build below. Recording it first means a failed build
+        // still leaves STS in hand: a resolve that only wants STS and queued behind this one then
+        // finds nothing owed, instead of taking the error of a webview it never needed.
+        {
             let mut inner = self.inner.lock().await;
-            if let Some(b) = inner.bridge.take() {
-                let _ = b.destroy(); // player.js rotated or the config epoch moved — it's stale
-                inner.last_used = None;
-            }
+            inner.drop_bridge(); // player.js rotated or the config epoch moved — it's stale
             inner.sts = sts;
             inner.built_epoch = epoch;
             inner.analyzed = true;
             inner.discovered = false;
+        }
+        // Analysis-only caller: stop short of the web process.
+        if !want_bridge {
             tracing::info!(hash = player.hash, ?sts, "cipher: analysis complete (no webview)");
             return Ok(());
         }
@@ -325,13 +437,7 @@ impl CipherDeobfuscator {
         tracing::info!(hash = player.hash, ?sts, "cipher: building webview");
         let injected = extractor::build_injection(&player.js, cfg.as_ref());
 
-        // Tear down any stale webview, then create fresh and load the player.
-        {
-            let mut inner = self.inner.lock().await;
-            if let Some(b) = inner.bridge.take() {
-                let _ = b.destroy();
-            }
-        }
+        // The stale webview went with the old analysis above; create fresh and load the player.
         let bridge = Bridge::create(&self.app, CIPHER_LABEL).await.map_err(|e| e.to_string())?;
         if let Err(e) = Self::load_player(&bridge, &injected).await {
             let _ = bridge.destroy(); // don't orphan the hidden window on a failed load
@@ -359,14 +465,22 @@ impl CipherDeobfuscator {
             inner.bridge = None;
             inner.last_used = None;
         }
-        inner.sts = sts;
-        inner.built_epoch = epoch;
+        // STS, the epoch and `analyzed` were recorded before the build, and nothing moves them
+        // without the build lock, which this build still holds.
         inner.n_available = n_available;
         inner.sig_available = sig_available;
-        inner.analyzed = true;
         inner.discovered = true;
+        inner.generation += 1;
         tracing::info!(sig_available, n_available, "cipher analysis complete");
         Ok(())
+    }
+
+    /// [`Inner::owes_work`] against the live state, asking Tauri whether the webview is still up.
+    /// When work is owed, returns how many builds had finished by then (see [`Inner::builds`]).
+    async fn work_owed(&self, epoch: u64, want_bridge: bool) -> Option<u64> {
+        let inner = self.inner.lock().await;
+        let bridge_ok = inner.bridge.as_ref().is_some_and(|b| b.exists());
+        inner.owes_work(epoch, want_bridge, bridge_ok).then_some(inner.builds)
     }
 
     /// Inject player.js + discovery into a freshly-built cipher `bridge` and wait for discovery to
@@ -466,6 +580,44 @@ mod tests {
         // Discovery proved there is nothing callable, so a missing webview is not a debt.
         let undecipherable = Inner { sig_available: false, ..discovered };
         assert!(!undecipherable.owes_work(7, true, false));
+    }
+
+    /// Both self-heals go through `invalidate`. It must leave STS and the webview owed again, and
+    /// move the generation, so a second heal queued behind it on the build lock stands down.
+    #[test]
+    fn invalidation_owes_everything_again_and_moves_the_generation() {
+        let mut inner = Inner {
+            analyzed: true,
+            discovered: true,
+            sig_available: true,
+            built_epoch: 7,
+            ..Inner::default()
+        };
+        let failed_on = inner.generation;
+        inner.invalidate();
+        assert!(inner.owes_work(7, false, true), "STS must be re-analysed");
+        assert!(inner.owes_work(7, true, true), "and the webview rebuilt");
+        assert_ne!(inner.generation, failed_on, "a heal from before this one must stand down");
+    }
+
+    /// A failed build fails only the callers that were already queued behind it. Anyone arriving
+    /// later, or after a success or an invalidation, builds again.
+    #[test]
+    fn a_failed_build_is_shared_with_its_queue_and_not_beyond() {
+        let mut inner = Inner::default();
+        let queued = inner.builds;
+        inner.record_build(&Err("webview never became ready".into()));
+        assert_eq!(inner.failed_since(queued).as_deref(), Some("webview never became ready"));
+        assert_eq!(inner.failed_since(inner.builds), None, "a later caller tries afresh");
+
+        let queued = inner.builds;
+        inner.record_build(&Ok(()));
+        assert_eq!(inner.failed_since(queued), None, "a success leaves no error to share");
+
+        let queued = inner.builds;
+        inner.record_build(&Err("player.js fetch timed out".into()));
+        inner.invalidate();
+        assert_eq!(inner.failed_since(queued), None, "an invalidation changes the next build");
     }
 
     #[test]

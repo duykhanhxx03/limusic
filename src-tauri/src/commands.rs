@@ -14,6 +14,22 @@ use crate::state::{AppState, ON_REPEAT_ID, ON_REPEAT_LIMIT, ON_REPEAT_WINDOW_SEC
 
 type St<'a> = State<'a, Arc<AppState>>;
 
+/// Run a command's database work on a blocking thread and answer with what it returns.
+///
+/// For the commands whose whole job is SQLite and the disk. Written as a sync command, one of
+/// those runs on the GTK main thread and stalls the whole window for as long as it takes. It goes
+/// to a blocking thread rather than running on an async worker because the database lock can be
+/// held for a whole local-library scan transaction, and a worker parked behind it is one the
+/// network commands go without meanwhile. The `Result` is only because Tauri requires one of an
+/// async command that borrows its state; the page still gets the same value.
+async fn blocking<T: Send + 'static>(
+    state: St<'_>,
+    work: impl FnOnce(&AppState) -> T + Send + 'static,
+) -> Result<T, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || work(&state)).await.map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn search(state: St<'_>, query: String) -> Result<Vec<SongItem>, String> {
     let client = state.clients.get(innertube::METADATA_CLIENT).ok_or("metadata client missing")?;
@@ -290,24 +306,32 @@ pub fn download_tracks(state: St<'_>, items: Vec<SongItem>) -> Result<(), String
 
 /// Everything saved, newest first. This is the offline library: it reads from the database and the
 /// disk only, so it works with the network off, which is the entire point.
+///
+/// Off the main thread (`blocking`): every saved track costs a stat as well as its row.
 #[tauri::command]
-pub fn downloads(state: St<'_>) -> Vec<crate::db::Downloaded> {
-    // Rows whose file has gone (the user cleared the folder by hand) are dropped rather than
-    // listed: a row that cannot play is worse than no row.
-    let all = state.db.downloads();
-    let (alive, dead): (Vec<_>, Vec<_>) =
-        all.into_iter().partition(|d| std::path::Path::new(&d.path).is_file());
-    for d in dead {
-        state.db.delete_download(&d.video_id);
-    }
-    alive
+pub async fn downloads(state: St<'_>) -> Result<Vec<crate::db::Downloaded>, String> {
+    blocking(state, |state| {
+        // Rows whose file has gone (the user cleared the folder by hand) are dropped rather than
+        // listed: a row that cannot play is worse than no row.
+        let all = state.db.downloads();
+        let (alive, dead): (Vec<_>, Vec<_>) =
+            all.into_iter().partition(|d| std::path::Path::new(&d.path).is_file());
+        for d in dead {
+            state.db.delete_download(&d.video_id);
+        }
+        alive
+    })
+    .await
 }
 
 /// Which of these are already saved. One call rather than one per row: a playlist page asks about
 /// every track it shows.
+///
+/// Off the main thread (`blocking`), since a page asking about hundreds of rows would otherwise
+/// stall the whole window for as long as the answer took, and every saved track costs a stat.
 #[tauri::command]
-pub fn downloaded_ids(state: St<'_>, video_ids: Vec<String>) -> Vec<String> {
-    video_ids.into_iter().filter(|id| crate::downloads::is_downloaded(state.inner(), id)).collect()
+pub async fn downloaded_ids(state: St<'_>, video_ids: Vec<String>) -> Result<Vec<String>, String> {
+    blocking(state, move |state| crate::downloads::downloaded_of(state, video_ids)).await
 }
 
 /// Stop what is downloading and drop the rest of the queue.
@@ -324,10 +348,11 @@ pub fn remove_download(state: St<'_>, video_id: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Bytes on disk, for the storage row in settings.
+/// Bytes on disk, for the storage row in settings. Summed over every download row, so it is read
+/// off the main thread (`blocking`).
 #[tauri::command]
-pub fn downloads_size(state: St<'_>) -> i64 {
-    crate::downloads::total_bytes(&state)
+pub async fn downloads_size(state: St<'_>) -> Result<i64, String> {
+    blocking(state, |state| crate::downloads::total_bytes(state)).await
 }
 
 // --- equalizer ----------------------------------------------------------------------------------
@@ -442,9 +467,16 @@ pub async fn autoeq_refresh(state: St<'_>) -> Result<i64, String> {
 
 /// Headphones whose name contains every word of `query`. Local only; an empty result before the
 /// first `autoeq_refresh` has finished just means there is no index yet.
+///
+/// Off the main thread (`blocking`): it runs as the search box is typed in, over thousands of rows
+/// that `LIKE '%…%'` cannot narrow by index, and the picker opening starts a refresh that holds the
+/// database lock while it rewrites all of them.
 #[tauri::command]
-pub fn autoeq_search(state: St<'_>, query: String) -> Vec<crate::autoeq::Entry> {
-    state.db.search_autoeq(&query, crate::autoeq::SEARCH_LIMIT)
+pub async fn autoeq_search(
+    state: St<'_>,
+    query: String,
+) -> Result<Vec<crate::autoeq::Entry>, String> {
+    blocking(state, move |state| state.db.search_autoeq(&query, crate::autoeq::SEARCH_LIMIT)).await
 }
 
 /// The correction for one headphone from the index: ten gains and a preamp, fetched once.
@@ -1019,9 +1051,14 @@ pub async fn set_playlist_sort(
 /// videoId → how many times it was played, over the same trailing window On Repeat is built from
 /// (the history table is pruned to it, so there is no older data to offer). Feeds the playlist
 /// page's "Most played" sort; a track the map doesn't mention has not been played this month.
+///
+/// Off the main thread (`blocking`): it groups a month of listening history.
 #[tauri::command]
-pub fn play_counts(state: St<'_>) -> std::collections::HashMap<String, i64> {
-    state.db.play_counts(now_secs() - ON_REPEAT_WINDOW_SECS).into_iter().collect()
+pub async fn play_counts(state: St<'_>) -> Result<std::collections::HashMap<String, i64>, String> {
+    blocking(state, |state| {
+        state.db.play_counts(now_secs() - ON_REPEAT_WINDOW_SECS).into_iter().collect()
+    })
+    .await
 }
 
 /// The On Repeat track list: most-played first, over the trailing window. Rows whose stored JSON
@@ -1230,9 +1267,13 @@ const PLAYLIST_INDEX_MAX_PAGES: usize = 50;
 
 /// videoId → the ids of your playlists holding it, straight from SQLite with no network at all,
 /// so a track list can draw the "saved" mark on its first paint. Empty until the first sync.
+///
+/// Off the main thread (`blocking`): the index runs to a row per track of every playlist you own.
 #[tauri::command]
-pub fn playlist_index(state: St<'_>) -> std::collections::HashMap<String, Vec<String>> {
-    state.db.playlist_memberships()
+pub async fn playlist_index(
+    state: St<'_>,
+) -> Result<std::collections::HashMap<String, Vec<String>>, String> {
+    blocking(state, |state| state.db.playlist_memberships()).await
 }
 
 /// Rebuild that index by walking the playlists you own, then answer with it.
@@ -1303,14 +1344,16 @@ pub async fn sync_playlist_index(
     Ok(state.db.playlist_memberships())
 }
 
-/// `false` means the playlist already had the track and YouTube added nothing — not an error, but
-/// the UI must not draw an optimistic row for it (there is no real row to remove later).
+/// `added: false` means the playlist already had the track and YouTube added nothing — not an
+/// error, but the UI must not draw an optimistic row for it (there is no real row to remove
+/// later). `set_video_id` is the new row's handle, so the optimistic row can offer "Remove" at
+/// once instead of waiting on a refetch that may never reach it.
 #[tauri::command]
 pub async fn add_to_playlist(
     state: St<'_>,
     playlist_id: String,
     video_id: String,
-) -> Result<bool, String> {
+) -> Result<innertube::endpoints::PlaylistAdd, String> {
     let client = editable_playlist(&state, &playlist_id)?;
     let added =
         state.it.playlist_add(client, &playlist_id, &video_id).await.map_err(|e| e.to_string())?;

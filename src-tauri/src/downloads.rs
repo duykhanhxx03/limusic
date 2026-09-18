@@ -148,6 +148,19 @@ pub fn is_downloaded(state: &Arc<AppState>, video_id: &str) -> bool {
     }
 }
 
+/// Those of `video_ids` that [`is_downloaded`] would say yes to, in the order asked and keeping
+/// any repeats, so it answers exactly what filtering the list through it would. The rows come
+/// back in one query under one lock instead of one of each per id, which is the difference that
+/// matters when a playlist page asks about every track it shows. Blocking (SQLite, plus a stat
+/// per saved file), so an async caller should run it on a blocking thread.
+pub fn downloaded_of(state: &AppState, video_ids: Vec<String>) -> Vec<String> {
+    let paths = state.db.download_paths(&video_ids);
+    video_ids
+        .into_iter()
+        .filter(|id| paths.get(id).is_some_and(|p| Path::new(p).is_file()))
+        .collect()
+}
+
 /// The file for a downloaded track, if it is really there, with the codec and bitrate it was saved
 /// at. `AppState::resolve` calls this.
 ///

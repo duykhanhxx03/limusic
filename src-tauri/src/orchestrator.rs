@@ -9,6 +9,7 @@
 //! chain behind an upload to fall through to.
 
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -275,29 +276,39 @@ impl Orchestrator {
                 audio_config_loudness = main_loudness(&resp);
             }
 
-            // Resolve the URL: direct, else decipher (context/05). A ciphered format with no
-            // working cipher webview lands here, and for an upload that is fatal: every client on
-            // its chain is a web client, so the whole chain produces nothing and the user sees
-            // "sign-in needed" for what is really a broken extraction runtime. Issues #71/#128.
-            let Some(mut url) = self.find_url(format, video_id).await else {
+            // Resolve the URL: direct, else decipher (context/05), then the n-transform for web
+            // clients. A ciphered format with no working cipher webview comes back `None`, and for
+            // an upload that is fatal: every client on its chain is a web client, so the whole
+            // chain produces nothing and the user sees "sign-in needed" for what is really a
+            // broken extraction runtime. Issues #71/#128.
+            //
+            // The streaming PoToken is minted from the videoId alone, so it has no reason to wait
+            // for the URL, and the two run side by side. On a cold resolve (the first play after
+            // launch, after the idle teardown, after a self-heal) each one has a runtime to stand
+            // up first, the cipher webview and the BotGuard isolate, measured at about half a
+            // second apiece. One after the other, they were most of the silence before the first
+            // note. See `join_unless_none` for why a failed decipher still skips the mint.
+            let client = self.clients.get(&key);
+            let uses_pot = client.is_some_and(|c| c.use_web_po_tokens);
+            let needs_n = uses_pot || NEEDS_N_TRANSFORM.contains(&key.as_str());
+            let decipher = async {
+                let url = self.find_url(format, video_id).await?;
+                Some(if needs_n { self.cipher.transform_n_param_in_url(&url).await } else { url })
+            };
+            let mint = async {
+                match &visitor {
+                    Some(vd) if uses_pot => self.potoken.get_streaming_po_token(video_id, vd).await,
+                    _ => None,
+                }
+            };
+            let Some((mut url, pot)) = join_unless_none(decipher, mint).await else {
                 tracing::warn!(video_id, client = %key, itag = format.itag, "no stream URL (deciphering unavailable?)");
                 continue;
             };
-
-            // n-transform + &pot= for web clients (context/05, 06).
-            let client = self.clients.get(&key);
-            let needs_n = client.is_some_and(|c| c.use_web_po_tokens)
-                || NEEDS_N_TRANSFORM.contains(&key.as_str());
-            if needs_n {
-                url = self.cipher.transform_n_param_in_url(&url).await;
-                if client.is_some_and(|c| c.use_web_po_tokens) {
-                    if let Some(vd) = &visitor {
-                        if let Some(pot) = self.potoken.get_streaming_po_token(video_id, vd).await {
-                            let sep = if url.contains('?') { '&' } else { '?' };
-                            url = format!("{url}{sep}pot={}", urlencoding::encode(&pot));
-                        }
-                    }
-                }
+            // &pot= for web clients (context/04, 06).
+            if let Some(pot) = pot {
+                let sep = if url.contains('?') { '&' } else { '?' };
+                url = format!("{url}{sep}pot={}", urlencoding::encode(&pot));
             }
 
             // HIGH two-pass: remember the best non-HIGH and keep looking if a HIGH exists elsewhere.
@@ -591,6 +602,30 @@ fn stream_headers(
     headers
 }
 
+/// Run `first` and `second` side by side and return both results, except that `second` is dropped
+/// unfinished as soon as `first` comes back `None`.
+///
+/// `resolve` overlaps deciphering (`first`) with the streaming PoToken mint (`second`) this way. A
+/// plain `join!` would wait out the mint even when there is no URL to put the token on, and on a
+/// player the cipher cannot handle (no registry config yet, KI-1) that is every resolve: the
+/// decipher fails at once and the fall-through to the direct clients would sit behind a BotGuard
+/// bootstrap it has no use for. The sequential code this replaced never minted in that case.
+///
+/// Biased toward `first`, so a `first` that is already done is seen before `second` is polled even
+/// once. On a no-config player the decipher fails without waiting on anything (cipher/mod.rs skips
+/// the webview build there), so the mint normally never starts and no bootstrap is sent.
+async fn join_unless_none<A, B>(
+    first: impl Future<Output = Option<A>>,
+    second: impl Future<Output = B>,
+) -> Option<(A, B)> {
+    tokio::pin!(first, second);
+    tokio::select! {
+        biased;
+        a = &mut first => Some((a?, second.await)),
+        b = &mut second => Some((first.await?, b)),
+    }
+}
+
 fn is_high(f: &Format) -> bool {
     f.audio_quality.as_deref() == Some("AUDIO_QUALITY_HIGH")
 }
@@ -641,9 +676,71 @@ fn best_thumbnail(resp: &PlayerResponse) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{blacklist_blocks, blacklist_insert, stream_headers, WEB_REMIX_BLACKLIST_TTL};
+    use super::{
+        blacklist_blocks, blacklist_insert, join_unless_none, stream_headers,
+        WEB_REMIX_BLACKLIST_TTL,
+    };
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
     use std::time::{Duration, Instant};
+
+    /// The saving rests on both halves making progress at once. Here `first` cannot finish until
+    /// `second` has run, so running them one after the other would hang and trip the timeout.
+    #[tokio::test]
+    async fn decipher_and_mint_run_at_the_same_time() {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let first = async { rx.await.ok() };
+        let second = async {
+            tx.send("url").unwrap();
+            "pot"
+        };
+        let got = tokio::time::timeout(Duration::from_secs(5), join_unless_none(first, second))
+            .await
+            .expect("the two halves ran one after the other");
+        assert_eq!(got, Some(("url", "pot")));
+    }
+
+    /// A failed decipher must not wait out a mint that is already under way (there is no URL to
+    /// put the token on), and has to drop it, which is what abandons a BotGuard bootstrap.
+    #[tokio::test]
+    async fn a_failed_decipher_abandons_the_mint() {
+        struct Dropped(Arc<AtomicBool>);
+        impl Drop for Dropped {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let dropped = Arc::new(AtomicBool::new(false));
+        let flag = Dropped(dropped.clone());
+        // Yield once so the mint is polled, and so in flight, before the decipher gives up.
+        let first = async {
+            tokio::task::yield_now().await;
+            None::<&str>
+        };
+        let second = async move {
+            let _flag = flag;
+            std::future::pending::<&str>().await
+        };
+        let got = tokio::time::timeout(Duration::from_secs(5), join_unless_none(first, second))
+            .await
+            .expect("waited on the mint after the decipher failed");
+        assert_eq!(got, None);
+        assert!(dropped.load(Ordering::SeqCst), "the abandoned mint was not dropped");
+    }
+
+    /// The no-config player (KI-1): the decipher fails without ever waiting, and then the mint
+    /// must not start at all, since starting one sends a bootstrap to the BotGuard thread.
+    #[tokio::test]
+    async fn an_instant_decipher_failure_never_starts_the_mint() {
+        let started = AtomicBool::new(false);
+        let second = async {
+            started.store(true, Ordering::SeqCst);
+            "pot"
+        };
+        assert_eq!(join_unless_none(async { None::<&str> }, second).await, None);
+        assert!(!started.load(Ordering::SeqCst), "the mint was polled");
+    }
 
     #[test]
     fn the_web_remix_bar_expires_and_stays_bounded() {

@@ -79,8 +79,13 @@ impl Bridge {
     /// finished loading (Tauri `on_page_load`) AND a probe confirms JS↔Rust round-trips. On any
     /// failure the just-built window is destroyed so its label can be reused (no orphan
     /// "already exists").
+    ///
+    /// Never run two at once for the same label: each one starts by reclaiming the label, so the
+    /// second destroys the first's window while it is still loading. The caller serialises them
+    /// (the cipher's build lock).
     pub async fn create(app: &AppHandle, label: &str) -> Result<Bridge, Error> {
-        // Reclaim the label if a prior attempt left an orphan (or a concurrent build raced us).
+        // Reclaim the label from a window still on its way out (`destroy` does not wait) or one a
+        // cancelled attempt orphaned. Not from a concurrent create: see above.
         destroy_and_wait(app, label).await;
 
         let url = tauri::Url::parse(&format!("{SCHEME}://localhost/"))

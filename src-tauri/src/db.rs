@@ -677,6 +677,39 @@ impl Db {
         .ok()
     }
 
+    /// videoId → stored file path, for those of `video_ids` that have a row; ids without one are
+    /// simply absent. Like [`Db::download`], the files are not checked.
+    ///
+    /// One lock and one statement per chunk rather than a [`Db::download`] per id: a playlist
+    /// page asks about every track it shows, and a lock plus a fresh prepare per row is what made
+    /// that question expensive. Chunked because SQLite caps the parameters a statement may bind;
+    /// a statement per few hundred ids is still all under the one lock.
+    pub fn download_paths(
+        &self,
+        video_ids: &[String],
+    ) -> std::collections::HashMap<String, String> {
+        let mut out = std::collections::HashMap::new();
+        if video_ids.is_empty() {
+            return out;
+        }
+        let conn = self.0.lock().unwrap();
+        for chunk in video_ids.chunks(DOWNLOAD_PATHS_CHUNK) {
+            let holes = vec!["?"; chunk.len()].join(",");
+            let Ok(mut st) = conn.prepare(&format!(
+                "SELECT video_id, path FROM downloads WHERE video_id IN ({holes})"
+            )) else {
+                continue;
+            };
+            let Ok(rows) = st.query_map(rusqlite::params_from_iter(chunk.iter()), |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            }) else {
+                continue;
+            };
+            out.extend(rows.flatten());
+        }
+        out
+    }
+
     /// Newest first, which is the order a "Downloaded" list reads in.
     pub fn downloads(&self) -> Vec<Downloaded> {
         let conn = self.0.lock().unwrap();
@@ -1262,6 +1295,10 @@ impl Db {
     }
 }
 
+/// Ids per statement in [`Db::download_paths`]: comfortably under the 999 bound parameters SQLite
+/// allowed before 3.32, so the query does not lean on the bundled build's higher limit.
+const DOWNLOAD_PATHS_CHUNK: usize = 500;
+
 const LOCAL_TRACK_UPSERT: &str =
     "INSERT INTO local_tracks(path, title, artist, album, album_key, album_artist, track_no, duration_secs, cover, mtime)
      VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
@@ -1478,6 +1515,42 @@ mod tests {
         assert_eq!(d.playlist_memberships().keys().collect::<Vec<_>>(), vec!["c"]);
         d.retain_playlists(&[]);
         assert!(d.playlist_memberships().is_empty());
+    }
+
+    #[test]
+    fn download_paths_answers_a_batch_across_chunks() {
+        let d = db();
+        let saved = |id: &str| Downloaded {
+            video_id: id.into(),
+            path: format!("/music/{id}.opus"),
+            title: id.into(),
+            artists: String::new(),
+            thumbnail: None,
+            duration: None,
+            bytes: 1,
+            audio_mime: None,
+            audio_bitrate: None,
+            added_at: 0,
+        };
+        // Saved ids on both sides of a chunk boundary, so a batch longer than one statement's worth
+        // of parameters still finds rows in every chunk, not just the first.
+        let ids: Vec<String> = (0..DOWNLOAD_PATHS_CHUNK * 2 + 7).map(|n| format!("v{n}")).collect();
+        let hits = [0, DOWNLOAD_PATHS_CHUNK - 1, DOWNLOAD_PATHS_CHUNK, ids.len() - 1];
+        for &n in &hits {
+            d.put_download(&saved(&ids[n]));
+        }
+        d.put_download(&saved("not-asked"));
+
+        let m = d.download_paths(&ids);
+        assert_eq!(m.len(), hits.len(), "only asked-about ids with a row come back");
+        for &n in &hits {
+            assert_eq!(m[&ids[n]], format!("/music/{}.opus", ids[n]));
+        }
+        assert!(!m.contains_key("not-asked"));
+
+        // A repeated id is one entry, and an empty batch never reaches SQLite (`IN ()` is invalid).
+        assert_eq!(d.download_paths(&["v0".into(), "v0".into()]).len(), 1);
+        assert!(d.download_paths(&[]).is_empty());
     }
 
     #[test]
