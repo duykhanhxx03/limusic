@@ -246,8 +246,6 @@
 			"shortcuts_hint": "Klavye kısayollarını {key} ile açın",
 			"autostart": "Başlangıçta çalıştır",
 			"autostart_hint": "Sistem açıldığında YouTube Music ++ uygulamasını otomatik başlatın.",
-			"close_to_tray": "Sistem tepsisine küçült",
-			"close_to_tray_hint": "Pencere kapatıldığında arka planda çalışmaya devam etsin.",
 			"update_banner": "Güncelleme bildirimleri",
 			"update_banner_hint": "Yeni bir YouTube Music ++ sürümü çıktığında bildirim çubuğu gösterilsin.",
 			"proxy": "HTTP/HTTPS Proxy",

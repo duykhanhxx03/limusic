@@ -245,8 +245,6 @@
 			"shortcuts_hint": "Apri le scorciatoie da tastiera con {key}",
 			"autostart": "Avvia all'avvio",
 			"autostart_hint": "Avvia automaticamente YouTube Music ++ all'avvio del sistema.",
-			"close_to_tray": "Chiudi nel tray di sistema",
-			"close_to_tray_hint": "Mantieni YouTube Music ++ in esecuzione in background quando chiudi la finestra.",
 			"update_banner": "Notifiche degli aggiornamenti",
 			"update_banner_hint": "Mostra un banner quando è disponibile una nuova versione di YouTube Music ++.",
 			"proxy": "",

@@ -219,7 +219,7 @@
 		// First: it reveals the window (see initWin).
 		const teardownWin = initWin();
 		checkForUpdatesQuiet();
-		// Repeat while the app stays open: ✕ hides to tray by default, so this component can stay
+		// Repeat while the app stays open: the mini player hides the app to the tray, so this component can stay
 		// mounted for days and a mount-only check would never see a release published in between.
 		const updateTimer = setInterval(checkForUpdatesQuiet, QUIET_INTERVAL_MS);
 		const teardownApp = initApp();

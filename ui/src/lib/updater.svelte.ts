@@ -69,7 +69,7 @@ async function look(): Promise<boolean> {
 }
 
 /** On app open, and every `QUIET_INTERVAL_MS` after: show the update banner if one exists, stay
- *  silent otherwise. Repeating matters because ✕ hides to tray by default, so the webview mounts
+ *  silent otherwise. Repeating matters because the mini player hides the app to the tray, so the webview mounts
  *  once and can stay up for days: a mount-only check never sees a release published while the app
  *  is running. With `update_banner` off the check is skipped entirely (no banner, no request),
  *  leaving Settings > About > Check for updates as the only way to find one. */

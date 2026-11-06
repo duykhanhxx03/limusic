@@ -246,8 +246,6 @@
 			"shortcuts_hint": "Открыть горячие клавиши с {key}",
 			"autostart": "Запуск с системой",
 			"autostart_hint": "Автоматически запускать YouTube Music ++, при загрузке системы.",
-			"close_to_tray": "Свернуть в трей",
-			"close_to_tray_hint": "Оставить YouTube Music ++ на заднем плане, когда окно закрыто.",
 			"update_banner": "Уведомления",
 			"update_banner_hint": "Показать баннер, когда доступна новая версия YouTube Music ++.",
 			"proxy": "HTTP/HTTPS Прокси",

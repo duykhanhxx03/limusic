@@ -47,7 +47,7 @@ YouTube Music client. If this is useful to you, the original author takes coffee
 - **Mini Player and theater mode**: shrink to a strip that keeps playing, or go fullscreen with cover and lyrics side by side
 - **Local Music**: play your own files, with all metadata still intact
 - **OS media keys** and now-playing integration (MPRIS on Linux, SMTC on Windows, plus playback buttons on the Windows taskbar preview)
-- **System tray**: close the window, keep the music; play/pause and skip from the tray, optional start-on-login
+- **System tray**: play/pause and skip from the tray menu, optional start-on-login
 - **Keyboard and mouse**: `Ctrl+K` searches from anywhere, `Ctrl+H` lists every shortcut, right-click menus throughout, `Ctrl` and the wheel zooms the interface
 - **Sleep timer**: 15m, 30m, 1h, 3h or a custom count, kept in the Rust core so it still fires with the window hidden
 - **Offline downloads**: save tracks to disk and play them with no connection, with progress and cancel

@@ -206,13 +206,12 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 /// enough that the list stays a list rather than a log.
 const SEARCH_HISTORY_LIMIT: usize = 30;
 
-const UI_SETTINGS: [&str; 25] = [
+const UI_SETTINGS: [&str; 24] = [
     "volume",
     "proxy",
     "quality",
     "enable_history",
     "disabled_stream_clients",
-    "close_to_tray",
     "autostart",
     "autoplay",
     "hide_videos",

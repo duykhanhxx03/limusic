@@ -246,8 +246,6 @@
 			"shortcuts_hint": "Ouvrez les raccourcis clavier avec {key}",
 			"autostart": "Lancement au démarrage",
 			"autostart_hint": "Démarrage automatique de YouTube Music ++ quand votre système démarre.",
-			"close_to_tray": "Réduire dans la barre système",
-			"close_to_tray_hint": "Gardez YouTube Music ++ en arrière-plan lorsque vous fermez la fenêtre.",
 			"update_banner": "Notifications de mise à jour",
 			"update_banner_hint": "Afficher une bannière quand une nouvelle version de YouTube Music ++ est disponible.",
 			"proxy": "HTTP/HTTPS Proxy",

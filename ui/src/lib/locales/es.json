@@ -246,8 +246,6 @@
 			"shortcuts_hint": "Abre los atajos de teclado con {key}",
 			"autostart": "Iniciar al arrancar",
 			"autostart_hint": "Iniciar automáticamente YouTube Music ++ cuando se encienda el sistema.",
-			"close_to_tray": "Minimizar a la bandeja del sistema",
-			"close_to_tray_hint": "Mantener YouTube Music ++ ejecutándose en segundo plano al cerrar la ventana.",
 			"update_banner": "Notificaciones de actualización",
 			"update_banner_hint": "Mostrar un banner cuando haya una nueva versión de YouTube Music ++ disponible.",
 			"proxy": "Proxy HTTP/HTTPS",

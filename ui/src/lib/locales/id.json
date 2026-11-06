@@ -246,8 +246,6 @@
 			"shortcuts_hint": "Buka pintasan papan ketik dengan {key}",
 			"autostart": "Jalankan saat komputer menyala",
 			"autostart_hint": "Mulai YouTube Music ++ secara otomatis saat sistem Anda booting.",
-			"close_to_tray": "Tutup ke baki sistem (system tray)",
-			"close_to_tray_hint": "Biarkan YouTube Music ++ tetap berjalan di latar belakang saat menutup jendela.",
 			"update_banner": "Notifikasi pembaruan",
 			"update_banner_hint": "Tampilkan banner saat versi baru YouTube Music ++ tersedia.",
 			"proxy": "Proksi HTTP/HTTPS",

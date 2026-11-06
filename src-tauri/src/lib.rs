@@ -747,26 +747,15 @@ pub fn run() {
             commands::log_ui,
         ])
         .on_window_event(|window, event| {
-            // Close-to-tray: ✕ hides the main window and playback keeps running; real quit is
-            // the tray's Quit item (or the "close_to_tray=false" setting). Label-gated: the
-            // hidden cipher/PoToken webviews are windows too and must close normally.
+            // ✕ on the main window quits. Label-gated: the hidden cipher/PoToken webviews are
+            // windows too and must close normally.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 match window.label() {
                     "main" => {
-                        let hide = window
-                            .app_handle()
-                            .try_state::<Arc<AppState>>()
-                            .map(|s| close_hides(s.db.get_setting("close_to_tray").as_deref()))
-                            .unwrap_or(true);
                         api.prevent_close();
-                        if hide {
-                            let _ = window.hide();
-                            tray::set_main_visible(window.app_handle(), false);
-                        } else {
-                            // Quit through the exit request rather than by letting the window go,
-                            // so `kill_web_processes` still finds every webview alive.
-                            window.app_handle().exit(0);
-                        }
+                        // Quit through the exit request rather than by letting the window go,
+                        // so `kill_web_processes` still finds every webview alive.
+                        window.app_handle().exit(0);
                     }
                     // Nothing in the widget closes it, but a WM shortcut still can. Turn that into
                     // the ordinary "back to the app" path — closing it on its own would leave the
@@ -782,9 +771,9 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|handle, event| {
-            // Every way out passes here first: tray Quit and Restart, the updater's relaunch, ✕
-            // with close-to-tray off. Restart cannot be prevented, so nothing is deferred: the
-            // runtime runs `with_webview` inline on this (main) thread and the kill lands now.
+            // Every way out passes here first: tray Quit and Restart, the updater's relaunch, ✕.
+            // Restart cannot be prevented, so nothing is deferred: the runtime runs `with_webview`
+            // inline on this (main) thread and the kill lands now.
             #[cfg(target_os = "linux")]
             if let tauri::RunEvent::ExitRequested { .. } = &event {
                 kill_web_processes(handle);
@@ -826,11 +815,6 @@ fn kill_web_processes(app: &tauri::AppHandle) {
             wv.inner().terminate_web_process();
         });
     }
-}
-
-/// ✕ hides to tray unless the user explicitly set close_to_tray=false (unset → default on).
-fn close_hides(setting: Option<&str>) -> bool {
-    setting != Some("false")
 }
 
 /// Decide whether a position tick is worth forwarding to the UI. Passes ~4 Hz of steady
@@ -933,7 +917,7 @@ fn spawn_event_pump(
 
 #[cfg(test)]
 mod tests {
-    use super::{close_hides, PositionThrottle};
+    use super::PositionThrottle;
     use std::time::{Duration, Instant};
 
     /// `tauri.macos.conf.json` overrides the main window so macOS gets real traffic lights over the
@@ -968,14 +952,6 @@ mod tests {
             mac["app"]["windows"][0].clone(),
         )
         .expect("macOS window config is not a valid WindowConfig");
-    }
-
-    #[test]
-    fn close_hides_unless_explicitly_disabled() {
-        assert!(close_hides(None)); // fresh install → tray on
-        assert!(close_hides(Some("true")));
-        assert!(close_hides(Some("garbage")));
-        assert!(!close_hides(Some("false")));
     }
 
     #[test]

@@ -255,8 +255,6 @@
 			"shortcuts_hint": "Deschide tastatura de scurtături cu {key}",
 			"autostart": "Deschide la pornirea de sistem",
 			"autostart_hint": "Pornește automat YouTube Music ++ când se pornește sistemul.",
-			"close_to_tray": "Închide bara de sistem",
-			"close_to_tray_hint": "Ține YouTube Music ++ pornit în fundal când fereastra este închisă.",
 			"update_banner": "Notificări de actualizare",
 			"update_banner_hint": "Arată un banner când o nouă versiune de YouTube Music ++ este disponibilă.",
 			"proxy": "HTTP/HTTPS Proxy",

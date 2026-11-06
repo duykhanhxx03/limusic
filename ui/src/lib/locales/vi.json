@@ -332,8 +332,6 @@
 			"shortcuts_hint": "Mở danh sách phím tắt bằng {key}",
 			"autostart": "Khởi động cùng hệ thống",
 			"autostart_hint": "Tự động chạy YouTube Music ++ khi máy khởi động.",
-			"close_to_tray": "Đóng xuống khay hệ thống",
-			"close_to_tray_hint": "Giữ YouTube Music ++ chạy nền khi đóng cửa sổ.",
 			"system_titlebar": "Dùng thanh tiêu đề hệ thống",
 			"system_titlebar_hint": "Để hệ điều hành vẽ khung cửa sổ và các nút của nó. YouTube Music ++ vẫn giữ thanh công cụ riêng bên dưới.",
 			"update_banner": "Thông báo cập nhật",
