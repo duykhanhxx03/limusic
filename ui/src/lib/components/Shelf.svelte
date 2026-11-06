@@ -108,8 +108,11 @@
 	};
 
 	// Slot width per form, and the height the rail reserves before it has been laid out.
+	// Song columns go by the rail's own width, not the window's: with the library and the right
+	// column open, a 1440px window leaves the page about 700px, and three columns of that left a
+	// title one or two letters once the row's buttons had theirs.
 	const SLOT: Record<Mode, string> = {
-		song: 'basis-full sm:basis-1/2 xl:basis-1/3',
+		song: 'basis-full @lg:basis-1/2 @4xl:basis-1/3',
 		album: 'w-40',
 		artist: 'w-40',
 		playlist: 'w-44',
@@ -195,7 +198,7 @@
 		<div
 			class="flex snap-x overflow-x-auto pb-4 [scrollbar-width:none] [will-change:opacity] [&::-webkit-scrollbar]:hidden {mode ===
 			'song'
-				? 'gap-0'
+				? '@container gap-0'
 				: community
 					? 'gap-3'
 					: 'gap-2'}"
@@ -213,7 +216,7 @@
 					<div
 						class="min-w-0 shrink-0 snap-start {SLOT.song} {c || others.length
 							? 'pl-4'
-							: ''} pr-4"
+							: ''} {others.length && columns.length === 1 ? 'grow' : ''} pr-4"
 					>
 						{#each col as song, r (song.video_id + ':' + r)}
 							<TrackRow

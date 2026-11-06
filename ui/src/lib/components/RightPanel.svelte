@@ -142,11 +142,11 @@
 	}
 </script>
 
-<!-- Width: the dragged one, but never more than 28vw, so the page keeps its room on a narrower
-     window than the one the width was picked on. `relative` for the drag handle on the left edge. -->
+<!-- Width: the dragged one, but never more than a quarter of the window up to 1600px (a 13" laptop), so the
+     page keeps its room on a screen smaller than the one the width was picked on. `relative` for the drag handle on the left edge. -->
 <aside
-	class="panel relative flex h-full shrink-0 flex-col"
-	style="width: min({ui.rightPanelWidth}px, 28vw)"
+	class="panel relative flex h-full shrink-0 flex-col max-[100rem]:max-w-[max(18.75rem,25vw)]"
+	style="width: {ui.rightPanelWidth}px"
 >
 	<SidebarResizer edge="left" />
 	<div class="flex shrink-0 items-center gap-2 px-4 pt-3 pb-2">

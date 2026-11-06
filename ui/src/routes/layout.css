@@ -937,6 +937,15 @@ html.art-tint.dark {
 	}
 }
 
+/* A laptop screen (a 13" Air is 1440px): the stored library width plus the docked right column left
+   the page about 650px, so up to 1600px both are capped to a share of the window. The floors are the
+   narrowest each stays usable at. Wider screens keep whatever was dragged. */
+@media (min-width: 64rem) and (max-width: 100rem) {
+	.app-shell[data-sidebar='open'] {
+		--sidebar-w: max(17.5rem, min(var(--sidebar-open, 21.25rem), 20vw));
+	}
+}
+
 .card-grid {
 	display: grid;
 	grid-template-columns: repeat(auto-fill, 10rem);

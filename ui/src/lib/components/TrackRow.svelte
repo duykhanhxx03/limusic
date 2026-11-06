@@ -299,7 +299,7 @@
 	     centred column of its own there; narrow ones sit it next to the duration at its natural width
 	     rather than dropping it, since it never needs more than "1,234 plays" worth of room. -->
 	{#if song.play_count && showPlayCount && !compact}
-		<div class="flex shrink-0 items-center justify-center text-sm text-muted-foreground lg:flex-1">
+		<div class="flex shrink-0 items-center justify-center text-sm text-muted-foreground lg:w-36 min-[100rem]:flex-1">
 			<span class="truncate">{t('library.play_count', { count: song.play_count })}</span>
 		</div>
 	{/if}

@@ -591,7 +591,7 @@
 					     down under the reader's cursor. -->
 					<div aria-hidden="true">
 						<Skeleton class="mb-3 h-5 w-48 rounded" />
-						<div class="columns-1 gap-x-6 md:columns-2 xl:columns-3">
+						<div class="gap-x-6 [columns:17rem_3]">
 							{#each Array(15) as _, i (i)}
 								<div class="break-inside-avoid"><TrackRowSkeleton /></div>
 							{/each}

@@ -31,7 +31,7 @@
 	<SectionHeading title={section.title} icon={Clock01Icon} {onMore} />
 	<!-- CSS columns, not a grid: it fills top-to-bottom like the shelf it replaces, balances the last
 	     column itself, and needs no row count per breakpoint. -->
-	<div class="columns-1 gap-x-6 md:columns-2 xl:columns-3">
+	<div class="gap-x-6 [columns:17rem_3]">
 		{#each songs as song, i (song.video_id + ':' + i)}
 			<div class="break-inside-avoid">
 				<TrackRow
