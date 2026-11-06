@@ -143,6 +143,16 @@ else
   bundle_deps_of "$JACK"
 fi
 
+# 1a. libpipewire: libavdevice DT_NEEDs it and linuxdeploy's excludelist, fetched fresh on every
+#     build, stopped bundling it. Not a host baseline: a host without PipeWire would not start.
+if [ ! -e "$APPDIR/usr/lib/libpipewire-0.3.so.0" ]; then
+  PW="$(ldconfig -p 2>/dev/null | awk '/libpipewire-0\.3\.so\.0 /{print $NF}' | head -1 || true)"
+  [ -n "$PW" ] || { echo "libpipewire-0.3.so.0 not found on the build host"; exit 1; }
+  cp -L "$PW" "$APPDIR/usr/lib/libpipewire-0.3.so.0"
+  echo "==> bundled libpipewire-0.3.so.0 from $PW"
+  bundle_deps_of "$PW"
+fi
+
 # 1b0. Wrong-architecture gio modules. linuxdeploy copies whatever sits in the host's gio module
 #      directory, and on a multilib Fedora /usr/lib/gio/modules holds the *32-bit* build while the
 #      real one lives in /usr/lib64. GLib scans modules by basename, so the unloadable 32-bit copy
@@ -274,6 +284,15 @@ for soname in $GNUTLS_STACK; do
     mv -f "$lib" "$FALLBACK/$(basename "$lib")"
     echo "==> moved $(basename "$lib") into gnutls-fallback/"
   done
+done
+# The same excludelist can drop a member of the stack (libgmp went that way). The fallback only
+# works whole, so a missing member comes from the build host.
+for soname in $GNUTLS_STACK; do
+  [ -e "$FALLBACK/$soname" ] && continue
+  lib="$(ldconfig -p 2>/dev/null | awk -v n="$soname" '$1 == n {print $NF}' | head -1 || true)"
+  [ -n "$lib" ] || { echo "$soname not found on the build host"; exit 1; }
+  cp -L "$lib" "$FALLBACK/$soname"
+  echo "==> copied $soname into gnutls-fallback/ from $lib"
 done
 # p11-kit's module directory goes with it: nothing can load those without libp11-kit.so.0 anyway.
 rm -rf "$APPDIR/usr/lib/pkcs11" "$APPDIR/usr/lib64/pkcs11"
